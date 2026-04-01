@@ -39,8 +39,8 @@ export class AuthService {
         console.log('Access data:', accessData);
       }
       if (email.toLowerCase() !== 'superadmin@gmail.com' &&
-        !(accessData?.some((access: any) => access.companies?.name === "David Health Solutions Oy"))) {
-        toast.error("User not found. Only David Health Solutions Oy users can log in.");
+        !(accessData?.some((access: any) => access.companies?.name === "XyReg"))) {
+        toast.error("User not found. Only XyReg users can log in.");
         await supabase.auth.signOut();
         return { user: null, error: null, success: false };
       }
