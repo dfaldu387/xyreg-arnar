@@ -1309,7 +1309,7 @@ export class DocumentExportService {
 
     // Approval table
     const approvalHeaderRow = new TableRow({
-      children: ['', 'Prepared By', 'Reviewed By', 'Approved By'].map(label =>
+      children: ['', 'Issued By', 'Reviewed By', 'Approved By'].map(label =>
         new TableCell({
           children: [new Paragraph({ children: [new TextRun({ text: label, bold: true, font: 'Arial', size: 18 })] })],
           width: { size: 25, type: WidthType.PERCENTAGE },

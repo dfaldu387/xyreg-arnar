@@ -1,14 +1,15 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
 import { Dialog, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { cn } from "@/lib/utils";
-import { X } from "lucide-react";
+import { X, Package } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
-import { FileText, Filter, ChevronDown, Check } from "lucide-react";
+import { FileText, Filter, ChevronDown, ChevronRight, Check } from "lucide-react";
 
 interface Phase {
   id: string;
@@ -20,6 +21,8 @@ interface DocumentItem {
   name: string;
   phase_id: string;
   phase_name: string;
+  product_id: string;
+  product_name: string;
 }
 
 interface DocumentPermissionSelectorProps {
@@ -27,6 +30,9 @@ interface DocumentPermissionSelectorProps {
   selectedProductIds: string[];
   selectedDocumentIds: string[];
   onChange: (ids: string[]) => void;
+  label?: string;
+  inline?: boolean;
+  initialRestricted?: boolean;
 }
 
 export function DocumentPermissionSelector({
@@ -34,6 +40,9 @@ export function DocumentPermissionSelector({
   selectedProductIds,
   selectedDocumentIds,
   onChange,
+  label = "Document Permissions",
+  inline = false,
+  initialRestricted = false,
 }: DocumentPermissionSelectorProps) {
   const [phases, setPhases] = useState<Phase[]>([]);
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
@@ -46,7 +55,7 @@ export function DocumentPermissionSelector({
 
   // Fetch phases and documents filtered by selected products
   useEffect(() => {
-    if (!companyId || selectedProductIds.length === 0) {
+    if (!companyId) {
       setDocuments([]);
       setPhases([]);
       setLoading(false);
@@ -79,12 +88,27 @@ export function DocumentPermissionSelector({
         const phaseNameMap = new Map<string, string>();
         phaseList.forEach((p) => phaseNameMap.set(p.id, p.name));
 
-        // Fetch document templates filtered by selected product IDs
-        const { data: docs } = await (supabase as any)
+        // Fetch products for name mapping
+        const { data: products } = await supabase
+          .from("products")
+          .select("id, name")
+          .eq("company_id", companyId)
+          .eq("is_archived", false);
+
+        const productNameMap = new Map<string, string>();
+        (products || []).forEach((p: any) => productNameMap.set(p.id, p.name));
+
+        // Fetch document templates - if no specific products selected, fetch all for company
+        let docsQuery = (supabase as any)
           .from("phase_assigned_document_template")
           .select("id, name, phase_id, product_id")
-          .eq("company_id", companyId)
-          .in("product_id", selectedProductIds);
+          .eq("company_id", companyId);
+
+        if (selectedProductIds.length > 0) {
+          docsQuery = docsQuery.in("product_id", selectedProductIds);
+        }
+
+        const { data: docs } = await docsQuery;
 
         const docList: DocumentItem[] = (docs || [])
           .filter((d: any) => d.name)
@@ -93,6 +117,8 @@ export function DocumentPermissionSelector({
             name: d.name,
             phase_id: d.phase_id,
             phase_name: (() => { const n = phaseNameMap.get(d.phase_id); return (!n || n === "No Phase") ? "Core" : n; })(),
+            product_id: d.product_id,
+            product_name: productNameMap.get(d.product_id) || '',
           }));
 
         setDocuments(docList);
@@ -106,10 +132,12 @@ export function DocumentPermissionSelector({
     fetchData();
   }, [companyId, selectedProductIds]);
 
-  // Clear stale document selections when products change
+  // Auto-select all documents when they load and none are selected yet
   useEffect(() => {
     if (loading) return;
-    if (documents.length === 0 && selectedDocumentIds.length > 0) {
+    if (documents.length > 0 && selectedDocumentIds.length === 0) {
+      onChange(documents.map((d) => d.id));
+    } else if (documents.length === 0 && selectedDocumentIds.length > 0) {
       onChange([]);
     } else if (selectedDocumentIds.length > 0) {
       const validIds = new Set(documents.map((d) => d.id));
@@ -151,6 +179,45 @@ export function DocumentPermissionSelector({
     }
   };
 
+  // Group documents by device
+  const [expandedDevices, setExpandedDevices] = useState<Set<string>>(new Set());
+
+  const groupedDocuments = useMemo(() => {
+    const groups = new Map<string, { productName: string; docs: DocumentItem[] }>();
+    filteredDocuments.forEach((doc) => {
+      const key = doc.product_id || 'no-device';
+      if (!groups.has(key)) {
+        groups.set(key, { productName: doc.product_name || 'General', docs: [] });
+      }
+      groups.get(key)!.docs.push(doc);
+    });
+    return Array.from(groups.entries());
+  }, [filteredDocuments]);
+
+  const toggleDeviceExpand = (productId: string) => {
+    setExpandedDevices((prev) => {
+      const next = new Set(prev);
+      if (next.has(productId)) {
+        next.delete(productId);
+      } else {
+        next.add(productId);
+      }
+      return next;
+    });
+  };
+
+  const handleToggleDeviceDocs = (productId: string, docs: DocumentItem[]) => {
+    const docIds = docs.map((d) => d.id);
+    const allSelected = docIds.every((id) => tempSelectedIds.includes(id));
+    if (allSelected) {
+      setTempSelectedIds(tempSelectedIds.filter((id) => !docIds.includes(id)));
+    } else {
+      const existing = new Set(tempSelectedIds);
+      docIds.forEach((id) => existing.add(id));
+      setTempSelectedIds(Array.from(existing));
+    }
+  };
+
   const handleOpenDialog = () => {
     setTempSelectedIds([...selectedDocumentIds]);
     setSelectedPhase("all");
@@ -173,34 +240,80 @@ export function DocumentPermissionSelector({
     return (!name || name === "No Phase") ? "Core" : name;
   };
 
-  const disabled = selectedProductIds.length === 0;
+  const disabled = false;
+  const allDocsSelected =
+    documents.length > 0 &&
+    documents.every((d) => selectedDocumentIds.includes(d.id));
+  const [hasDocRestriction, setHasDocRestriction] = useState(initialRestricted);
+
+  // Sync when initialRestricted changes (e.g., data loaded from DB)
+  useEffect(() => {
+    if (initialRestricted) {
+      setHasDocRestriction(true);
+    }
+  }, [initialRestricted]);
+
+  const switchEl = (
+    <Switch
+      checked={hasDocRestriction}
+      disabled={disabled}
+      onCheckedChange={(checked) => {
+        setHasDocRestriction(checked);
+        if (checked) {
+          handleOpenDialog();
+        } else {
+          onChange(documents.map((d) => d.id));
+        }
+      }}
+    />
+  );
+
+  const statusText = (
+    <span className="text-sm text-muted-foreground">
+      {!hasDocRestriction || allDocsSelected
+        ? "All Documents"
+        : "Restricted"}
+    </span>
+  );
 
   return (
-    <div className="space-y-2">
-      <div className="flex items-center justify-between">
-        <Label>Document Permissions</Label>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={handleOpenDialog}
-          disabled={disabled}
-        >
-          <FileText className="h-3.5 w-3.5 mr-1.5" />
-          {selectedDocumentIds.length > 0
-            ? `${selectedDocumentIds.length} selected`
-            : "Select Documents"}
-        </Button>
-      </div>
+    <>
+      {inline ? (
+        <>
+          <Label>{label}</Label>
+          {switchEl}
+          {statusText}
+          {hasDocRestriction && !allDocsSelected && selectedDocumentIds.length > 0 && (
+            <p
+              className="col-span-3 text-xs text-primary -mt-2 cursor-pointer hover:underline"
+              onClick={handleOpenDialog}
+            >
+              {selectedDocumentIds.length} document{selectedDocumentIds.length !== 1 ? 's' : ''} selected
+            </p>
+          )}
+        </>
+      ) : (
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <Label>{label}</Label>
+            <div className="flex items-center space-x-2">
+              {switchEl}
+              {statusText}
+              {hasDocRestriction && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleOpenDialog}
+                  disabled={disabled}
+                >
+                  Select Documents
+                </Button>
+              )}
+            </div>
+          </div>
 
-      {disabled && (
-        <p className="text-xs text-muted-foreground">Select devices first to assign document permissions</p>
-      )}
-
-      {selectedDocumentIds.length > 0 && (
-        <p className="text-xs text-muted-foreground">
-          {selectedDocumentIds.length} document{selectedDocumentIds.length !== 1 ? "s" : ""} selected
-        </p>
+        </div>
       )}
 
       <Dialog open={dialogOpen} onOpenChange={(open) => { setDialogOpen(open); if (!open) setFilterOpen(false); }}>
@@ -280,35 +393,72 @@ export function DocumentPermissionSelector({
                 </Label>
               </div>
 
-              {/* Document list */}
+              {/* Document list grouped by device */}
               <div className="h-[300px] overflow-y-auto rounded-md border p-3">
                 {filteredDocuments.length === 0 ? (
                   <p className="text-sm text-muted-foreground">
                     No documents in this phase
                   </p>
                 ) : (
-                  <div className="space-y-2">
-                    {filteredDocuments.map((doc) => (
-                      <div key={doc.id} className="flex items-center space-x-2">
-                        <Checkbox
-                          id={`dialog-doc-${doc.id}`}
-                          checked={tempSelectedIds.includes(doc.id)}
-                          onCheckedChange={() => handleToggleDocument(doc.id)}
-                        />
-                        <Label
-                          htmlFor={`dialog-doc-${doc.id}`}
-                          className="text-sm cursor-pointer flex items-center gap-1.5 font-normal"
-                        >
-                          <FileText className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                          <span>{doc.name}</span>
-                          {selectedPhase === "all" && (
-                            <span className="text-xs text-muted-foreground ml-1">
-                              ({doc.phase_name})
-                            </span>
+                  <div className="space-y-1">
+                    {groupedDocuments.map(([productId, { productName, docs }]) => {
+                      const isExpanded = expandedDevices.has(productId);
+                      const docIds = docs.map((d) => d.id);
+                      const allDeviceDocsSelected = docIds.every((id) => tempSelectedIds.includes(id));
+                      const someDeviceDocsSelected = docIds.some((id) => tempSelectedIds.includes(id));
+
+                      return (
+                        <div key={productId}>
+                          {/* Device header */}
+                          <div className="flex items-center space-x-2 py-1.5 hover:bg-muted/50 rounded-md px-1 cursor-pointer">
+                            <Checkbox
+                              id={`device-group-${productId}`}
+                              checked={allDeviceDocsSelected}
+                              // @ts-ignore
+                              indeterminate={someDeviceDocsSelected && !allDeviceDocsSelected}
+                              onCheckedChange={() => handleToggleDeviceDocs(productId, docs)}
+                            />
+                            <div
+                              className="flex items-center gap-1.5 flex-1"
+                              onClick={() => toggleDeviceExpand(productId)}
+                            >
+                              {isExpanded ? (
+                                <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                              ) : (
+                                <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                              )}
+                              <Package className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                              <span className="text-sm font-medium">{productName}</span>
+                              <span className="text-xs text-muted-foreground">
+                                ({docs.length})
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Document list under device */}
+                          {isExpanded && (
+                            <div className="ml-8 space-y-1 pb-1">
+                              {docs.map((doc) => (
+                                <div key={doc.id} className="flex items-center space-x-2 py-0.5">
+                                  <Checkbox
+                                    id={`dialog-doc-${doc.id}`}
+                                    checked={tempSelectedIds.includes(doc.id)}
+                                    onCheckedChange={() => handleToggleDocument(doc.id)}
+                                  />
+                                  <Label
+                                    htmlFor={`dialog-doc-${doc.id}`}
+                                    className="text-sm cursor-pointer flex items-center gap-1.5 font-normal"
+                                  >
+                                    <FileText className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                                    <span>{doc.name}</span>
+                                  </Label>
+                                </div>
+                              ))}
+                            </div>
                           )}
-                        </Label>
-                      </div>
-                    ))}
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -336,6 +486,6 @@ export function DocumentPermissionSelector({
           </DialogPrimitive.Content>
         </DialogPrimitive.Portal>
       </Dialog>
-    </div>
+    </>
   );
 }

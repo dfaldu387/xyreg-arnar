@@ -37,6 +37,7 @@ export interface FeedbackData {
   title: string;
   description: string;
   screenshot: string;
+  screenshots: string[];
   company_id: string;
 }
 
@@ -46,31 +47,36 @@ export function FeedbackModal({ open, onClose, screenshot, onSubmit, onCaptureSc
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [uploadedImage, setUploadedImage] = useState<string>('');
+  const [uploadedImages, setUploadedImages] = useState<string[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const currentImage = uploadedImage || screenshot;
+  const allImages = [...(screenshot ? [screenshot] : []), ...uploadedImages];
   const companyId = useCompanyId();
   // console.log('companyId', companyId);
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file && file.type.startsWith('image/')) {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const result = e.target?.result as string;
-        setUploadedImage(result);
-      };
-      reader.readAsDataURL(file);
-    }
+    const files = e.target.files;
+    if (!files) return;
+    Array.from(files).forEach(file => {
+      if (file.type.startsWith('image/')) {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          const result = e.target?.result as string;
+          setUploadedImages(prev => [...prev, result]);
+        };
+        reader.readAsDataURL(file);
+      }
+    });
+    if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  const handleRemoveImage = () => {
-    setUploadedImage('');
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
+  const handleRemoveImage = (index: number) => {
+    // If index 0 and screenshot exists, it's the captured screenshot
+    if (screenshot && index === 0) {
+      onClearScreenshot?.();
+      return;
     }
-    // Also clear the screenshot from parent
-    onClearScreenshot?.();
+    const uploadIndex = screenshot ? index - 1 : index;
+    setUploadedImages(prev => prev.filter((_, i) => i !== uploadIndex));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -85,7 +91,8 @@ export function FeedbackModal({ open, onClose, screenshot, onSubmit, onCaptureSc
         type,
         title: title.trim(),
         description: description.trim(),
-        screenshot: currentImage,
+        screenshot: allImages[0] || '',
+        screenshots: allImages,
         company_id: companyId,
       });
       // console.log('result', result);
@@ -98,10 +105,7 @@ export function FeedbackModal({ open, onClose, screenshot, onSubmit, onCaptureSc
       setType('bug_report');
       setTitle('');
       setDescription('');
-      setUploadedImage('');
-      if (fileInputRef.current) {
-        fileInputRef.current.value = '';
-      }
+      setUploadedImages([]);
       onClose();
     } catch (error) {
       console.error('Failed to submit feedback:', error);
@@ -128,7 +132,7 @@ export function FeedbackModal({ open, onClose, screenshot, onSubmit, onCaptureSc
                   variant="outline"
                   size="sm"
                   onClick={onCaptureScreen}
-                  disabled={currentImage.length > 0 || isCapturing}
+                  disabled={isCapturing}
                 >
                   {isCapturing ? (
                     <>
@@ -144,48 +148,52 @@ export function FeedbackModal({ open, onClose, screenshot, onSubmit, onCaptureSc
                 </Button>
               )}
             </div>
-            {currentImage ? (
-              <div className="border rounded-lg p-2 bg-muted relative">
-                <img
-                  src={currentImage}
-                  alt={lang('feedback.screenshotAlt')}
-                  className="w-full h-48 object-contain rounded"
-                />
-                <Button
-                  type="button"
-                  variant="destructive"
-                  size="sm"
-                  className="absolute top-2 right-2"
-                  onClick={handleRemoveImage}
-                >
-                  <X className="h-4 w-4" />
-                </Button>
-              </div>
-            ) : (
-              <div className="border-2 border-dashed border-muted-foreground/25 rounded-lg p-8">
-                <div className="text-center">
-                  <Upload className="mx-auto h-8 w-8 text-muted-foreground mb-2" />
-                  <div className="text-sm text-muted-foreground mb-2">
-                    {lang('feedback.uploadDescription')}
+            {allImages.length > 0 && (
+              <div className="grid grid-cols-2 gap-2">
+                {allImages.map((img, idx) => (
+                  <div key={idx} className="border rounded-lg p-2 bg-muted relative">
+                    <img
+                      src={img}
+                      alt={`${lang('feedback.screenshotAlt')} ${idx + 1}`}
+                      className="w-full h-32 object-contain rounded"
+                    />
+                    <Button
+                      type="button"
+                      variant="destructive"
+                      size="icon"
+                      className="absolute top-2 right-2 h-6 w-6"
+                      onClick={() => handleRemoveImage(idx)}
+                    >
+                      <X className="h-3 w-3" />
+                    </Button>
                   </div>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => fileInputRef.current?.click()}
-                  >
-                    {lang('feedback.chooseFile')}
-                  </Button>
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept="image/*"
-                    onChange={handleFileUpload}
-                    className="hidden"
-                  />
-                </div>
+                ))}
               </div>
             )}
+            <div className="border-2 border-dashed border-muted-foreground/25 rounded-lg p-6">
+              <div className="text-center">
+                <Upload className="mx-auto h-8 w-8 text-muted-foreground mb-2" />
+                <div className="text-sm text-muted-foreground mb-2">
+                  {lang('feedback.uploadDescription')}
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  {lang('feedback.chooseFile')}
+                </Button>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  onChange={handleFileUpload}
+                  className="hidden"
+                />
+              </div>
+            </div>
           </div>
 
           {/* Type Selection */}

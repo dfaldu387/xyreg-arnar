@@ -179,9 +179,9 @@ export function ProductPageHeader({
     
     // Replace Device Status with Device Family Status when viewing a variant (and there is at least one other sibling)
     // or when there are multiple variants in the family.
-    if (subsection === 'Device Status' || subsection.includes('Device Status')) {
+    if (subsection === 'Device Dashboard' || subsection.includes('Device Dashboard')) {
       if ((isVariant && totalProducts > 1) || totalProducts > 2) {
-        return subsection.replace(/Device Status/gi, 'Device Family Status');
+        return subsection.replace(/Device Dashboard/gi, 'Device Family Dashboard');
       }
       return subsection;
     }

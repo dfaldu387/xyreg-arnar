@@ -13,7 +13,8 @@ import { SectionSelector } from '@/components/common/SectionSelector';
 import { ReferenceDocumentPicker } from '@/components/common/ReferenceDocumentPicker';
 import { useDocumentTypes } from '@/hooks/useDocumentTypes';
 import { useReferenceDocuments } from '@/hooks/useReferenceDocuments';
-import { Settings2, Check, Loader2, BookOpen } from 'lucide-react';
+import { Settings2, Check, Loader2, BookOpen, ChevronDown } from 'lucide-react';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { toast } from 'sonner';
 
 interface CIPropertyPanelProps {
@@ -58,15 +59,19 @@ export function CIPropertyPanel({
   const { documentTypes } = useDocumentTypes(companyId);
   const { documents: refDocuments } = useReferenceDocuments(companyId);
   const [isRefDocPickerOpen, setIsRefDocPickerOpen] = useState(false);
+  const [isCollapsed, setIsCollapsed] = useState(true);
 
   // Local state for text inputs (debounced)
   const [localName, setLocalName] = useState(name);
   const [fieldStates, setFieldStates] = useState<Record<string, FieldSaveState>>({});
   const debounceRef = useRef<Record<string, NodeJS.Timeout>>({});
+  const isEditingNameRef = useRef(false);
 
-  // Sync local name when prop changes externally
+  // Sync local name when prop changes externally (but not while user is typing)
   useEffect(() => {
-    setLocalName(name);
+    if (!isEditingNameRef.current) {
+      setLocalName(name);
+    }
   }, [name]);
 
   const showSaveIndicator = useCallback((field: string) => {
@@ -118,13 +123,18 @@ export function CIPropertyPanel({
     .map(d => d.file_name);
 
   return (
+    <Collapsible open={!isCollapsed} onOpenChange={(open) => setIsCollapsed(!open)}>
     <Card className="border-0 rounded-none border-t">
-      <CardHeader className="pb-3 px-6 pt-4">
+      <CollapsibleTrigger asChild>
+      <CardHeader className="pb-3 px-6 pt-4 cursor-pointer hover:bg-muted/50 transition-colors">
         <CardTitle className="text-sm flex items-center gap-2 text-muted-foreground font-medium">
           <Settings2 className="w-4 h-4" />
           CI Properties
+          <ChevronDown className={`w-4 h-4 ml-auto transition-transform ${isCollapsed ? '-rotate-90' : ''}`} />
         </CardTitle>
       </CardHeader>
+      </CollapsibleTrigger>
+      <CollapsibleContent>
       <CardContent className="px-6 pb-4 space-y-4">
         {/* Name */}
         <div className="space-y-1.5">
@@ -138,6 +148,8 @@ export function CIPropertyPanel({
               setLocalName(e.target.value);
               handleDebouncedFieldSave('name', e.target.value);
             }}
+            onFocus={() => { isEditingNameRef.current = true; }}
+            onBlur={() => { isEditingNameRef.current = false; }}
             disabled={disabled}
             className="h-8 text-sm"
             placeholder="Document name"
@@ -279,6 +291,8 @@ export function CIPropertyPanel({
           onConfirm={(ids) => handleFieldSave('reference_document_ids', ids)}
         />
       </CardContent>
+      </CollapsibleContent>
     </Card>
+    </Collapsible>
   );
 }

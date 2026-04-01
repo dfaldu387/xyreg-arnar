@@ -13,6 +13,9 @@ import {
   type RequirementSpecsAIRequest 
 } from "@/services/requirementSpecsAIService";
 import type { CreateRequirementSpecificationData } from "./types";
+import { supabase } from '@/integrations/supabase/client';
+import { deduplicateSuggestions } from '@/utils/deduplicateSuggestions';
+import { toast } from 'sonner';
 
 interface RequirementSpecsSuggestionsProps {
   productId: string;
@@ -118,6 +121,13 @@ export function RequirementSpecsSuggestions({
     setSuggestions([]);
 
     try {
+      // Fetch existing requirement specs for deduplication
+      const { data: existingReqs } = await supabase
+        .from('requirement_specifications')
+        .select('description')
+        .eq('product_id', productId);
+      const existingDescriptions = (existingReqs || []).map(r => r.description).filter(Boolean);
+
       const purposeData = productData.intended_purpose_data || {};
       
       const request: RequirementSpecsAIRequest = {
@@ -136,13 +146,22 @@ export function RequirementSpecsSuggestions({
           product_name: productData.name || ''
         },
         userNeeds: userNeedsToAnalyze,
-        selectedCategories: [] // Generate for all categories
+        selectedCategories: [],
+        existingItems: existingDescriptions,
       };
 
       const response = await RequirementSpecsAIService.generateRequirementSpecifications(request);
 
       if (response.success && response.suggestions) {
-        setSuggestions(response.suggestions);
+        const { filtered, removedCount } = deduplicateSuggestions(
+          response.suggestions,
+          existingDescriptions,
+          s => s.description
+        );
+        if (removedCount > 0) {
+          toast.info(`${removedCount} duplicate suggestion(s) filtered out`);
+        }
+        setSuggestions(filtered);
       } else {
         throw new Error(response.error || 'Failed to generate suggestions');
       }

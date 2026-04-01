@@ -1,16 +1,45 @@
 import React, { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useNavigate } from "react-router-dom";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Plus, FileText, CheckCircle, Clock, AlertCircle, Sparkles, Users } from "lucide-react";
+import { Plus, FileText, CheckCircle, Clock, AlertCircle, Sparkles, Users, FileEdit, Pencil } from "lucide-react";
 import { vvService, type VVPlan } from "@/services/vvService";
 import { useTranslation } from "@/hooks/useTranslation";
-import { CreateVVPlanDialog, type VVPlanInitialData } from "./CreateVVPlanDialog";
-import { VVPlanDetailDialog } from "./VVPlanDetailDialog";
+import type { VVPlanInitialData } from "./CreateVVPlanSheet";
+import { VVPlanDetailSheet } from "./VVPlanDetailSheet";
 import { AIVVPlanSuggestionsDialog } from "./AIVVPlanSuggestionsDialog";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/context/AuthContext";
 import CompactScopeToggle from "@/components/product/shared/CompactScopeToggle";
+import { SaveContentAsDocCIDialog } from "@/components/shared/SaveContentAsDocCIDialog";
+import { VVPlanStudioBridgeService } from "@/services/vvPlanStudioBridgeService";
+import { toast } from "sonner";
+
+function generateVVPlanHtml(plan: VVPlan): string {
+  let html = `<h1>${plan.name} v${plan.version}</h1>`;
+  if (plan.description) html += `<p>${plan.description}</p>`;
+  if (plan.scope) html += `<h2>1. Scope &amp; Boundaries</h2><p>${plan.scope}</p>`;
+  if (plan.methodology) html += `<h2>2. Methodology</h2><p>${plan.methodology}</p>`;
+  if (plan.acceptance_criteria) html += `<h2>3. Acceptance Criteria</h2><p>${plan.acceptance_criteria}</p>`;
+  const roles = plan.roles_responsibilities;
+  const hasRoles = roles && typeof roles === 'object' && (Array.isArray(roles) ? roles.length > 0 : Object.keys(roles).length > 0);
+  if (hasRoles) {
+    html += `<h2>4. Roles &amp; Responsibilities</h2><table><thead><tr><th>Role</th><th>Responsibility</th></tr></thead><tbody>`;
+    if (Array.isArray(roles)) {
+      (roles as Array<{ role: string; responsibility: string }>).forEach((r) => {
+        html += `<tr><td>${r.role}</td><td>${r.responsibility}</td></tr>`;
+      });
+    } else {
+      Object.entries(roles).forEach(([role, responsibility]) => {
+        html += `<tr><td>${role}</td><td>${String(responsibility)}</td></tr>`;
+      });
+    }
+    html += `</tbody></table>`;
+  }
+  return html;
+}
 
 interface VVPlanModuleProps {
   productId: string;
@@ -19,13 +48,26 @@ interface VVPlanModuleProps {
 }
 
 export function VVPlanModule({ productId, companyId, disabled = false }: VVPlanModuleProps) {
+  const navigate = useNavigate();
   const { lang } = useTranslation();
-  const [showCreateDialog, setShowCreateDialog] = useState(false);
+  const { user } = useAuth();
   const [showAISuggestions, setShowAISuggestions] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState<VVPlan | null>(null);
-  const [createInitialData, setCreateInitialData] = useState<VVPlanInitialData | null>(null);
-  const [editPlanId, setEditPlanId] = useState<string | null>(null);
   const [scopeViewOverride, setScopeViewOverride] = useState<'individual' | 'product_family' | null>(null);
+  const [ciExportPlan, setCiExportPlan] = useState<VVPlan | null>(null);
+
+  const { data: company } = useQuery({
+    queryKey: ['company-name', companyId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('companies')
+        .select('id, name')
+        .eq('id', companyId)
+        .single();
+      if (error) throw error;
+      return data;
+    },
+  });
 
   // Fetch product to get basic_udi_di
   const { data: product } = useQuery({
@@ -43,7 +85,6 @@ export function VVPlanModule({ productId, companyId, disabled = false }: VVPlanM
 
   const familyIdentifier = product?.basic_udi_di || null;
   const canShowFamily = !!familyIdentifier;
-  // Default to product_family when basic_udi_di exists
   const scopeView = scopeViewOverride ?? (canShowFamily ? 'product_family' : 'individual');
 
   const { data: vvPlans, isLoading } = useQuery({
@@ -56,33 +97,72 @@ export function VVPlanModule({ productId, companyId, disabled = false }: VVPlanM
     },
   });
 
-  const handleCreatePlan = () => {
-    if (disabled) return;
-    setCreateInitialData(null);
-    setEditPlanId(null);
-    setShowCreateDialog(true);
+  const navigateToStudio = async (plan: VVPlan) => {
+    if (!company?.name) return;
+    try {
+      await VVPlanStudioBridgeService.upsertTemplate(plan, companyId, productId);
+      const encodedCompanyName = encodeURIComponent(company.name);
+      navigate(`/app/company/${encodedCompanyName}/document-studio?templateId=VV-PLAN-${plan.id}&productId=${productId}`);
+    } catch (error) {
+      console.error('Error opening in studio:', error);
+      toast.error('Failed to open in Document Studio');
+    }
   };
 
-  const handleEditPlan = (plan: VVPlan) => {
-    if (disabled) return;
-    setEditPlanId(plan.id);
-    setCreateInitialData({
-      name: plan.name,
-      version: plan.version,
-      description: plan.description || "",
-      scope: plan.scope || "",
-      methodology: plan.methodology ? plan.methodology.split(", ") : [],
-      acceptance_criteria: plan.acceptance_criteria || "",
-      roles: (plan as any).roles_responsibilities || [],
-      scope_type: (plan.scope_type as 'individual' | 'product_family') || 'individual',
-    });
-    setShowCreateDialog(true);
+  const handleCreatePlan = async () => {
+    if (disabled || !company?.name) return;
+    try {
+      const newPlan = await vvService.createVVPlan({
+        company_id: companyId,
+        product_id: productId,
+        name: 'V&V Master Plan v1.0',
+        version: '1.0',
+        status: 'draft',
+        scope: '',
+        methodology: '',
+        acceptance_criteria: '',
+        roles_responsibilities: {},
+        created_by: user!.id,
+        scope_type: scopeView,
+        family_identifier: scopeView === 'product_family' ? familyIdentifier || undefined : undefined,
+      });
+      toast.success('V&V Plan created');
+      await navigateToStudio(newPlan);
+    } catch (error) {
+      console.error('Error creating V&V plan:', error);
+      toast.error('Failed to create V&V Plan');
+    }
   };
 
-  const handleAIAccept = (data: VVPlanInitialData) => {
-    setCreateInitialData(data);
-    setEditPlanId(null);
-    setShowCreateDialog(true);
+  const handleEditPlan = async (plan: VVPlan) => {
+    if (disabled) return;
+    await navigateToStudio(plan);
+  };
+
+  const handleAIAccept = async (data: VVPlanInitialData) => {
+    if (!company?.name) return;
+    try {
+      const newPlan = await vvService.createVVPlan({
+        company_id: companyId,
+        product_id: productId,
+        name: data.name || 'V&V Master Plan v1.0',
+        version: data.version || '1.0',
+        status: 'draft',
+        description: data.description,
+        scope: data.scope,
+        methodology: Array.isArray(data.methodology) ? data.methodology.join(', ') : (data.methodology || ''),
+        acceptance_criteria: data.acceptance_criteria,
+        roles_responsibilities: data.roles || {},
+        created_by: user!.id,
+        scope_type: data.scope_type || scopeView,
+        family_identifier: scopeView === 'product_family' ? familyIdentifier || undefined : undefined,
+      });
+      toast.success('V&V Plan created from AI suggestions');
+      await navigateToStudio(newPlan);
+    } catch (error) {
+      console.error('Error creating V&V plan from AI:', error);
+      toast.error('Failed to create V&V Plan');
+    }
   };
 
   const getStatusColor = (status: string) => {
@@ -223,11 +303,14 @@ export function VVPlanModule({ productId, companyId, disabled = false }: VVPlanM
                     <FileText className="h-4 w-4 mr-2" />
                     {lang('verificationValidation.vvPlan.viewDetails')}
                   </Button>
-                  {plan.status === 'draft' && (
-                    <Button variant="outline" size="sm" disabled={disabled} onClick={() => handleEditPlan(plan)}>
-                      {lang('verificationValidation.vvPlan.editPlan')}
-                    </Button>
-                  )}
+                  <Button variant="outline" size="sm" disabled={disabled} onClick={() => handleEditPlan(plan)}>
+                    <Pencil className="h-4 w-4 mr-2" />
+                    {lang('verificationValidation.vvPlan.editPlan')}
+                  </Button>
+                  <Button variant="outline" size="sm" disabled={disabled} onClick={() => setCiExportPlan(plan)}>
+                    <FileEdit className="h-4 w-4 mr-2" />
+                    Send to CI
+                  </Button>
                 </div>
               </CardContent>
             </Card>
@@ -268,22 +351,16 @@ export function VVPlanModule({ productId, companyId, disabled = false }: VVPlanM
         </CardContent>
       </Card>
 
-      <CreateVVPlanDialog
-        open={showCreateDialog}
-        onOpenChange={setShowCreateDialog}
-        productId={productId}
-        companyId={companyId}
-        initialData={createInitialData}
-        editPlanId={editPlanId}
-        familyIdentifier={familyIdentifier}
-        defaultScopeType={scopeView}
-      />
 
       {selectedPlan && (
-        <VVPlanDetailDialog
+        <VVPlanDetailSheet
           open={!!selectedPlan}
           onOpenChange={(open) => { if (!open) setSelectedPlan(null); }}
           plan={selectedPlan}
+          productId={productId}
+          companyId={companyId}
+          companyName={company?.name || ''}
+          onEdit={handleEditPlan}
         />
       )}
 
@@ -296,6 +373,21 @@ export function VVPlanModule({ productId, companyId, disabled = false }: VVPlanM
         scopeType={scopeView}
         familyIdentifier={familyIdentifier}
       />
+
+      {/* Send to CI from card-level action */}
+      {ciExportPlan && company?.name && (
+        <SaveContentAsDocCIDialog
+          open={!!ciExportPlan}
+          onOpenChange={(open) => { if (!open) setCiExportPlan(null); }}
+          title={`V&V Plan: ${ciExportPlan.name}`}
+          htmlContent={generateVVPlanHtml(ciExportPlan)}
+          templateIdKey={`VV-PLAN-${ciExportPlan.id}`}
+          companyId={companyId}
+          companyName={company.name}
+          productId={productId}
+          defaultScope="device"
+        />
+      )}
     </div>
   );
 }

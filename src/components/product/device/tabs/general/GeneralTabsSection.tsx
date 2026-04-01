@@ -207,6 +207,8 @@ export function GeneralTabsSection(props: GeneralTabsSectionProps) {
     autoSyncScope,
     familyProductIds,
     parentProductId,
+    familyProducts,
+    onScopeChangeWithPropagation: handleScopeChangeWithPropagation,
   };
 
   return (

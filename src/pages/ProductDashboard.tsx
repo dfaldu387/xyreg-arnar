@@ -716,7 +716,7 @@ export default function ProductDashboard() {
       <div className="flex h-full min-h-0 flex-col">
         <ProductPageHeader
           product={product}
-          subsection="Device Status"
+          subsection="Device Dashboard"
           onRefresh={handleRefreshData}
           isRefreshing={isFetching && !isLoading}
           marketStatus={marketStatus}

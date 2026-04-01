@@ -3119,7 +3119,11 @@
     "communications": "Viestintä",
     "unreadMessages": "Lukemattomat viestit",
     "highPriority": "Korkea prioriteetti",
+    "awaitingResponse": "Odottaa vastausta",
+    "onlineUsers": "Online-käyttäjät",
     "activeThreads": "Aktiiviset keskustelut",
+    "users": "Käyttäjät",
+    "myThreads": "Omat keskustelut",
     "recentMessages": "Viimeisimmät Viestit",
     "new": "Uusi",
     "noRecentCommunications": "No Viimeisimmät Viestintä",
@@ -3386,7 +3390,9 @@
       "pricingStrategy": "Hinnoittelustrategia",
       "pricingStrategyDesc": "Määritä ja hallitse hinnoittelustrategioita tuoteportfoliossasi.",
       "investors": "Sijoittajat",
-      "investorsDesc": "Easily manage investor relationships and data rooms for due diligence."
+      "investorsDesc": "Easily manage investor relationships and data rooms for due diligence.",
+      "fundingGrants": "Rahoitus & Avustukset",
+      "fundingGrantsDesc": "Arvioi kelpoisuus, seuraa hakemuksia ja hallinnoi dokumentaatiota EU:n, Yhdysvaltain ja kansallisille rahoitusohjelmille."
     },
     "blueprint": {
       "title": "Yritys Yrityssuunnitelma",
@@ -4142,7 +4148,7 @@
     "failedToLoad": "Failed to load gap analysis data",
     "breadcrumbs": {
       "clientCompass": "Asiakaskompassi",
-      "complianceInstances": "Vaatimustenmukaisuustiedot",
+      "complianceInstances": "Sääntely ja hakemukset",
       "gapAnalysis": "Puuteanalyysi"
     },
     "actions": {
@@ -10574,7 +10580,7 @@
     "archives": "Arkistot",
     "tabs": {
       "lifecyclePhases": "Elinkaaren vaiheet",
-      "complianceInstances": "Vaatimustenmukaisuustiedot",
+      "complianceInstances": "Sääntely ja hakemukset",
       "clinicalTrials": "Kliiniset tutkimukset",
       "templates": "Mallit",
       "users": "Käyttäjät",
@@ -13549,7 +13555,7 @@
       "resolvedThisMonth": "resolved tämä kuukausi",
       "criticalPathFormula": "Count(Items on Critical Path + Overdue)",
       "criticalPathDescription": "Number of items on critical path or past due requiring immediate attention",
-      "complianceInstances": "Vaatimustenmukaisuustiedot",
+      "complianceInstances": "Sääntely ja hakemukset",
       "totalTrackedItems": "Total tracked items",
       "completionRate": "valmistumisaste",
       "complianceFormula": "Yhteensä Vaatimustenmukaisuus Instance Lukumäärä",
@@ -14026,7 +14032,7 @@
   },
   "pageHeader": {
     "executiveDashboard": "Executive Hallintapaneeli",
-    "complianceInstances": "Vaatimustenmukaisuustiedot",
+    "complianceInstances": "Sääntely ja hakemukset",
     "xyregGenesis": "Xyreg Genesis",
     "businessCase": "Liiketoimintasuunnitelma",
     "commercialIntelligence": "Kaupallinen tiedustelu",
@@ -15650,10 +15656,21 @@
     "qualityAssurancePreview": "Laadunvarmistus:",
     "engineeringLead": "Tekninen johtaja",
     "qualityManager": "Laatupäällikkö",
-    "independentReviewer": "Riippumaton arvioija"
+    "independentReviewer": "Riippumaton arvioija",
+    "productPageTitle": "Suunnittelukatselmus",
+    "productPageSubtitle": "ISO 13485 §7.3.5 — Muodolliset suunnittelukatselmukset perusviivan ja todisteiden lukituksen kanssa",
+    "totalReviews": "Katselmuksia yhteensä",
+    "completedBaselines": "Valmiit perusviivat",
+    "openFindings": "Avoimet havainnot",
+    "noReviewsYet": "Ei suunnittelukatselmuksia vielä. Luo ensimmäinen aloittaaksesi.",
+    "baseline": "Perusviiva",
+    "findings": "Havainnot",
+    "deleteConfirm": "Poista \"{{title}}\"? Tätä ei voi kumota.",
+    "deleteFailed": "Poistaminen epäonnistui",
+    "deleteSuccess": "Suunnittelukatselmus poistettu"
   },
   "deviceProcessEngine": {
-    "deviceStatusTab": "Laitteen tila",
+    "deviceStatusTab": "Laitteen kojelauta",
     "processEngineTab": "Laitteen prosessimoottori",
     "title": "Laitteen prosessimoottori",
     "iso13485": "(ISO 13485)",

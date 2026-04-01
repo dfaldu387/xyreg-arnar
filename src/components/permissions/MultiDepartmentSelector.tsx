@@ -4,7 +4,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { X } from "lucide-react";
+import { X, Pencil, Check } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 
@@ -44,6 +44,9 @@ export const MultiDepartmentSelector = forwardRef<MultiDepartmentSelectorRef, Mu
   const [newDepartment, setNewDepartment] = useState("");
   const [newFTE, setNewFTE] = useState("100");
   const [newRole, setNewRole] = useState("");
+  const [editingIndex, setEditingIndex] = useState<number | null>(null);
+  const [editDepartment, setEditDepartment] = useState("");
+  const [editRole, setEditRole] = useState("");
 
   useEffect(() => {
     loadDepartments();
@@ -107,7 +110,7 @@ export const MultiDepartmentSelector = forwardRef<MultiDepartmentSelectorRef, Mu
     const percentageValue = parseFloat(normalizedInput);
     
     if (isNaN(percentageValue) || percentageValue <= 0 || percentageValue > 100) {
-      toast.error("FTE must be between 0 and 100%");
+      toast.info("FTE must be between 0 and 100%");
       return null;
     }
 
@@ -116,13 +119,13 @@ export const MultiDepartmentSelector = forwardRef<MultiDepartmentSelectorRef, Mu
 
     const totalAfterAdd = getTotalFTE() + fteValue;
     if (totalAfterAdd > 1.0) {
-      toast.error(`Total FTE cannot exceed 100%. You have ${getRemainingPercentage()}% remaining.`);
+      toast.info(`Total FTE cannot exceed 100%. You have ${getRemainingPercentage()}% remaining.`);
       return null;
     }
 
     // Check if department already assigned
     if (assignments.some(a => a.department_name === newDepartment)) {
-      toast.error("This department is already assigned");
+      toast.info("This department is already assigned");
       return null;
     }
 
@@ -157,35 +160,34 @@ export const MultiDepartmentSelector = forwardRef<MultiDepartmentSelectorRef, Mu
   const handleUpdateFTE = (index: number, newPercentage: string) => {
     // Normalize input - handle both comma and decimal formats
     const normalizedInput = newPercentage.replace(',', '.');
-    const percentageValue = parseFloat(normalizedInput);
-    
-    if (isNaN(percentageValue) || percentageValue <= 0 || percentageValue > 100) {
-      toast.error("FTE must be between 0 and 100%");
+    let percentageValue = parseFloat(normalizedInput);
+
+    if (isNaN(percentageValue) || percentageValue <= 0) {
       return;
     }
 
-    // Convert percentage to decimal (e.g., 40% -> 0.4)
-    const fteValue = percentageValue / 100;
-
-    // Calculate total FTE excluding the assignment being updated
+    // Calculate max allowed for this assignment
     const totalExcludingCurrent = assignments
       .filter((_, i) => i !== index)
       .reduce((sum, a) => sum + parseFloat(a.fte_allocation.toString()), 0);
-    
-    const totalAfterUpdate = totalExcludingCurrent + fteValue;
-    
-    if (totalAfterUpdate > 1.0) {
-      const maxAllowed = Math.round((1.0 - totalExcludingCurrent) * 100);
-      toast.error(`Maximum FTE for this assignment is ${maxAllowed}% (Total cannot exceed 100%)`);
-      return;
+    const maxAllowed = Math.round((1.0 - totalExcludingCurrent) * 100);
+
+    // Clamp to max allowed — just stop at the limit
+    if (percentageValue > maxAllowed) {
+      percentageValue = maxAllowed;
+      toast.info(`Maximum FTE for this department is ${maxAllowed}%. Total allocation cannot exceed 100%.`);
     }
 
-    const updatedAssignments = assignments.map((assignment, i) => 
-      i === index 
+    if (percentageValue > 100) percentageValue = 100;
+
+    const fteValue = percentageValue / 100;
+
+    const updatedAssignments = assignments.map((assignment, i) =>
+      i === index
         ? { ...assignment, fte_allocation: fteValue }
         : assignment
     );
-    
+
     setAssignments(updatedAssignments);
     onChange(updatedAssignments);
   };
@@ -200,6 +202,44 @@ export const MultiDepartmentSelector = forwardRef<MultiDepartmentSelectorRef, Mu
     return dept?.roles || [];
   };
 
+  const getEditDeptRoles = () => {
+    const dept = departments.find(d => d.name === editDepartment);
+    return dept?.roles || [];
+  };
+
+  const startEditing = (index: number) => {
+    const assignment = assignments[index];
+    setEditingIndex(index);
+    setEditDepartment(assignment.department_name);
+    setEditRole(assignment.role?.[0] || "");
+  };
+
+  const cancelEditing = () => {
+    setEditingIndex(null);
+    setEditDepartment("");
+    setEditRole("");
+  };
+
+  const saveEditing = () => {
+    if (editingIndex === null) return;
+
+    const updatedAssignments = assignments.map((assignment, i) =>
+      i === editingIndex
+        ? {
+            ...assignment,
+            department_name: editDepartment || assignment.department_name,
+            role: editRole ? [editRole] : undefined,
+          }
+        : assignment
+    );
+
+    setAssignments(updatedAssignments);
+    onChange(updatedAssignments);
+    setEditingIndex(null);
+    setEditDepartment("");
+    setEditRole("");
+  };
+
   return (
     <div className="space-y-4">
       <div>
@@ -209,43 +249,142 @@ export const MultiDepartmentSelector = forwardRef<MultiDepartmentSelectorRef, Mu
         {assignments.length > 0 ? (
           <div className="space-y-2 mb-4">
             {assignments.map((assignment, index) => (
-              <div 
+              <div
                 key={index}
                 className="flex items-center gap-3 p-3 bg-muted/50 rounded-lg border"
               >
-                <div className="flex-1">
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="font-medium">{assignment.department_name}</span>
+                {editingIndex === index ? (
+                  <div className="flex-1 space-y-3">
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-2">
+                        <Label className="text-xs">Department</Label>
+                        <Select
+                          value={editDepartment}
+                          onValueChange={(value) => {
+                            setEditDepartment(value);
+                            setEditRole("");
+                          }}
+                          disabled={disabled}
+                        >
+                          <SelectTrigger className="h-9">
+                            <SelectValue placeholder="Select department" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value={assignment.department_name}>
+                              {assignment.department_name}
+                            </SelectItem>
+                            {getAvailableDepartments().map((dept) => (
+                              <SelectItem key={dept.id} value={dept.name}>
+                                {dept.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-xs">FTE Allocation (%)</Label>
+                        <Input
+                          type="number"
+                          min="1"
+                          max="100"
+                          step="1"
+                          value={Math.round(assignment.fte_allocation * 100)}
+                          onChange={(e) => handleUpdateFTE(index, e.target.value)}
+                          disabled={disabled}
+                          className="h-9"
+                        />
+                      </div>
+                    </div>
+
+                    {getEditDeptRoles().length > 0 && (
+                      <div className="space-y-2">
+                        <Label className="text-xs">Role (Optional)</Label>
+                        <Select
+                          value={editRole}
+                          onValueChange={setEditRole}
+                          disabled={disabled}
+                        >
+                          <SelectTrigger className="h-9">
+                            <SelectValue placeholder="Select role" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {getEditDeptRoles().map((role) => (
+                              <SelectItem key={role} value={role}>
+                                {role}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
+
+                    <div className="flex gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={saveEditing}
+                        className="flex-1 bg-black text-white hover:bg-black/90"
+                      >
+                        <Check className="h-4 w-4 mr-1" /> Save Changes
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={cancelEditing}
+                      >
+                        Cancel
+                      </Button>
+                    </div>
                   </div>
-                  {assignment.role && assignment.role.length > 0 && (
-                    <span className="text-sm text-muted-foreground">{assignment.role[0]}</span>
-                  )}
-                </div>
-                
-                <div className="flex items-center gap-2">
-                  <Input
-                    type="number"
-                    min="1"
-                    max="100"
-                    step="1"
-                    value={Math.round(assignment.fte_allocation * 100)}
-                    onChange={(e) => handleUpdateFTE(index, e.target.value)}
-                    disabled={disabled}
-                    className="h-8 w-20 text-center"
-                  />
-                  <span className="text-sm text-muted-foreground">%</span>
-                </div>
-                
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => handleRemoveAssignment(index)}
-                  disabled={disabled}
-                  className="h-8 w-8 p-0"
-                >
-                  <X className="h-4 w-4" />
-                </Button>
+                ) : (
+                  <>
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="font-medium">{assignment.department_name}</span>
+                      </div>
+                      {assignment.role && assignment.role.length > 0 && (
+                        <span className="text-sm text-muted-foreground">{assignment.role[0]}</span>
+                      )}
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <Input
+                        type="number"
+                        min="1"
+                        max="100"
+                        step="1"
+                        value={Math.round(assignment.fte_allocation * 100)}
+                        onChange={(e) => handleUpdateFTE(index, e.target.value)}
+                        disabled={disabled}
+                        className="h-8 w-20 text-center"
+                      />
+                      <span className="text-sm text-muted-foreground">%</span>
+                    </div>
+
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => startEditing(index)}
+                      disabled={disabled}
+                      className="h-8 w-8 p-0"
+                      title="Edit department & role"
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => handleRemoveAssignment(index)}
+                      disabled={disabled}
+                      className="h-8 w-8 p-0"
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </>
+                )}
               </div>
             ))}
             

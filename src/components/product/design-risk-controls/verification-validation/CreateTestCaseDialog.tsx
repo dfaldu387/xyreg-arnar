@@ -229,7 +229,7 @@ export function CreateTestCaseDialog({
                 company_id: companyId,
                 source_type: req.type,
                 source_id: reqId,
-                target_type: "test_cases",
+                target_type: "test_case",
                 target_id: testCase.id,
                 link_type: "verifies"
               });

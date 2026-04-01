@@ -264,6 +264,10 @@ const DocumentCICardComponent = ({
     ? variantCtx.getDocumentInheritanceStatus(document.id)
     : null;
 
+  // Documents that are excluded or shared from another device are read-only
+  const isSharedFromOtherDevice = !!(document as any)._isSharedFromDevice;
+  const isNotInteractable = isExcludedFromVariant || isSharedFromOtherDevice;
+
   const handleCreateDocument = () => {
     if (onCreateDraft) {
       onCreateDraft(document);
@@ -503,15 +507,16 @@ const DocumentCICardComponent = ({
           </Badge>
         </div>
       </div>
+      {!isNotInteractable && (
       <div className="flex items-center gap-3">
-        {/* Studio */}
+        {/* Studio - only shown for interactable documents */}
         <Button
           variant="outline"
           size="sm"
           onClick={() => handleCreateDocument()}
           disabled={isProcessing || disabled}
           className="h-8 px-3 !bg-white"
-          title="Create Document in Document Studio"
+          title={document.document_reference?.startsWith('DS-') ? "Edit Document" : "Create Document"}
         >
           <FileEdit className="h-4 w-4 text-primary" />
         </Button>
@@ -572,6 +577,7 @@ const DocumentCICardComponent = ({
           </DropdownMenu>
         )}
       </div>
+      )}
     </div>
   </div>
   {/* Delete Confirmation Dialog */ }
@@ -634,6 +640,7 @@ const DocumentCICardComponent = ({
       documentId={document.id}
       documentName={document.name}
       companyId={companyId}
+      productId={productId}
       existingGroupIds={(document as any).reviewer_group_ids || []}
     />
   )}
@@ -1151,7 +1158,7 @@ export function AllActivePhasesTab({
     };
 
     loadSharedDocs();
-  }, [productId, companyId, exclusionsLoaded, docExclusionScopes]);
+  }, [productId, companyId, exclusionsLoaded, lifecycleLoading, docExclusionScopes]);
 
   // Get all documents in a flat list
   const allDocuments = useMemo(() => {
@@ -1294,7 +1301,7 @@ export function AllActivePhasesTab({
     setDocExclusionScopeRaw(normalized, scope);
   }, [setDocExclusionScopeRaw]);
 
-  // Handle document scope change: save scope, copy doc to included products, mirror scope to all family products
+  // Handle document scope change: save scope on current product, mirror to family
   const handleDocScopeChange = useCallback(async (docId: string, newScope: import("@/hooks/useInheritanceExclusion").ItemExclusionScope) => {
     const normalized = docId.replace(/^template-/, '');
     const scopeWithFlag = { ...newScope, isManualGroup: true };
@@ -1304,101 +1311,7 @@ export function AllActivePhasesTab({
 
     if (!companyId || !productId) return;
 
-    // 2. Get all family products
-    const { data: allProducts } = await supabase
-      .from('products')
-      .select('id, field_scope_overrides')
-      .eq('company_id', companyId)
-      .eq('is_archived', false);
-    if (!allProducts) return;
-
-    const newExcluded = new Set(newScope.excludedProductIds || []);
-    const includedOtherIds = allProducts
-      .filter(p => p.id !== productId && !newExcluded.has(p.id))
-      .map(p => p.id);
-
-    // 3. Copy document to included products that don't have it
-    if (includedOtherIds.length > 0) {
-      // Try phase_assigned_document_template first, then documents table
-      let sourceDoc: any = null;
-      let sourceTable: 'phase_assigned_document_template' | 'documents' = 'phase_assigned_document_template';
-
-      // First try current product
-      const { data: templateDoc } = await supabase
-        .from('phase_assigned_document_template')
-        .select('*')
-        .eq('id', normalized)
-        .eq('product_id', productId)
-        .maybeSingle();
-
-      if (templateDoc) {
-        sourceDoc = templateDoc;
-        sourceTable = 'phase_assigned_document_template';
-      } else {
-        // Try documents table on current product
-        const { data: regularDoc } = await supabase
-          .from('documents')
-          .select('*')
-          .eq('id', normalized)
-          .eq('product_id', productId)
-          .maybeSingle();
-        if (regularDoc) {
-          sourceDoc = regularDoc;
-          sourceTable = 'documents';
-        }
-      }
-
-      // Fallback: doc might be inherited from another product (e.g. master)
-      if (!sourceDoc) {
-        const { data: anyTemplateDoc } = await supabase
-          .from('phase_assigned_document_template')
-          .select('*')
-          .eq('id', normalized)
-          .maybeSingle();
-        if (anyTemplateDoc) {
-          sourceDoc = anyTemplateDoc;
-          sourceTable = 'phase_assigned_document_template';
-        } else {
-          const { data: anyRegularDoc } = await supabase
-            .from('documents')
-            .select('*')
-            .eq('id', normalized)
-            .maybeSingle();
-          if (anyRegularDoc) {
-            sourceDoc = anyRegularDoc;
-            sourceTable = 'documents';
-          }
-        }
-      }
-
-      if (sourceDoc) {
-        for (const targetId of includedOtherIds) {
-          // Check if target already has a document with same name
-          const { data: existing } = await supabase
-            .from(sourceTable)
-            .select('id')
-            .eq('product_id', targetId)
-            .eq('name', sourceDoc.name)
-            .maybeSingle();
-
-          if (!existing) {
-            const { id: _id, created_at: _ca, updated_at: _ua, ...rest } = sourceDoc;
-            const { error: insertError } = await supabase.from(sourceTable).insert({
-              ...rest,
-              product_id: targetId,
-              status: sourceDoc.status || 'Not Started',
-            });
-            if (insertError) {
-              console.error(`[handleDocScopeChange] Failed to copy doc to product ${targetId}:`, insertError);
-            }
-          }
-        }
-      } else {
-        console.warn(`[handleDocScopeChange] Source document not found for id: ${normalized}`);
-      }
-    }
-
-    // 4. Mirror scope to family products (reusable utility)
+    // 2. Mirror scope to family products (shared access, no document copying)
     await mirrorScopeToFamilyProducts(normalized, scopeWithFlag, 'document_ci_exclusion_scopes', productId, companyId, detectedParentProductId);
   }, [productId, companyId, setDocExclusionScopeRaw, detectedParentProductId]);
 
@@ -1671,6 +1584,10 @@ export function AllActivePhasesTab({
         authors_ids: updatedDocument.authors_ids,
         tags: updatedDocument.tags,
         updated_at: new Date().toISOString(),
+        file_path: updatedDocument.file_path,
+        file_name: updatedDocument.file_name,
+        filePath: updatedDocument.file_path,
+        fileName: updatedDocument.file_name,
       });
       return next;
     });
@@ -2226,7 +2143,7 @@ export function AllActivePhasesTab({
       open={!!editingTemplateWithOnlyOffice}
       onOpenChange={(open) => !open && setEditingTemplateWithOnlyOffice(null)}
       document={editingTemplateWithOnlyOffice}
-      documentServerUrl="http://localhost:4001/"
+      documentServerUrl={import.meta.env.VITE_ONLYOFFICE_SERVER_URL || "/api/onlyoffice/"}
       onDocumentSaved={(doc) => {
         handleRefreshData?.();
         setEditingTemplateWithOnlyOffice(null);
@@ -2285,7 +2202,26 @@ export function AllActivePhasesTab({
     {/* Document Draft Drawer */}
     <DocumentDraftDrawer
       open={!!draftDrawerDocument}
-      onOpenChange={(open) => { if (!open) setDraftDrawerDocument(null); }}
+      onOpenChange={async (open) => {
+        if (!open && draftDrawerDocument) {
+          const rawId = draftDrawerDocument.id.replace(/^template-/, '');
+          const docId = draftDrawerDocument.id.startsWith('template-') ? draftDrawerDocument.id : `template-${draftDrawerDocument.id}`;
+          // Fetch only the edited document to update its card
+          const { data } = await supabase
+            .from('phase_assigned_document_template')
+            .select('name, status, due_date, document_type, sub_section, authors_ids, reference_document_ids, tags, updated_at, description, reviewer_group_ids')
+            .eq('id', rawId)
+            .single();
+          if (data) {
+            setOptimisticUpdates(prev => {
+              const next = new Map(prev);
+              next.set(docId, { ...data });
+              return next;
+            });
+          }
+          setDraftDrawerDocument(null);
+        }
+      }}
       documentId={draftDrawerDocument?.id || ''}
       documentName={draftDrawerDocument?.name || ''}
       documentType={draftDrawerDocument?.document_type || 'Standard'}

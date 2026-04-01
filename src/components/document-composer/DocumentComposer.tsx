@@ -7,10 +7,8 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 
 import { Badge } from '@/components/ui/badge';
 import { useTranslation } from '@/hooks/useTranslation';
-import { ControlPanel } from './ControlPanel';
-import { CIPropertyPanel } from './CIPropertyPanel';
 import { DocumentSidebar } from './DocumentSidebar';
-import { useCIDocumentMetadata } from '@/hooks/useCIDocumentMetadata';
+import { DocumentEditorSidebar } from './DocumentEditorSidebar';
 import { DocumentPreview } from './DocumentPreview';
 import { LiveEditor } from './LiveEditor';
 import { SimpleDocumentEditor } from './SimpleDocumentEditor';
@@ -87,7 +85,6 @@ export function DocumentComposer({ disabled = false }: DocumentComposerProps) {
   const [showUploadDialog, setShowUploadDialog] = useState(false);
   const [viewingRefDoc, setViewingRefDoc] = useState<{ url: string; fileName: string } | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [selectedReferenceDocumentIds, setSelectedReferenceDocumentIds] = useState<string[]>([]);
   const [companyLogoUrl, setCompanyLogoUrl] = useState<string | undefined>(undefined);
   const [contentModal, setContentModal] = useState<{
     isOpen: boolean;
@@ -105,12 +102,6 @@ export function DocumentComposer({ disabled = false }: DocumentComposerProps) {
   const createNew = searchParams.get('createNew') === 'true';
   const docName = searchParams.get('docName');
   const docType = searchParams.get('docType');
-
-  // CI Property Panel: fetch document metadata for inline editing
-  const { metadata: ciMetadata, updateField: updateCIField } = useCIDocumentMetadata(
-    editingDocumentId,
-    activeCompanyRole?.companyId
-  );
 
   // Resolve company context - prefer URL company name over active role
   const decodedCompanyName = urlCompanyName ? decodeURIComponent(urlCompanyName) : null;
@@ -140,13 +131,6 @@ export function DocumentComposer({ disabled = false }: DocumentComposerProps) {
     };
     fetchLogo();
   }, [activeCompanyRole?.companyId]);
-
-  // Sync reference document IDs from CI metadata
-  React.useEffect(() => {
-    if (ciMetadata?.reference_document_ids) {
-      setSelectedReferenceDocumentIds(ciMetadata.reference_document_ids);
-    }
-  }, [ciMetadata?.reference_document_ids]);
 
   const { template, isLoading, error } = useDocumentTemplate(
     templateId || selectedTemplateId,
@@ -1030,7 +1014,7 @@ export function DocumentComposer({ disabled = false }: DocumentComposerProps) {
 
 
   return (
-    <div className="flex flex-col h-[calc(100vh-64px)] overflow-hidden">
+    <div className="flex flex-col h-[calc(100vh-6rem)] overflow-hidden">
       <ConsistentPageHeader
         breadcrumbs={breadcrumbs}
         title={lang('draftStudio.title')}
@@ -1080,7 +1064,7 @@ export function DocumentComposer({ disabled = false }: DocumentComposerProps) {
         </Card> */}
       {/* </div> */}
 
-      <div className="flex flex-1 min-h-0 overflow-hidden bg-background border rounded-lg mb-4">
+      <div className="flex flex-1 min-h-0 overflow-hidden bg-background border pt-2 rounded-lg mb-4">
         {showDocumentList ? (
           <DocumentPreview
             document={null}
@@ -1099,69 +1083,34 @@ export function DocumentComposer({ disabled = false }: DocumentComposerProps) {
           />
         ) : (
           <>
-            {/* Collapsible Sidebar */}
-            {!sidebarCollapsed && (
-              <div className="w-80 min-w-[280px] max-w-[320px] h-full border-r flex flex-col overflow-y-auto shrink-0">
-                <ControlPanel
-                  productContext={template?.productContext}
-                  documentType={template?.type}
-                  isLocked={isLocked}
-                  initialScope={productId ? 'product' : undefined}
-                  initialProductId={productId || undefined}
-                  createNew={createNew}
-                  docName={docName}
-                  onSelectionChange={handleSelectionChange}
-                  onGenerateDocument={handleGenerateDocument}
-                  onFileUploaded={setUploadedFileInfo}
-                  isGenerating={isGenerating}
-                  template={generatedTemplate || template}
-                  smartData={smartData}
-                  onRoleMappingsUpdated={handleRoleMappingsUpdated}
-                  onContentEnhancement={handleContentEnhancement}
-                  disabled={disabled}
-                  onDocumentControlChange={handleDocumentControlChange}
-                  onViewReferenceDocument={(url, fileName) => setViewingRefDoc({ url, fileName })}
-                  selectedReferenceIds={selectedReferenceDocumentIds}
-                  onReferenceSelectionChange={(ids) => {
-                    setSelectedReferenceDocumentIds(ids);
-                    if (editingDocumentId) {
-                      updateCIField('reference_document_ids', ids);
-                    }
-                  }}
-                />
-                {ciMetadata && isEditingExistingDocument && (
-                  <CIPropertyPanel
-                    documentId={ciMetadata.id}
-                    companyId={activeCompanyRole?.companyId || ''}
-                    productId={ciMetadata.product_id || productId || undefined}
-                    phaseId={ciMetadata.phase_id || undefined}
-                    name={ciMetadata.name}
-                    status={ciMetadata.status}
-                    dueDate={ciMetadata.due_date || undefined}
-                    documentType={ciMetadata.document_type || undefined}
-                    section={ciMetadata.sub_section || undefined}
-                    sectionId={ciMetadata.section_ids?.[0] || undefined}
-                    authorsIds={ciMetadata.authors_ids || []}
-                    referenceDocumentIds={ciMetadata.reference_document_ids || []}
-                    onFieldChange={updateCIField}
-                    disabled={disabled}
-                  />
-                )}
-              </div>
-            )}
-
-            {/* Sidebar toggle */}
-            <button
-              onClick={() => setSidebarCollapsed(prev => !prev)}
-              className="w-5 shrink-0 flex items-center justify-center border-r bg-muted/30 hover:bg-muted transition-colors cursor-pointer"
-              title={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'}
-            >
-              {sidebarCollapsed ? (
-                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6"/></svg>
-              ) : (
-                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6"/></svg>
-              )}
-            </button>
+            <DocumentEditorSidebar
+              collapsed={sidebarCollapsed}
+              onToggleCollapse={() => setSidebarCollapsed(prev => !prev)}
+              ciDocumentId={templateId}
+              ciCompanyId={activeCompanyRole?.companyId}
+              productId={productId || undefined}
+              showCIProperties={isEditingExistingDocument}
+              controlPanelProps={{
+                productContext: template?.productContext,
+                documentType: template?.type,
+                isLocked,
+                initialScope: productId ? 'product' : undefined,
+                initialProductId: productId || undefined,
+                createNew,
+                docName,
+                onSelectionChange: handleSelectionChange,
+                onGenerateDocument: handleGenerateDocument,
+                onFileUploaded: setUploadedFileInfo,
+                isGenerating,
+                template: generatedTemplate || template,
+                smartData,
+                onRoleMappingsUpdated: handleRoleMappingsUpdated,
+                onContentEnhancement: handleContentEnhancement,
+                disabled,
+                onDocumentControlChange: handleDocumentControlChange,
+                onViewReferenceDocument: (url, fileName) => setViewingRefDoc({ url, fileName }),
+              }}
+            />
 
             {/* Main content - scrolls independently */}
             <div className="flex-1 flex flex-col min-w-0 h-full overflow-y-auto">

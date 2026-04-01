@@ -221,7 +221,7 @@ export function UnifiedMarketsRegulatorySection({
       return (data || []) as { id: string; markets: any }[];
     },
     enabled: !!familyRootId && belongsToFamily,
-    staleTime: 30_000,
+    staleTime: 5_000,
   });
 
   // Compute family product IDs from the family-only query
@@ -239,8 +239,17 @@ export function UnifiedMarketsRegulatorySection({
     fieldExclusion, 'market_exclusion_scopes', productId, companyId, belongsToFamily, undefined, parentProductId
   );
 
-  // Debounce timer for market sync
-  const syncTimerRef = useRef<ReturnType<typeof setTimeout>>();
+
+  // Compute which family products have a given market selected (for value-matching badge)
+  const getMarketMatchingProductIds = useCallback((marketCode: string): string[] | undefined => {
+    if (!familyProducts?.length || !productId) return undefined;
+    return familyProducts
+      .filter(p => {
+        const pMarkets = Array.isArray(p.markets) ? p.markets as any[] : [];
+        return pMarkets.some((m: any) => m.code === marketCode && m.selected);
+      })
+      .map(p => p.id);
+  }, [familyProducts, productId]);
 
   const handleMarketChange = useCallback((updatedMarket: EnhancedProductMarket) => {
     if (disabled) return;
@@ -248,54 +257,19 @@ export function UnifiedMarketsRegulatorySection({
       market.code === updatedMarket.code ? updatedMarket : market
     );
     onMarketsChange(updatedMarkets);
-
-    // Sync to other devices in the scope group
-    if (!belongsToFamily || !productId || !familyProducts) return;
-    const scopeKey = `market_${updatedMarket.code}`;
-    const scope = fieldExclusion.getExclusionScope(scopeKey);
-    if (!scope.excludedProductIds && !scope.isManualGroup) return; // no scope set
-
-    const excludedSet = new Set(scope.excludedProductIds || []);
-    const targetIds = familyProducts
-      .filter(p => p.id !== productId && !excludedSet.has(p.id))
-      .map(p => p.id);
-
-    if (targetIds.length === 0) return;
-
-    // Debounced sync to other devices
-    if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
-    syncTimerRef.current = setTimeout(async () => {
-      // Read fresh markets from each target and update the specific market
-      const { data: targets } = await supabase
-        .from('products')
-        .select('id, markets')
-        .in('id', targetIds);
-
-      if (!targets) return;
-
-      await Promise.all(targets.map(async (tp) => {
-        const existingMarkets = Array.isArray(tp.markets) ? tp.markets as any[] : [];
-        const updatedTargetMarkets = existingMarkets.map((m: any) =>
-          m.code === updatedMarket.code ? { ...m, ...updatedMarket } : m
-        );
-        // If market doesn't exist yet, add it
-        const hasMarket = existingMarkets.some((m: any) => m.code === updatedMarket.code);
-        const finalMarkets = hasMarket ? updatedTargetMarkets : [...existingMarkets, updatedMarket];
-
-        return supabase
-          .from('products')
-          .update({ markets: finalMarkets } as any)
-          .eq('id', tp.id);
-      }));
-
-      // Invalidate caches so other devices see the update
-      queryClient.invalidateQueries({ queryKey: ['family-products-markets-sync', familyRootId] });
-      for (const tid of targetIds) {
-        queryClient.invalidateQueries({ queryKey: ['productDetails', tid] });
-        queryClient.invalidateQueries({ queryKey: ['product', tid] });
-      }
-    }, 800);
-  }, [disabled, currentMarkets, onMarketsChange, belongsToFamily, productId, familyProducts, fieldExclusion, companyId, queryClient]);
+    // Optimistically update the family products cache so the value-matching badge refreshes instantly
+    if (productId && familyRootId) {
+      queryClient.setQueryData(
+        ['family-products-markets-sync', familyRootId],
+        (old: { id: string; markets: any }[] | undefined) => {
+          if (!old) return old;
+          return old.map(p =>
+            p.id === productId ? { ...p, markets: updatedMarkets } : p
+          );
+        }
+      );
+    }
+  }, [disabled, currentMarkets, onMarketsChange, queryClient, familyRootId, productId]);
 
   const launchSummary = useMemo(() => getLaunchStatusSummary(currentMarkets), [currentMarkets]);
   const selectedCount = useMemo(() => currentMarkets.filter(m => m.selected).length, [currentMarkets]);
@@ -390,6 +364,7 @@ export function UnifiedMarketsRegulatorySection({
                       belongsToFamily={belongsToFamily}
                       fieldExclusion={mirroredFieldExclusion}
                       familyProductIds={effectiveFamilyProductIds}
+                      valueMatchingProductIds={getMarketMatchingProductIds(market.code)}
                     />
                   );
                 })}

@@ -6,6 +6,7 @@ import { Sparkles, Loader2 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
+import { AIContextSourcesPanel } from '@/components/product/ai-assistant/AIContextSourcesPanel';
 
 interface FieldDef {
   id: string;
@@ -48,6 +49,9 @@ export function StepAIAssessButton({
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [outputLanguage, setOutputLanguage] = useState('en');
+  const [additionalPrompt, setAdditionalPrompt] = useState('');
 
   // Filter to assessable fields including hazard_linker (notes) and doc_reference
   const assessableFields = fields.filter(f =>
@@ -56,11 +60,15 @@ export function StepAIAssessButton({
 
   if (assessableFields.length === 0) return null;
 
+  const handleConfirmAndAssess = () => {
+    setConfirmOpen(false);
+    handleAssess();
+  };
+
   const handleAssess = async () => {
     setLoading(true);
     try {
       const fieldDefs = assessableFields.map(f => {
-        // For hazard_linker, target the notes sub-field instead of the hazard IDs
         if (f.type === 'hazard_linker') {
           return {
             id: `${f.id}_notes`,
@@ -87,6 +95,8 @@ export function StepAIAssessButton({
           requirementText: requirementText?.substring(0, 1000),
           fields: fieldDefs,
           frameworkId,
+          outputLanguage,
+          additionalPrompt,
         },
       });
       if (error) throw error;
@@ -138,13 +148,42 @@ export function StepAIAssessButton({
       <Button
         variant="outline"
         size="sm"
-        onClick={handleAssess}
+        onClick={() => setConfirmOpen(true)}
         disabled={loading}
         className="bg-gradient-to-r from-violet-50 to-purple-50 border-violet-300 text-violet-700 hover:from-violet-100 hover:to-purple-100 dark:from-violet-950/30 dark:to-purple-950/30 dark:border-violet-700 dark:text-violet-300"
       >
         {loading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Sparkles className="h-4 w-4 mr-2" />}
         AI Fill All Fields
       </Button>
+
+      {/* Pre-generation confirmation dialog */}
+      <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Sparkles className="h-5 w-5 text-violet-500" />
+              AI Fill All Fields
+            </DialogTitle>
+            <p className="text-sm text-muted-foreground">
+              Review the context sources that will be used for AI generation.
+            </p>
+          </DialogHeader>
+          <AIContextSourcesPanel
+            productId={productId}
+            additionalSources={[`Requirement: ${stepLabel}`, frameworkId ? `Framework: ${frameworkId}` : ''].filter(Boolean)}
+            mode="select"
+            onLanguageChange={setOutputLanguage}
+            onPromptChange={setAdditionalPrompt}
+          />
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmOpen(false)}>Cancel</Button>
+            <Button onClick={handleConfirmAndAssess}>
+              <Sparkles className="h-4 w-4 mr-2" />
+              Generate
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">

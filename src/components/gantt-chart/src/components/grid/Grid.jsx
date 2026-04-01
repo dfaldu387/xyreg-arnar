@@ -9,7 +9,7 @@ import {
 import { context } from '@svar-ui/react-core';
 import { locateID, locateAttr } from '@svar-ui/lib-dom';
 import { reorder } from '../../helpers/reorder';
-import { normalizeDates } from '@svar-ui/gantt-store';
+import { normalizeDates } from '../../helpers/normalizeDates';
 import { Grid as WxGrid } from '@svar-ui/react-grid';
 import TextCell from './TextCell.jsx';
 import ActionCell from './ActionCell.jsx';

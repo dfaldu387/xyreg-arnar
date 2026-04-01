@@ -270,7 +270,7 @@ export class SmartTemplateService {
       ['[Company Name]', `<span style="background-color: #fef08a; padding: 2px 4px; border-radius: 2px;">${company.name}</span>`],
       ['[Date]', `<span style="background-color: #fef08a; padding: 2px 4px; border-radius: 2px;">${currentDate}</span>`],
       ['[Version]', `<span style="background-color: #fef08a; padding: 2px 4px; border-radius: 2px;">1.0</span>`],
-      ['[Prepared By Name]', `<span style="background-color: #fef08a; padding: 2px 4px; border-radius: 2px;">${qaHeadName}</span>`],
+      ['[Issued By Name]', `<span style="background-color: #fef08a; padding: 2px 4px; border-radius: 2px;">${qaHeadName}</span>`],
       ['[Reviewed By Name]', `<span style="background-color: #fef08a; padding: 2px 4px; border-radius: 2px;">${qaHeadName}</span>`],
       ['[Approved By Name]', `<span style="background-color: #fed7aa; color: #c2410c; padding: 4px 8px; border-radius: 4px; border: 1px solid #fdba74; font-weight: 500;">Missing: Specific information</span>`],
       

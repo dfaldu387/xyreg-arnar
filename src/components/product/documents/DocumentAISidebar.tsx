@@ -131,7 +131,10 @@ export function DocumentAISidebar({
             </Button>
           </div>
           {document && (
-            <div className="mt-2">
+            <div className="mt-2 rounded-md border bg-muted/30 p-2">
+              <p className="text-[10px] font-medium text-muted-foreground flex items-center gap-1 mb-1">
+                <FileText className="h-3 w-3" /> AI Input Source
+              </p>
               <p className="text-sm font-medium truncate">{document.name}</p>
               <div className="flex items-center gap-2 mt-1">
                 {document.document_type && (

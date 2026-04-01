@@ -264,6 +264,34 @@ export function AIContentGenerationModal({
         </DialogHeader>
 
         <div className="space-y-6">
+          {/* AI Input Sources Indicator */}
+          <div className="rounded-lg border bg-muted/30 p-3">
+            <h4 className="text-sm font-medium flex items-center gap-2 mb-2">
+              <BookOpen className="h-4 w-4 text-muted-foreground" />
+              AI Input Sources
+            </h4>
+            <div className="divide-y divide-border rounded-md border bg-muted/20">
+              <div className="flex items-center gap-2 px-2.5 py-1.5 text-xs">
+                <Check className="h-3 w-3 text-green-600 dark:text-green-400 shrink-0" />
+                <span className="font-medium">Section</span>
+                <span className="text-muted-foreground truncate">{sectionTitle}</span>
+              </div>
+              {currentContent && (
+                <div className="flex items-center gap-2 px-2.5 py-1.5 text-xs">
+                  <Check className="h-3 w-3 text-green-600 dark:text-green-400 shrink-0" />
+                  <span className="font-medium">Existing Content</span>
+                  <span className="text-muted-foreground truncate">{currentContent.substring(0, 60)}...</span>
+                </div>
+              )}
+              {selectedRefDocIds.length > 0 && (
+                <div className="flex items-center gap-2 px-2.5 py-1.5 text-xs">
+                  <Check className="h-3 w-3 text-green-600 dark:text-green-400 shrink-0" />
+                  <span className="font-medium">Reference Docs</span>
+                  <span className="text-muted-foreground">{selectedRefDocIds.length} document(s)</span>
+                </div>
+              )}
+            </div>
+          </div>
           {/* Reference Documents Picker */}
           {refDocuments.length > 0 && (
             <div>

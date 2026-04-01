@@ -56,6 +56,7 @@ import { ProductDataTableService } from "@/services/productDataTableService";
 import { useCompanyId } from "@/hooks/useCompanyId";
 import { useTranslation } from "@/hooks/useTranslation";
 import { CreateFamilyDialog } from "./CreateFamilyDialog";
+import { CopyProductDialog } from "./CopyProductDialog";
 
 interface ProductGridProps {
   products: any[];
@@ -86,6 +87,8 @@ export function ProductDataTable({ products, getProductCardBg, refetch }: Produc
   const [selectedPlatformOption, setSelectedPlatformOption] = useState<string>("all");
   const [isUpdating, setIsUpdating] = useState<boolean>(false);
   const [showCreateFamilyDialog, setShowCreateFamilyDialog] = useState(false);
+  const [copyDialogOpen, setCopyDialogOpen] = useState(false);
+  const [copyTargetProduct, setCopyTargetProduct] = useState<any>(null);
   const companyId = useCompanyId();
   const queryClient = useQueryClient();
   
@@ -439,53 +442,150 @@ export function ProductDataTable({ products, getProductCardBg, refetch }: Produc
     return Array.from(values).sort();
   };
 
-  const handleCopyProduct = async (product: any) => {
+  const handleCopyProduct = (product: any) => {
+    setCopyTargetProduct(product);
+    setCopyDialogOpen(true);
+  };
+
+  const handleCopyConfirm = async (targetCompanyId: string, attachToFamily: boolean, customName?: string) => {
+    const product = copyTargetProduct;
+    if (!product) return;
+
     try {
-      // Determine copy name with incrementing suffix
-      const baseName = product.name.replace(/\s*copy\d*$/i, '').trim();
-      
-      // Find existing copies to determine next number
-      const existingCopies = products.filter(p => {
-        const name = p.name || '';
-        return name === `${baseName} copy` || /^.+ copy\d+$/i.test(name) && name.startsWith(baseName);
-      });
-      
+      // Fetch full product data from Supabase (table row may only have selected columns)
+      const { data: fullProduct, error: fetchError } = await supabase
+        .from('products')
+        .select('*')
+        .eq('id', product.id)
+        .single();
+
+      if (fetchError || !fullProduct) throw fetchError || new Error('Product not found');
+
+      // Use custom name if provided, otherwise auto-generate with incrementing suffix
       let copyName: string;
-      if (existingCopies.length === 0) {
-        // Check if "baseName copy" already exists
-        const hasCopy = products.some(p => p.name === `${baseName} copy`);
-        copyName = hasCopy ? `${baseName} copy2` : `${baseName} copy`;
+      if (customName) {
+        copyName = customName;
       } else {
-        // Find highest copy number
-        let maxNum = 1;
-        existingCopies.forEach(p => {
-          const match = p.name.match(/copy(\d+)$/i);
-          if (match) {
-            maxNum = Math.max(maxNum, parseInt(match[1]));
-          }
+        const baseName = fullProduct.name.replace(/\s*copy\d*$/i, '').trim();
+        const existingCopies = products.filter(p => {
+          const name = p.name || '';
+          return name === `${baseName} copy` || (/^.+ copy\d+$/i.test(name) && name.startsWith(baseName));
         });
-        copyName = `${baseName} copy${maxNum + 1}`;
+
+        if (existingCopies.length === 0) {
+          const hasCopy = products.some(p => p.name === `${baseName} copy`);
+          copyName = hasCopy ? `${baseName} copy2` : `${baseName} copy`;
+        } else {
+          let maxNum = 1;
+          existingCopies.forEach(p => {
+            const match = p.name.match(/copy(\d+)$/i);
+            if (match) maxNum = Math.max(maxNum, parseInt(match[1]));
+          });
+          copyName = `${baseName} copy${maxNum + 1}`;
+        }
       }
 
-      // Copy product - strip non-column fields (joins, computed)
+      // Strip system/auto-generated fields, keep everything else
       const {
-        id, created_at, inserted_at, updated_at,
-        company, profiles, lifecycle_phases,
+        id: _id,
+        created_at: _ca,
+        inserted_at: _ia,
+        updated_at: _ua,
+        archived_at: _aa,
+        archived_by: _ab,
+        company_id: _cid,
+        name: _name,
+        parent_product_id: _ppid,
+        master_product_id: _mpid,
+        // Strip joined/computed fields that may appear from queries
+        company: _company,
+        profiles: _profiles,
+        lifecycle_phases: _lp,
         ...productData
-      } = product;
-      
-      const { error } = await supabase
-        .from('products')
-        .insert({
-          ...productData,
-          name: copyName,
-        });
+      } = fullProduct as any;
 
-      if (error) throw error;
+      // Set target company and name
+      (productData as any).company_id = targetCompanyId;
+      (productData as any).name = copyName;
+
+      // Handle family attachment
+      if (!attachToFamily) {
+        (productData as any).is_master_device = false;
+        (productData as any).is_master_product = false;
+        (productData as any).is_variant = false;
+      } else {
+        (productData as any).parent_product_id = fullProduct.parent_product_id || null;
+        (productData as any).master_product_id = fullProduct.master_product_id || null;
+      }
+
+      // Insert the copied product and get the new ID
+      const { data: newProduct, error } = await supabase
+        .from('products')
+        .insert(productData)
+        .select('id')
+        .single();
+
+      if (error || !newProduct) throw error || new Error('Failed to insert copy');
+
+      const newProductId = newProduct.id;
+
+      // Copy device_components
+      const { data: components } = await supabase
+        .from('device_components')
+        .select('*')
+        .eq('product_id', product.id);
+
+      if (components && components.length > 0) {
+        const idMap = new Map<string, string>();
+
+        // Insert components with new product_id, track old->new ID mapping
+        for (const comp of components) {
+          const { id: oldId, created_at, updated_at, ...compData } = comp;
+          const { data: newComp } = await supabase
+            .from('device_components')
+            .insert({ ...compData, product_id: newProductId })
+            .select('id')
+            .single();
+          if (newComp) idMap.set(oldId, newComp.id);
+        }
+
+        // Copy device_component_hierarchy with remapped IDs
+        const { data: hierarchy } = await supabase
+          .from('device_component_hierarchy')
+          .select('*')
+          .in('parent_id', Array.from(idMap.keys()));
+
+        if (hierarchy && hierarchy.length > 0) {
+          const newHierarchy = hierarchy
+            .filter(h => idMap.has(h.parent_id) && idMap.has(h.child_id))
+            .map(h => ({
+              parent_id: idMap.get(h.parent_id)!,
+              child_id: idMap.get(h.child_id)!,
+            }));
+          if (newHierarchy.length > 0) {
+            await supabase.from('device_component_hierarchy').insert(newHierarchy);
+          }
+        }
+      }
+
+      // Copy feature_user_needs
+      const { data: featureNeeds } = await supabase
+        .from('feature_user_needs')
+        .select('*')
+        .eq('product_id', product.id);
+
+      if (featureNeeds && featureNeeds.length > 0) {
+        const newFeatureNeeds = featureNeeds.map(({ id, created_at, ...fn }) => ({
+          ...fn,
+          product_id: newProductId,
+        }));
+        await supabase.from('feature_user_needs').insert(newFeatureNeeds);
+      }
 
       toast.success(`Created copy: ${copyName}`);
       if (refetch) await refetch();
       queryClient.invalidateQueries({ queryKey: ['products'] });
+      queryClient.invalidateQueries({ queryKey: ['sidebarCompanyProducts'] });
     } catch (error) {
       console.error('Error copying product:', error);
       toast.error('Failed to create copy');
@@ -1379,6 +1479,14 @@ export function ProductDataTable({ products, getProductCardBg, refetch }: Produc
           basic_udi_di: r.original.basic_udi_di,
         }))}
         refetch={refetch}
+      />
+
+      <CopyProductDialog
+        open={copyDialogOpen}
+        onOpenChange={setCopyDialogOpen}
+        product={copyTargetProduct}
+        currentCompanyId={companyId || ''}
+        onConfirm={handleCopyConfirm}
       />
     </div>
   );

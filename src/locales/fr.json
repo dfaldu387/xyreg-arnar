@@ -3119,7 +3119,11 @@
     "communications": "Communications",
     "unreadMessages": "Messages non lus",
     "highPriority": "Haute priorité",
+    "awaitingResponse": "En attente de réponse",
+    "onlineUsers": "Utilisateurs en ligne",
     "activeThreads": "Fils actifs",
+    "users": "Utilisateurs",
+    "myThreads": "Mes fils",
     "recentMessages": "Messages récents",
     "new": "Nouveau",
     "noRecentCommunications": "Aucune communication récente",
@@ -3386,7 +3390,9 @@
       "pricingStrategy": "Stratégie de tarification",
       "pricingStrategyDesc": "Définissez et gérez les stratégies de tarification sur l'ensemble de votre portefeuille de produits.",
       "investors": "Investisseurs",
-      "investorsDesc": "Gérez facilement les relations avec les investisseurs et les data rooms pour la due diligence."
+      "investorsDesc": "Gérez facilement les relations avec les investisseurs et les data rooms pour la due diligence.",
+      "fundingGrants": "Financements & Subventions",
+      "fundingGrantsDesc": "Évaluez l'éligibilité, suivez les candidatures et gérez la documentation pour les programmes de financement EU, US et nationaux."
     },
     "blueprint": {
       "title": "Plan d'entreprise",
@@ -4142,7 +4148,7 @@
     "failedToLoad": "Échec du chargement des données d'analyse des écarts",
     "breadcrumbs": {
       "clientCompass": "Boussole clients",
-      "complianceInstances": "Instances de conformité",
+      "complianceInstances": "Réglementaire & Soumissions",
       "gapAnalysis": "Analyse des écarts"
     },
     "actions": {
@@ -10576,7 +10582,7 @@
     "archives": "Archives",
     "tabs": {
       "lifecyclePhases": "Phases du cycle de vie",
-      "complianceInstances": "Instances de conformité",
+      "complianceInstances": "Réglementaire & Soumissions",
       "clinicalTrials": "Essais cliniques",
       "templates": "Modèles",
       "users": "Utilisateurs",
@@ -13551,7 +13557,7 @@
       "resolvedThisMonth": "résolus ce mois-ci",
       "criticalPathFormula": "Nombre(Éléments sur chemin critique + En retard)",
       "criticalPathDescription": "Nombre d'éléments sur le chemin critique ou en retard nécessitant une attention immédiate",
-      "complianceInstances": "Instances de conformité",
+      "complianceInstances": "Réglementaire & Soumissions",
       "totalTrackedItems": "Éléments suivis au total",
       "completionRate": "taux d'achèvement",
       "complianceFormula": "Nombre total d'instances de conformité",
@@ -14028,7 +14034,7 @@
   },
   "pageHeader": {
     "executiveDashboard": "Tableau de bord exécutif",
-    "complianceInstances": "Instances de conformité",
+    "complianceInstances": "Réglementaire & Soumissions",
     "xyregGenesis": "Xyreg Genesis",
     "businessCase": "Cas d'affaires",
     "commercialIntelligence": "Intelligence commerciale",
@@ -15652,10 +15658,21 @@
     "qualityAssurancePreview": "Assurance qualité :",
     "engineeringLead": "Responsable technique",
     "qualityManager": "Responsable qualité",
-    "independentReviewer": "Réviseur indépendant"
+    "independentReviewer": "Réviseur indépendant",
+    "productPageTitle": "Revue de conception",
+    "productPageSubtitle": "ISO 13485 §7.3.5 — Revues de conception formelles avec référencement et verrouillage des preuves",
+    "totalReviews": "Total des revues",
+    "completedBaselines": "Références complétées",
+    "openFindings": "Constatations ouvertes",
+    "noReviewsYet": "Aucune revue de conception pour le moment. Créez-en une pour commencer.",
+    "baseline": "Référence",
+    "findings": "Constatations",
+    "deleteConfirm": "Supprimer \"{{title}}\" ? Cette action est irréversible.",
+    "deleteFailed": "Échec de la suppression",
+    "deleteSuccess": "Revue de conception supprimée"
   },
   "deviceProcessEngine": {
-    "deviceStatusTab": "Statut du dispositif",
+    "deviceStatusTab": "Tableau de bord du dispositif",
     "processEngineTab": "Moteur de processus du dispositif",
     "title": "Moteur de processus du dispositif",
     "iso13485": "(ISO 13485)",

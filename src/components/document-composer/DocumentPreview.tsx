@@ -345,7 +345,7 @@ export function DocumentPreview({
                       {/* Scope Column */}
                       <div className="col-span-2 flex items-center min-w-0">
                         <span className="text-xs text-muted-foreground truncate">
-                          {doc.product_context?.id || (doc.product_id ? 'Product-specific' : 'Company-wide')}
+                          {doc.product_context?.name || (doc.product_id ? 'Product-specific' : 'Company-wide')}
                         </span>
                       </div>
 

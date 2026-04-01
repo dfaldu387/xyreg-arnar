@@ -1,7 +1,8 @@
 import { useState, useEffect, useMemo, useCallback, useContext } from 'react';
 import { Editor as WxEditor, registerEditorItem } from '@svar-ui/react-editor';
 import { Locale, RichSelect, Slider, Counter, TwoState } from '@svar-ui/react-core';
-import { defaultEditorItems, normalizeDates } from '@svar-ui/gantt-store';
+import { defaultEditorItems } from '@svar-ui/gantt-store';
+import { normalizeDates } from '../helpers/normalizeDates';
 import { dateToString, locale } from '@svar-ui/lib-dom';
 import { en } from '@svar-ui/gantt-locales';
 import { en as coreEn } from '@svar-ui/core-locales';

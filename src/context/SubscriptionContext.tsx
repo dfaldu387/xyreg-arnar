@@ -348,7 +348,6 @@ export function SubscriptionProvider({ children }: SubscriptionProviderProps) {
             if (expired) {
               // Status is cancelled/expired AND past expires_at → lock all menus
               setIsSubscriptionExpired(true);
-              console.log('[SubscriptionContext] Subscription expired at', expiresAt?.toISOString(), '(status:', companyPlanStatus, ') — locking menus');
               if (plan.menu_access) {
                 const lockedAccess: Record<string, boolean | string> = {};
                 Object.keys(plan.menu_access).forEach((key) => {
@@ -370,12 +369,10 @@ export function SubscriptionProvider({ children }: SubscriptionProviderProps) {
               }
             }
           } else {
-            console.log('[SubscriptionContext] No plan entry found - granting full access');
             setNewPricingMenuAccess(null);
             setIsSubscriptionExpired(false);
           }
         } else {
-          console.log('[SubscriptionContext] No company found - granting full access');
           setNewPricingMenuAccess(null);
           setIsSubscriptionExpired(false);
         }

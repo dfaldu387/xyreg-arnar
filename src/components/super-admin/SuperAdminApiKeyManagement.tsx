@@ -65,7 +65,7 @@ function SuperAdminApiKeyManagement() {
   const [statusFilter, setStatusFilter] = useState('all');
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage, setItemsPerPage] = useState(10);
+  const [itemsPerPage, setItemsPerPage] = useState(20);
 
   // Modal state
   const [selectedCompanyForModal, setSelectedCompanyForModal] = useState<CompanyApiKeyInfo | null>(null);
@@ -622,38 +622,23 @@ function SuperAdminApiKeyManagement() {
   };
 
   return (
-    <div className="space-y-5 pt-4 px-2">
-      {/* Header */}
-      <div className="flex items-center justify-between pr-2">
-        <div className="flex items-center gap-4">
-          <div className="p-3 rounded-xl bg-primary/10">
-            <Key className="w-7 h-7 text-primary" />
-          </div>
-          <div>
-            <h2 className="text-2xl font-bold tracking-tight">API Key Management</h2>
-            <p className="text-sm text-muted-foreground">
-              Monitor and manage API keys across all companies
-            </p>
-          </div>
+    <div className="w-full px-4 py-3 space-y-3">
+      {/* Header — compact */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">API Key Management</h1>
+          <p className="text-sm text-muted-foreground mt-1">
+            {counts.total} companies — {counts.withKeys} with API keys
+          </p>
         </div>
-        <div className="flex items-center gap-2">
-          <Button size="sm" onClick={openBulkModal} className="gap-1.5">
-            <Zap className="w-3.5 h-3.5" />
-            Bulk Add Key
-          </Button>
-          {/* <Button variant="outline" size="sm" onClick={() => setShowKeys(!showKeys)} className="gap-1.5">
-            {showKeys ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-            {showKeys ? 'Hide Keys' : 'Show Keys'}
-          </Button> */}
-          {/* <Button onClick={loadCompaniesApiKeys} variant="ghost" size="sm" className="gap-1.5">
-            <RefreshCw className="w-3.5 h-3.5" />
-            Refresh
-          </Button> */}
-        </div>
+        <Button variant="outline" size="sm" onClick={openBulkModal} className="bg-background gap-1.5">
+          <Zap className="w-3.5 h-3.5" />
+          Bulk Add Key
+        </Button>
       </div>
 
       {/* Summary Cards — compact stat tiles */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 pr-2">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
         {/* Total Companies tile */}
         <div className="relative overflow-hidden rounded-xl border bg-card p-4 border-l-4 border-l-primary">
           <div className="flex items-center gap-2 mb-2">
@@ -691,48 +676,47 @@ function SuperAdminApiKeyManagement() {
       </div>
 
       {/* Main Table Card */}
-      <div className="pb-2 pr-2">
-      <Card className="overflow-hidden">
-        {/* Toolbar: Search + Filters */}
-        <div className="flex items-center gap-3 px-5 py-3 border-b bg-muted/30">
-          <div className="relative flex-1 max-w-lg">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground/60 w-4 h-4" />
-            <Input
-              placeholder="Search companies..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-9 h-9 bg-background border-muted-foreground/20 focus-visible:ring-1"
-            />
+      <div className="rounded-lg space-y-3">
+      {/* Filters */}
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="flex-1 min-w-[220px] max-w-sm">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Search companies..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-9 h-9 bg-background"
+              />
+            </div>
           </div>
-          <div className="flex items-center gap-2 ml-auto">
-            <Select value={statusFilter} onValueChange={(newValue) => setStatusFilter(newValue)}>
-              <SelectTrigger className="w-36 h-9 text-xs bg-background">
-                <SelectValue placeholder="All Status" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Status</SelectItem>
-                <SelectItem value="configured">Configured</SelectItem>
-                <SelectItem value="not-configured">Not Configured</SelectItem>
-              </SelectContent>
-            </Select>
-            <Select value={aiFilter} onValueChange={setAiFilter}>
-              <SelectTrigger className="w-40 h-9 text-xs bg-background">
-                <SelectValue placeholder="All AI Models" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All AI Models</SelectItem>
-                <SelectItem value="gemini">Gemini</SelectItem>
-                <SelectItem value="openai">OpenAI</SelectItem>
-                <SelectItem value="anthropic">Anthropic</SelectItem>
-                <SelectItem value="serpapi">SerpAPI</SelectItem>
-                <SelectItem value="google_vertex">Google Vertex AI</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+          <Select value={statusFilter} onValueChange={(newValue) => setStatusFilter(newValue)}>
+            <SelectTrigger className="w-[150px] h-9">
+              <SelectValue placeholder="All Status" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Status</SelectItem>
+              <SelectItem value="configured">Configured</SelectItem>
+              <SelectItem value="not-configured">Not Configured</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={aiFilter} onValueChange={setAiFilter}>
+            <SelectTrigger className="w-[160px] h-9">
+              <SelectValue placeholder="All AI Models" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All AI Models</SelectItem>
+              <SelectItem value="gemini">Gemini</SelectItem>
+              <SelectItem value="openai">OpenAI</SelectItem>
+              <SelectItem value="anthropic">Anthropic</SelectItem>
+              <SelectItem value="serpapi">SerpAPI</SelectItem>
+              <SelectItem value="google_vertex">Google Vertex AI</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
 
-        {/* Table */}
-        <CardContent className="p-0">
+      {/* Table */}
+      <div className="border rounded-lg overflow-hidden bg-background">
           <Table>
             <TableHeader>
               <TableRow className="bg-muted/20 hover:bg-muted/20">
@@ -828,57 +812,54 @@ function SuperAdminApiKeyManagement() {
               <p className="text-xs mt-1 text-muted-foreground/70">Try adjusting your search or filters</p>
             </div>
           )}
-        </CardContent>
-      </Card>
 
-      {/* Pagination */}
-      {totalPages > 1 && (
-        <div className="flex items-center justify-between pl-4 pr-20 py-3">
-          <div className="flex items-center gap-12">
-            <span className="text-md text-muted-foreground">
-              {startIndex + 1}-{Math.min(endIndex, filteredCompanies.length)} of {filteredCompanies.length}
-            </span>
-            <div className="flex items-center gap-1.5">
-              <span className="text-md text-muted-foreground">Rows:</span>
-              <Select value={itemsPerPage.toString()} onValueChange={(value) => setItemsPerPage(Number(value))}>
-                <SelectTrigger className="w-24 h-10 text-md">
+
+        {/* Pagination */}
+        <div className="flex items-center justify-between px-16 py-2.5 border-t text-sm text-slate-700">
+          <span>
+            Showing {filteredCompanies.length} companies · Page {currentPage}
+          </span>
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
+              <span>Rows per page</span>
+              <Select value={itemsPerPage.toString()} onValueChange={(value) => { setItemsPerPage(Number(value)); setCurrentPage(1); }}>
+                <SelectTrigger className="w-[65px] h-8">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="5">5</SelectItem>
                   <SelectItem value="10">10</SelectItem>
-                  <SelectItem value="25">25</SelectItem>
+                  <SelectItem value="20">20</SelectItem>
                   <SelectItem value="50">50</SelectItem>
                   <SelectItem value="100">100</SelectItem>
                 </SelectContent>
               </Select>
             </div>
-          </div>
-          <div className="flex items-center gap-1">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
-              disabled={currentPage === 1}
-              className="h-7 px-2 text-md"
-            >
-              Prev
-            </Button>
-            <span className="text-md text-muted-foreground px-2">
-              {currentPage} / {totalPages}
-            </span>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
-              disabled={currentPage === totalPages}
-              className="h-7 px-2 text-md"
-            >
-              Next
-            </Button>
+            <span>Page {currentPage}</span>
+            <div className="flex items-center gap-1">
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-8 w-8"
+                disabled={currentPage === 1}
+                onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
+              >
+                <span className="sr-only">Previous</span>
+                ‹
+              </Button>
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-8 w-8"
+                disabled={currentPage >= totalPages}
+                onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
+              >
+                <span className="sr-only">Next</span>
+                ›
+              </Button>
+            </div>
           </div>
         </div>
-      )}
+      </div>
       </div>
 
       {/* Bulk Add Key Modal */}

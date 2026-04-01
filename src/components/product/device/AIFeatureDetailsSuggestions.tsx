@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Sparkles, Check, Plus, Loader2 } from 'lucide-react';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { Sparkles, Check, Plus, Loader2, Database } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 
@@ -55,22 +56,39 @@ interface AIFieldTriggerProps {
   tooltip?: string;
 }
 
-export function AIFieldTrigger({ isLoading, onClick, disabled }: AIFieldTriggerProps) {
+export function AIFieldTrigger({ isLoading, onClick, disabled, tooltip }: AIFieldTriggerProps) {
   return (
-    <Button
-      type="button"
-      variant="ghost"
-      size="icon"
-      className="h-6 w-6 text-amber-600 hover:text-amber-700 hover:bg-amber-100 dark:text-amber-400 dark:hover:bg-amber-900/30"
-      onClick={onClick}
-      disabled={disabled || isLoading}
-    >
-      {isLoading ? (
-        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-      ) : (
-        <Sparkles className="h-3.5 w-3.5" />
-      )}
-    </Button>
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-6 w-6 text-amber-600 hover:text-amber-700 hover:bg-amber-100 dark:text-amber-400 dark:hover:bg-amber-900/30"
+            onClick={onClick}
+            disabled={disabled || isLoading}
+          >
+            {isLoading ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Sparkles className="h-3.5 w-3.5" />
+            )}
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent side="top" className="max-w-[250px]">
+          <div className="space-y-1">
+            <p className="font-medium text-xs">AI Generate</p>
+            {tooltip && (
+              <p className="text-xs text-muted-foreground flex items-center gap-1">
+                <Database className="h-3 w-3 shrink-0" />
+                Using: {tooltip}
+              </p>
+            )}
+          </div>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
   );
 }
 

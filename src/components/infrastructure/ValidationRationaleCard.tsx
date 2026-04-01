@@ -1,13 +1,28 @@
 import React, { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { ChevronDown, ChevronRight, Lightbulb, CheckCircle2, AlertTriangle, XCircle, Clock, MinusCircle } from 'lucide-react';
+import { ChevronDown, ChevronRight, Lightbulb, CheckCircle2, AlertTriangle, XCircle, Clock, MinusCircle, ClipboardCheck, Monitor } from 'lucide-react';
 import { useTranslation } from '@/hooks/useTranslation';
+import { ValidationEvidenceLinker } from './ValidationEvidenceLinker';
+import { ValidationSignatureBlock, type SignatureMeaning } from './ValidationSignatureBlock';
+import { ValidationTestStepChecklist, type TestStepResult } from './ValidationTestStepChecklist';
+import { Building2, UserCheck } from 'lucide-react';
+
+export interface TestEnvironmentData {
+  xyregVersion?: string;
+  instanceUrl?: string;
+  browser?: string;
+  os?: string;
+  network?: string;
+}
+
+export type ResponsibilityType = 'customer_authored' | 'vendor_supplied';
 
 export type ValidationVerdict =
   | 'acceptable'
@@ -15,6 +30,15 @@ export type ValidationVerdict =
   | 'not_acceptable'
   | 'not_applicable'
   | 'deferred';
+
+interface SignatureData {
+  initiatorId?: string;
+  initiatorSignedAt?: string;
+  initiatorMeaning?: SignatureMeaning;
+  approverId?: string;
+  approverSignedAt?: string;
+  approverMeaning?: SignatureMeaning;
+}
 
 interface ValidationRationaleCardProps {
   title: string;
@@ -26,12 +50,27 @@ interface ValidationRationaleCardProps {
   deviationsNoted?: string;
   riskAccepted?: boolean;
   riskRationale?: string;
+  acceptanceCriteria?: string;
+  testEnvironment?: TestEnvironmentData;
+  evidenceDocIds?: string[];
+  companyId?: string;
+  responsibilityType?: ResponsibilityType;
+  testSteps?: { step: string; expectedResult: string }[];
+  testStepResults?: TestStepResult[];
+  onTestStepsChange?: (results: TestStepResult[]) => void;
+  phase?: 'iq' | 'oq' | 'pq';
+  signatures?: SignatureData;
+  onSignAsInitiator?: (meaning: SignatureMeaning) => void;
+  onSignAsApprover?: (meaning: SignatureMeaning, approverId: string) => void;
   onVerdictChange: (verdict: ValidationVerdict) => void;
   onReasoningChange: (reasoning: string) => void;
   onEvidenceNotesChange?: (notes: string) => void;
+  onLinkDoc?: (docId: string) => void;
+  onUnlinkDoc?: (docId: string) => void;
   onDeviationsChange?: (deviations: string) => void;
   onRiskAcceptedChange?: (accepted: boolean) => void;
   onRiskRationaleChange?: (rationale: string) => void;
+  onTestEnvironmentChange?: (env: TestEnvironmentData) => void;
   showDeviations?: boolean;
   showRiskAcceptance?: boolean;
   disabled?: boolean;
@@ -57,6 +96,21 @@ const VERDICT_LABEL_KEYS: Record<ValidationVerdict, string> = {
   deferred: 'infrastructure.rationaleCard.deferred',
 };
 
+const RESPONSIBILITY_BANNERS: Record<ResponsibilityType, { icon: React.ReactNode; label: string; description: string; className: string }> = {
+  customer_authored: {
+    icon: <UserCheck className="h-4 w-4" />,
+    label: 'Customer Responsibility',
+    description: 'Your team performs and documents this qualification step',
+    className: 'bg-emerald-50 border-emerald-200 text-emerald-800',
+  },
+  vendor_supplied: {
+    icon: <Building2 className="h-4 w-4" />,
+    label: 'Vendor Evidence Supplied',
+    description: 'Review and accept XYREG\'s pre-executed test results (Rationale Cards)',
+    className: 'bg-blue-50 border-blue-200 text-blue-800',
+  },
+};
+
 export function ValidationRationaleCard({
   title,
   description,
@@ -67,12 +121,27 @@ export function ValidationRationaleCard({
   deviationsNoted = '',
   riskAccepted,
   riskRationale = '',
+  acceptanceCriteria,
+  testEnvironment = {},
+  evidenceDocIds = [],
+  companyId,
+  responsibilityType,
+  testSteps,
+  testStepResults,
+  onTestStepsChange,
+  phase,
+  signatures,
+  onSignAsInitiator,
+  onSignAsApprover,
   onVerdictChange,
   onReasoningChange,
   onEvidenceNotesChange,
+  onLinkDoc,
+  onUnlinkDoc,
   onDeviationsChange,
   onRiskAcceptedChange,
   onRiskRationaleChange,
+  onTestEnvironmentChange,
   showDeviations = false,
   showRiskAcceptance = false,
   disabled = false,
@@ -119,8 +188,107 @@ export function ValidationRationaleCard({
 
         <CollapsibleContent>
           <CardContent className="pt-0 px-4 pb-4 space-y-4">
+            {/* Responsibility Banner */}
+            {responsibilityType && (
+              <div className={`flex items-start gap-2 p-3 rounded-md border ${RESPONSIBILITY_BANNERS[responsibilityType].className}`}>
+                {RESPONSIBILITY_BANNERS[responsibilityType].icon}
+                <div>
+                  <p className="text-xs font-semibold">{RESPONSIBILITY_BANNERS[responsibilityType].label}</p>
+                  <p className="text-xs opacity-80">{RESPONSIBILITY_BANNERS[responsibilityType].description}</p>
+                </div>
+              </div>
+            )}
+
             {/* Description */}
             <p className="text-sm text-muted-foreground">{description}</p>
+
+            {/* Test Environment */}
+            <div className="space-y-2">
+              <Label className="text-sm font-medium flex items-center gap-1.5">
+                <Monitor className="h-3.5 w-3.5 text-muted-foreground" />
+                Test Environment
+              </Label>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1">
+                  <Label className="text-xs text-muted-foreground">XYREG Version</Label>
+                  <Input
+                    value={testEnvironment?.xyregVersion || ''}
+                    readOnly
+                    disabled={disabled}
+                    className="h-8 text-sm bg-muted/50 cursor-default"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs text-muted-foreground">Instance URL</Label>
+                  <Input
+                    value={testEnvironment?.instanceUrl || ''}
+                    readOnly
+                    disabled={disabled}
+                    className="h-8 text-sm bg-muted/50 cursor-default"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs text-muted-foreground">Browser & Version</Label>
+                  <Input
+                    value={testEnvironment?.browser || ''}
+                    onChange={(e) => onTestEnvironmentChange?.({ ...testEnvironment, browser: e.target.value })}
+                    placeholder="e.g., Chrome 124"
+                    disabled={disabled}
+                    className="h-8 text-sm"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs text-muted-foreground">Operating System</Label>
+                  <Input
+                    value={testEnvironment?.os || ''}
+                    onChange={(e) => onTestEnvironmentChange?.({ ...testEnvironment, os: e.target.value })}
+                    placeholder="e.g., Windows 11"
+                    disabled={disabled}
+                    className="h-8 text-sm"
+                  />
+                </div>
+                <div className="col-span-2 space-y-1">
+                  <Label className="text-xs text-muted-foreground">Network / Access</Label>
+                  <Select
+                    value={testEnvironment?.network || ''}
+                    onValueChange={(v) => onTestEnvironmentChange?.({ ...testEnvironment, network: v })}
+                    disabled={disabled}
+                  >
+                    <SelectTrigger className="h-8 text-sm">
+                      <SelectValue placeholder="Select network type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Corporate LAN">Corporate LAN</SelectItem>
+                      <SelectItem value="Corporate VPN">Corporate VPN</SelectItem>
+                      <SelectItem value="Public Internet">Public Internet</SelectItem>
+                      <SelectItem value="Air-gapped Network">Air-gapped Network</SelectItem>
+                      <SelectItem value="Other">Other</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            </div>
+
+            {/* Acceptance Criteria (read-only) */}
+            {acceptanceCriteria && (
+              <div className="flex items-start gap-2 p-3 rounded-md bg-blue-50 border border-blue-200">
+                <ClipboardCheck className="h-4 w-4 text-blue-600 mt-0.5 shrink-0" />
+                <div>
+                  <p className="text-xs font-semibold text-blue-800 mb-0.5">Acceptance Criteria</p>
+                  <p className="text-xs text-blue-700">{acceptanceCriteria}</p>
+                </div>
+              </div>
+            )}
+
+            {/* Test Step Checklist */}
+            {testSteps && testSteps.length > 0 && onTestStepsChange && (
+              <ValidationTestStepChecklist
+                steps={testSteps}
+                results={testStepResults || []}
+                onChange={onTestStepsChange}
+                disabled={disabled}
+              />
+            )}
 
             {/* Critical Thinking Prompt */}
             <div className="flex items-start gap-2 p-3 rounded-md bg-amber-50 border border-amber-200">
@@ -220,18 +388,42 @@ export function ValidationRationaleCard({
               </div>
             )}
 
-            {/* Evidence Notes */}
-            <div className="space-y-1.5">
-              <Label className="text-sm font-medium">{lang('infrastructure.rationaleCard.evidenceNotes')}</Label>
-              <Textarea
-                value={evidenceNotes}
-                onChange={(e) => onEvidenceNotesChange?.(e.target.value)}
-                placeholder={lang('infrastructure.rationaleCard.evidencePlaceholder')}
-                rows={2}
+            {/* Evidence & Document References */}
+            {companyId && onLinkDoc && onUnlinkDoc ? (
+              <ValidationEvidenceLinker
+                linkedDocIds={evidenceDocIds}
+                onLinkDoc={onLinkDoc}
+                onUnlinkDoc={onUnlinkDoc}
+                freeTextNotes={evidenceNotes}
+                onNotesChange={(notes) => onEvidenceNotesChange?.(notes)}
+                companyId={companyId}
                 disabled={disabled}
-                className="resize-none"
               />
-            </div>
+            ) : (
+              <div className="space-y-1.5">
+                <Label className="text-sm font-medium">{lang('infrastructure.rationaleCard.evidenceNotes')}</Label>
+                <Textarea
+                  value={evidenceNotes}
+                  onChange={(e) => onEvidenceNotesChange?.(e.target.value)}
+                  placeholder={lang('infrastructure.rationaleCard.evidencePlaceholder')}
+                  rows={2}
+                  disabled={disabled}
+                  className="resize-none"
+                />
+              </div>
+            )}
+
+            {/* E-Signature Block */}
+            {phase && onSignAsInitiator && onSignAsApprover && (
+              <ValidationSignatureBlock
+                phase={phase}
+                signatures={signatures || {}}
+                companyId={companyId}
+                onSignAsInitiator={onSignAsInitiator}
+                onSignAsApprover={onSignAsApprover}
+                disabled={disabled}
+              />
+            )}
           </CardContent>
         </CollapsibleContent>
       </Card>

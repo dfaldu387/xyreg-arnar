@@ -13,6 +13,7 @@ import { FeasibilityStudiesPage } from '@/components/commercial/FeasibilityStudi
 import { CompanyVentureBlueprint } from '@/components/commercial/CompanyVentureBlueprint';
 import { CompanyBusinessCanvas } from '@/components/commercial/CompanyBusinessCanvas';
 import { InvestorsPage } from '@/components/investors/InvestorsPage';
+import { FundingGrantsTab } from '@/components/commercial/funding/FundingGrantsTab';
 import { useCompanyId } from '@/hooks/useCompanyId';
 import { ConsistentPageHeader } from '@/components/layout/ConsistentPageHeader';
 import { buildCompanyBreadcrumbs } from '@/utils/breadcrumbUtils';
@@ -74,6 +75,12 @@ const TAB_CONFIG_BASE = [
     icon: FileKey,
     descriptionKey: 'commercial.tabs.investorsDesc'
   },
+  {
+    value: 'funding-grants',
+    labelKey: 'commercial.tabs.fundingGrants',
+    menuAccessKey: PORTFOLIO_MENU_ACCESS.COMMERCIAL_FUNDING_GRANTS,
+    descriptionKey: 'commercial.tabs.fundingGrantsDesc'
+  },
 ];
 
 export default function CompanyCommercialPage() {
@@ -121,7 +128,8 @@ export default function CompanyCommercialPage() {
     'commercial-performance',
     'variance-analysis',
     'pricing-strategy',
-    'investors'
+    'investors',
+    'funding-grants'
   ];
 
   // Render tab content - shows preview mode or upgrade component based on tab config
@@ -232,7 +240,7 @@ export default function CompanyCommercialPage() {
         <TooltipProvider>
         <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-6">
           <div className="overflow-x-auto w-full">
-          <TabsList className="inline-flex w-max gap-2 p-1 xl:w-full xl:grid xl:grid-cols-8">
+          <TabsList className="inline-flex w-max gap-2 p-1 xl:w-full xl:grid xl:grid-cols-9">
             {TAB_CONFIG.map((tab) => {
               const IconComponent = tab.icon;
               const supportsPreview = PREVIEW_MODE_TABS.includes(tab.value);
@@ -329,6 +337,10 @@ export default function CompanyCommercialPage() {
 
           <TabsContent value="investors" className="space-y-6">
             {renderTabContent('investors', <InvestorsPage companyId={companyId} companyName={decodeURIComponent(companyName || '')} />)}
+          </TabsContent>
+
+          <TabsContent value="funding-grants" className="space-y-6">
+            {renderTabContent('funding-grants', <FundingGrantsTab companyId={companyId} />)}
           </TabsContent>
         </Tabs>
         </TooltipProvider>

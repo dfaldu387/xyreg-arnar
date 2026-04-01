@@ -90,19 +90,25 @@ export function SidebarContextSwitcher({
         .eq('is_active', true)
         .limit(1);
 
-      const allowedIds = matrixRows?.[0]?.product_ids || [];
+      const matrixData = matrixRows?.[0] || null;
 
-      if (!allowedIds.includes(lastProductId)) {
-        // Last viewed product is no longer accessible — try first accessible product
-        localStorage.removeItem(lastProductKey);
+      // Only enforce restriction if an active matrix record exists
+      if (matrixData) {
+        const allowedIds = new Set<string>(matrixData.product_ids || []);
 
-        if (allowedIds.length > 0) {
-          navigate(`/app/product/${allowedIds[0]}`);
-        } else {
-          toast.error('You do not have access to any devices');
+        if (!allowedIds.has(lastProductId)) {
+          // Last viewed product is no longer accessible — try first accessible product
+          localStorage.removeItem(lastProductKey);
+
+          if (allowedIds.size > 0) {
+            navigate(`/app/product/${Array.from(allowedIds)[0]}`);
+          } else {
+            toast.error('You do not have access to any devices');
+          }
+          return;
         }
-        return;
       }
+      // No active matrix record means unrestricted access
     }
 
     navigate(`/app/product/${lastProductId}`);

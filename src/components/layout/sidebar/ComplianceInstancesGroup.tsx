@@ -30,7 +30,7 @@ export function ComplianceInstancesGroup({
 }: ComplianceInstancesGroupProps) {
   const { expandedMenus, toggleMenuExpansion, setAutoExpansion } = useSidebarState();
   const { state: sidebarState } = useSidebar();
-  const menuName = "Compliance Instances";
+  const menuName = "Enterprise Compliance";
   const isCollapsed = sidebarState === "collapsed";
 
   // Determine if any compliance item is active
@@ -117,14 +117,14 @@ export function ComplianceInstancesGroup({
         <SidebarMenuButton 
           asChild
           isActive={isComplianceInstancesActive}
-          tooltip="Compliance Instances" 
+          tooltip="Enterprise Compliance"
           className="flex-1 px-3 py-2.5 font-medium text-sm"
         >
           <Link to={complianceInstancesPath} className="flex items-center gap-3">
             <div className={`text-muted-foreground ${isCollapsed ? '-ml-2' : ''}`} style={isCollapsed ? {marginLeft: '-9px'} : {}}>
               <ShieldCheck className="h-5 w-5" />
             </div>
-            <span>Compliance Instances</span>
+            <span>Enterprise Compliance</span>
           </Link>
         </SidebarMenuButton>
         <CollapsibleTrigger asChild>

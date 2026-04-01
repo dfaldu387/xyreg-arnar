@@ -25,6 +25,8 @@ interface FamilyProductData {
   user_instructions: any;
   storage_sterility_handling: any;
   images: any;
+  product_platform: string | null;
+  trl_level: number | null;
 }
 
 /**
@@ -65,10 +67,12 @@ export function resolveFieldValue(product: FamilyProductData, fieldKey: string):
       return product.description;
     case 'definition_modelReference':
       return product.model_reference;
+    case 'definition_platform':
+      return product.product_platform;
 
     // Technical
     case 'technical_trlLevel':
-      return ktc.trlLevel ?? null;
+      return product.trl_level ?? null;
 
     // Grouped technical fields — compared as serialized sub-objects
     case 'technical_systemArchitecture':
@@ -113,6 +117,35 @@ export function resolveFieldValue(product: FamilyProductData, fieldKey: string):
         hasNFC: ktc.hasNFC ?? false,
         hasUSB: ktc.hasUSB ?? false,
       };
+    case 'technical_aiMl':
+      return {
+        hasImageAnalysis: ktc.hasImageAnalysis ?? false,
+        hasPredictiveAnalytics: ktc.hasPredictiveAnalytics ?? false,
+        hasNaturalLanguageProcessing: ktc.hasNaturalLanguageProcessing ?? false,
+      };
+    case 'technical_environmentalConditions':
+      return {
+        transportTempRange: ktc.transportTempRange ?? null,
+        transportHumidity: ktc.transportHumidity ?? null,
+        transportPressure: ktc.transportPressure ?? null,
+        operatingTempRange: ktc.operatingTempRange ?? null,
+        operatingHumidity: ktc.operatingHumidity ?? null,
+        operatingPressure: ktc.operatingPressure ?? null,
+      };
+    case 'technical_electricalCharacteristics':
+      return {
+        ratedVoltage: ktc.ratedVoltage ?? null,
+        ratedFrequency: ktc.ratedFrequency ?? null,
+        ratedCurrentPower: ktc.ratedCurrentPower ?? null,
+        protectionClass: ktc.protectionClass ?? null,
+      };
+    case 'technical_physicalClassification':
+      return {
+        appliedPartType: ktc.appliedPartType ?? null,
+        ipWaterRating: ktc.ipWaterRating ?? null,
+        portability: ktc.portability ?? null,
+        modeOfOperation: ktc.modeOfOperation ?? null,
+      };
 
     // Purpose / Statement of Use
     case 'intendedUse':
@@ -123,6 +156,10 @@ export function resolveFieldValue(product: FamilyProductData, fieldKey: string):
       return ipd.modeOfAction ?? null;
     case 'valueProposition':
       return ipd.valueProposition ?? null;
+    case 'intendedUseCategory':
+      return ipd.intended_use_category ?? null;
+    case 'essentialPerformance':
+      return ipd.essentialPerformance ?? null;
 
     // Context of Use
     case 'intendedPatientPopulation':
@@ -228,6 +265,12 @@ export function normalizeScopeValue(fieldKey: string, value: any): any {
     return value === true;
   }
 
+  // Custom user instruction fields: compare by value content only (not id/label metadata)
+  if (fieldKey.startsWith('userInstructions_custom_')) {
+    if (value && typeof value === 'object' && 'value' in value) return value.value ?? null;
+    return value ?? null;
+  }
+
   return value;
 }
 
@@ -240,11 +283,13 @@ function getSimpleDbColumn(fieldKey: string): string | null {
     'definition_tradeName': 'trade_name',
     'definition_deviceCategory': 'device_category',
     'definition_modelReference': 'model_reference',
+    'definition_platform': 'product_platform',
     'classification_primaryRegulatoryType': 'primary_regulatory_type',
     'clinicalBenefits': 'clinical_benefits',
     'contraindications': 'contraindications',
     'intendedUsers': 'intended_users',
     'media_deviceMedia': 'images',
+    'technical_trlLevel': 'trl_level',
   };
   return map[fieldKey] || null;
 }
@@ -258,6 +303,8 @@ function getJsonSubKey(fieldKey: string): string | null {
     'intendedFunction': 'indications',
     'modeOfAction': 'modeOfAction',
     'valueProposition': 'valueProposition',
+    'intendedUseCategory': 'intended_use_category',
+    'essentialPerformance': 'essentialPerformance',
     'intendedPatientPopulation': 'targetPopulation',
     'targetPopulation': 'targetPopulation',
     'intendedUser': 'userProfile',
@@ -284,13 +331,16 @@ function getKtcSubKeys(fieldKey: string): string[] | null {
     'classification_isActiveDevice': ['isActive'],
     'classification_systemProcedurePack': ['isSystemOrProcedurePack'],
     'classification_anatomicalLocation': ['anatomicalLocation'],
-    'technical_trlLevel': ['trlLevel'],
     'technical_systemArchitecture': ['isSoftwareAsaMedicalDevice', 'isSoftwareMobileApp', 'noSoftware'],
     'technical_keyTechCharacteristics': ['hasMeasuringFunction', 'isReusable', 'incorporatesMedicinalSubstance', 'containsHumanAnimalMaterial', 'isSingleUse', 'isCustomMade', 'isAccessoryToMedicalDevice'],
     'technical_sterility': ['isNonSterile', 'isDeliveredSterile', 'canBeSterilized'],
     'technical_powerSource': ['isBatteryPowered', 'isMainsPowered', 'isManualOperation', 'isWirelessCharging'],
     'technical_energyTransfer': ['energyTransferDirection', 'energyTransferType'],
     'technical_connectivity': ['hasBluetooth', 'hasWifi', 'hasCellular', 'hasNFC', 'hasUSB'],
+    'technical_aiMl': ['hasImageAnalysis', 'hasPredictiveAnalytics', 'hasNaturalLanguageProcessing'],
+    'technical_environmentalConditions': ['transportTempRange', 'transportHumidity', 'transportPressure', 'operatingTempRange', 'operatingHumidity', 'operatingPressure'],
+    'technical_electricalCharacteristics': ['ratedVoltage', 'ratedFrequency', 'ratedCurrentPower', 'protectionClass'],
+    'technical_physicalClassification': ['appliedPartType', 'ipWaterRating', 'portability', 'modeOfOperation'],
   };
   return map[fieldKey] || null;
 }
@@ -560,7 +610,7 @@ export function useAutoSyncScope(
     queryFn: async () => {
       const { data } = await supabase
         .from('products')
-        .select('id, primary_regulatory_type, device_type, key_technology_characteristics, trade_name, device_category, description, model_reference, intended_purpose_data, clinical_benefits, intended_users, contraindications, user_instructions, storage_sterility_handling, images, updated_at')
+        .select('id, primary_regulatory_type, device_type, key_technology_characteristics, trade_name, device_category, description, model_reference, intended_purpose_data, clinical_benefits, intended_users, contraindications, user_instructions, storage_sterility_handling, images, product_platform, trl_level, updated_at')
         .eq('is_archived', false)
         .or(`id.eq.${familyRootId},and(parent_product_id.eq.${familyRootId},parent_relationship_type.eq.variant)`);
       return (data || []) as FamilyProductData[];
@@ -681,12 +731,12 @@ export function useAutoSyncScope(
       'classification_primaryRegulatoryType', 'classification_coreDeviceNature',
       'classification_isActiveDevice', 'classification_systemProcedurePack',
       'classification_anatomicalLocation',
-      'definition_tradeName', 'definition_deviceCategory',
+      'definition_tradeName', 'definition_deviceCategory', 'definition_platform',
       'definition_description', 'definition_modelReference',
       'technical_trlLevel', 'technical_systemArchitecture',
       'technical_keyTechCharacteristics', 'technical_sterility',
       'technical_powerSource', 'technical_energyTransfer', 'technical_connectivity',
-      'intendedUse', 'intendedFunction', 'modeOfAction', 'valueProposition',
+      'intendedUse', 'intendedFunction', 'modeOfAction', 'valueProposition', 'intendedUseCategory', 'essentialPerformance',
       'intendedPatientPopulation', 'targetPopulation', 'intendedUser', 'userProfile',
       'durationOfUse', 'environmentOfUse', 'useEnvironment', 'useTrigger',
       'clinicalBenefits', 'contraindications', 'warningsPrecautions',
@@ -796,7 +846,7 @@ export function useAutoSyncScope(
         const sourceId = existingGroupMemberIds[0];
         const { data: sourceProduct } = await supabase
           .from('products')
-          .select('id, primary_regulatory_type, device_type, key_technology_characteristics, trade_name, device_category, description, model_reference, intended_purpose_data, clinical_benefits, intended_users, contraindications, user_instructions, storage_sterility_handling, images')
+          .select('id, primary_regulatory_type, device_type, key_technology_characteristics, trade_name, device_category, description, model_reference, intended_purpose_data, clinical_benefits, intended_users, contraindications, user_instructions, storage_sterility_handling, images, product_platform')
           .eq('id', sourceId)
           .single();
 
@@ -813,7 +863,7 @@ export function useAutoSyncScope(
         } else {
           const { data: freshProduct, error: readError } = await supabase
             .from('products')
-            .select('id, primary_regulatory_type, device_type, key_technology_characteristics, trade_name, device_category, description, model_reference, intended_purpose_data, clinical_benefits, intended_users, contraindications, user_instructions, storage_sterility_handling, images')
+            .select('id, primary_regulatory_type, device_type, key_technology_characteristics, trade_name, device_category, description, model_reference, intended_purpose_data, clinical_benefits, intended_users, contraindications, user_instructions, storage_sterility_handling, images, product_platform, trl_level')
             .eq('id', productId)
             .single();
           if (readError || !freshProduct) {
@@ -826,9 +876,9 @@ export function useAutoSyncScope(
         await propagateFieldToProducts(fieldKey, currentValue, newlyIncludedOthers);
       }
 
-      // Invalidate current product + sync query (other products already handled by mirrorScopeToFamilyProducts)
+      // Refetch family products (await ensures fresh data before returning) + invalidate current product
       const { queryClient } = await import('@/lib/query-client');
-      queryClient.invalidateQueries({ queryKey: ['family-products-scope-sync', familyRootId] });
+      await queryClient.refetchQueries({ queryKey: ['family-products-scope-sync', familyRootId] });
       queryClient.invalidateQueries({ queryKey: ['productDetails', productId] });
       queryClient.invalidateQueries({ queryKey: ['product', productId] });
     },

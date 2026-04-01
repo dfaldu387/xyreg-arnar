@@ -9,6 +9,14 @@ export default defineConfig(({ mode }) => ({
   server: {
     host: "::",
     port: 8080,
+    proxy: {
+      "/api/onlyoffice": {
+        target: "http://193.219.97.116:8080",
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/onlyoffice/, ""),
+        ws: true,
+      },
+    },
   },
   // esbuild: {
   //   drop: ['console', 'debugger'],

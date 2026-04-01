@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Sparkles, Loader2, Link2, PlusCircle, X, Check } from 'lucide-react';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { Sparkles, Loader2, Link2, PlusCircle, X, Check, Database } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { UserNeedsService } from '@/services/userNeedsService';
 import { toast } from 'sonner';
@@ -145,21 +146,35 @@ export function AIRequirementUserNeedSuggestions({
 
   return (
     <div>
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon"
-        onClick={handleGenerate}
-        disabled={isLoading || !requirementDescription.trim()}
-        className="h-6 w-6 text-amber-600 hover:text-amber-700 hover:bg-amber-100 dark:text-amber-400 dark:hover:bg-amber-900/30"
-        title="AI: Suggest user needs for this requirement"
-      >
-        {isLoading ? (
-          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-        ) : (
-          <Sparkles className="h-3.5 w-3.5" />
-        )}
-      </Button>
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              onClick={handleGenerate}
+              disabled={isLoading || !requirementDescription.trim()}
+              className="h-6 w-6 text-amber-600 hover:text-amber-700 hover:bg-amber-100 dark:text-amber-400 dark:hover:bg-amber-900/30"
+            >
+              {isLoading ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Sparkles className="h-3.5 w-3.5" />
+              )}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="top" className="max-w-[250px]">
+            <div className="space-y-1">
+              <p className="font-medium text-xs">AI Suggest User Needs</p>
+              <p className="text-xs text-muted-foreground flex items-center gap-1">
+                <Database className="h-3 w-3 shrink-0" />
+                Using: Requirement Description{productName ? `, ${productName}` : ''}, {existingUserNeeds.length} existing needs
+              </p>
+            </div>
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
 
       {isVisible && !isLoading && visibleSuggestions.length > 0 && (
         <div className="border border-amber-200 dark:border-amber-800 rounded-md p-3 space-y-2 bg-amber-50/50 dark:bg-amber-950/20 mt-2">

@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef, useEffect } from 'react';
+import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useSearchParams } from 'react-router-dom';
 import { Label } from "@/components/ui/label";
@@ -21,6 +21,7 @@ import { cn } from '@/lib/utils';
 import { useTranslation } from '@/hooks/useTranslation';
 import { ContextWarningToast, getMissingFieldsWithNavigation, getContextSources } from '../../ai-assistant/ContextWarningToast';
 import { InheritanceExclusionPopover } from '@/components/shared/InheritanceExclusionPopover';
+import { resolveFieldValue, normalizeScopeValue } from '@/hooks/useAutoSyncScope';
 
 import { Json } from '@/integrations/supabase/types';
 import { useFieldGovernance } from '@/hooks/useFieldGovernance';
@@ -100,6 +101,8 @@ interface StatementOfUseTabProps {
   };
   autoSyncScope?: (fieldKey: string, newValue: any) => void;
   familyProductIds?: string[];
+  familyProducts?: any[];
+  onScopeChangeWithPropagation?: (fieldKey: string, oldScope: import('@/hooks/useInheritanceExclusion').ItemExclusionScope, newScope: import('@/hooks/useInheritanceExclusion').ItemExclusionScope) => Promise<void>;
 }
 
 export function StatementOfUseTab({
@@ -133,6 +136,8 @@ export function StatementOfUseTab({
   fieldExclusion,
   autoSyncScope,
   familyProductIds,
+  familyProducts,
+  onScopeChangeWithPropagation,
 }: StatementOfUseTabProps) {
   const { lang } = useTranslation();
   const { isInInvestorFlow } = useInvestorFlow();
@@ -167,7 +172,43 @@ export function StatementOfUseTab({
     clinical_benefits: getSection('clinical_benefits')?.status ?? null,
   };
   const { showDialog: govDialog, activeFieldLabel: govFieldLabel, guardEdit: govGuardEdit, confirmEdit: govConfirm, cancelEdit: govCancel, setShowDialog: setGovDialog } = useMultiFieldGovernanceGuard(productId, governanceFields);
-  
+
+  // --- Value-matching helpers for Device Applicability popovers ---
+  const getMatchingProductIds = useCallback((fieldKey: string, currentValue: any): string[] | undefined => {
+    if (!familyProducts?.length || !productId) return undefined;
+    const currentNormalized = JSON.stringify(normalizeScopeValue(fieldKey, currentValue));
+    return familyProducts
+      .filter(p => {
+        if (p.id === productId) return true;
+        return JSON.stringify(normalizeScopeValue(fieldKey, resolveFieldValue(p, fieldKey))) === currentNormalized;
+      })
+      .map(p => p.id);
+  }, [familyProducts, productId]);
+
+  const getMatchSummary = useCallback((fieldKey: string, currentValue: any) => {
+    const matchIds = getMatchingProductIds(fieldKey, currentValue);
+    if (!matchIds || !familyProducts?.length) return undefined;
+    return `${matchIds.length}/${familyProducts.length}`;
+  }, [getMatchingProductIds, familyProducts]);
+
+  const createValueMatchScopeChange = useCallback((fieldKey: string, currentValue: any) => {
+    return (id: string, newScope: import('@/hooks/useInheritanceExclusion').ItemExclusionScope) => {
+      if (onScopeChangeWithPropagation && familyProducts?.length) {
+        const matchIds = getMatchingProductIds(fieldKey, currentValue);
+        const nonMatchingIds = matchIds
+          ? (familyProductIds || []).filter(pid => !matchIds.includes(pid))
+          : [];
+        const oldScope: import('@/hooks/useInheritanceExclusion').ItemExclusionScope = {
+          excludedProductIds: nonMatchingIds,
+          excludedCategories: [],
+          isManualGroup: true,
+        };
+        return onScopeChangeWithPropagation(id, oldScope, newScope);
+      } else if (fieldExclusion) {
+        return fieldExclusion.setExclusionScope(id, newScope);
+      }
+    };
+  }, [onScopeChangeWithPropagation, familyProducts, getMatchingProductIds, familyProductIds, fieldExclusion]);
 
   // --- PF mode: sync family values into localData, save on blur ---
   // --- PF mode: sync family values into localData, save on blur ---
@@ -326,18 +367,14 @@ export function StatementOfUseTab({
     typingGuardTimerRef.current = setTimeout(() => {
       isActivelyTypingRef.current = false;
     }, 3000); // Keep guard up for 3s after last keystroke
-    
-    const scopeKeyMap: Record<string, string> = {
-      clinicalPurpose: 'intendedUse',
-      indications: 'intendedFunction',
-      modeOfAction: 'modeOfAction',
-      valueProposition: 'valueProposition',
-    };
+
+    // Update localData immediately so the UI stays in sync
+    setLocalData(prev => ({ ...prev, [field]: value }));
+
     const sectionKey = FIELD_TO_SECTION[field];
     const doUpdate = () => {
       const debouncedUpdate = createDebouncedUpdate(field);
       debouncedUpdate(value);
-      if (scopeKeyMap[field]) autoSyncScope?.(scopeKeyMap[field], value);
     };
     if (sectionKey) {
       govGuardEdit(sectionKey, AI_FIELD_CONFIGS[sectionKey as keyof typeof AI_FIELD_CONFIGS]?.name || field, doUpdate);
@@ -503,7 +540,6 @@ export function StatementOfUseTab({
     }
     const updated = [...clinicalBenefits, trimmedValue];
     onClinicalBenefitsChange(updated);
-    autoSyncScope?.('clinicalBenefits', updated);
     setNewBenefit('');
   };
 
@@ -512,7 +548,6 @@ export function StatementOfUseTab({
     const updated = [...clinicalBenefits];
     updated.splice(index, 1);
     onClinicalBenefitsChange(updated);
-    autoSyncScope?.('clinicalBenefits', updated);
   };
 
   // Map field keys to governance section keys
@@ -602,9 +637,11 @@ export function StatementOfUseTab({
                 currentProductId={productId}
                 itemId="intendedUse"
                 exclusionScope={fieldExclusion.getExclusionScope('intendedUse')}
-                onScopeChange={(id, scope) => fieldExclusion.setExclusionScope(id, scope)}
+                onScopeChange={createValueMatchScopeChange('intendedUse', intendedPurposeData?.clinicalPurpose)}
                 defaultCurrentDeviceOnly
                 familyProductIds={familyProductIds}
+                summaryText={getMatchSummary('intendedUse', intendedPurposeData?.clinicalPurpose)}
+                valueMatchingProductIds={getMatchingProductIds('intendedUse', intendedPurposeData?.clinicalPurpose)}
               />
             ) : null}
             {getSaveStatusIcon('clinicalPurpose')}
@@ -614,11 +651,7 @@ export function StatementOfUseTab({
           <RichTextField
             value={localData.clinicalPurpose || ''}
             onChange={(html) => {
-              if (isFieldPFMode?.('intendedUse')) {
-                handlePfLocalChange('clinicalPurpose', html);
-              } else {
-                handleTextFieldChange('clinicalPurpose', html);
-              }
+              handleTextFieldChange('clinicalPurpose', html);
             }}
             placeholder={lang('devicePurpose.statement.intendedUsePlaceholder')}
             disabled={isLoading}
@@ -662,9 +695,11 @@ export function StatementOfUseTab({
                 currentProductId={productId}
                 itemId="intendedUseCategory"
                 exclusionScope={fieldExclusion.getExclusionScope('intendedUseCategory')}
-                onScopeChange={(id, scope) => fieldExclusion.setExclusionScope(id, scope)}
+                onScopeChange={createValueMatchScopeChange('intendedUseCategory', intendedPurposeData?.intended_use_category)}
                 defaultCurrentDeviceOnly
                 familyProductIds={familyProductIds}
+                summaryText={getMatchSummary('intendedUseCategory', intendedPurposeData?.intended_use_category)}
+                valueMatchingProductIds={getMatchingProductIds('intendedUseCategory', intendedPurposeData?.intended_use_category)}
               />
             ) : null}
             {getSaveStatusIcon('clinicalPurpose')}
@@ -726,9 +761,11 @@ export function StatementOfUseTab({
                 currentProductId={productId}
                 itemId="intendedFunction"
                 exclusionScope={fieldExclusion.getExclusionScope('intendedFunction')}
-                onScopeChange={(id, scope) => fieldExclusion.setExclusionScope(id, scope)}
+                onScopeChange={createValueMatchScopeChange('intendedFunction', intendedPurposeData?.indications)}
                 defaultCurrentDeviceOnly
                 familyProductIds={familyProductIds}
+                summaryText={getMatchSummary('intendedFunction', intendedPurposeData?.indications)}
+                valueMatchingProductIds={getMatchingProductIds('intendedFunction', intendedPurposeData?.indications)}
               />
             ) : null}
             {getSaveStatusIcon('indications')}
@@ -738,11 +775,7 @@ export function StatementOfUseTab({
           <RichTextField
             value={localData.indications || ''}
             onChange={(html) => {
-              if (isFieldPFMode?.('intendedFunction')) {
-                handlePfLocalChange('indications', html);
-              } else {
-                handleTextFieldChange('indications', html);
-              }
+              handleTextFieldChange('indications', html);
             }}
             placeholder={lang('devicePurpose.statement.intendedFunctionPlaceholder')}
             disabled={isLoading}
@@ -802,9 +835,11 @@ export function StatementOfUseTab({
                 currentProductId={productId}
                 itemId="modeOfAction"
                 exclusionScope={fieldExclusion.getExclusionScope('modeOfAction')}
-                onScopeChange={(id, scope) => fieldExclusion.setExclusionScope(id, scope)}
+                onScopeChange={createValueMatchScopeChange('modeOfAction', intendedPurposeData?.modeOfAction)}
                 defaultCurrentDeviceOnly
                 familyProductIds={familyProductIds}
+                summaryText={getMatchSummary('modeOfAction', intendedPurposeData?.modeOfAction)}
+                valueMatchingProductIds={getMatchingProductIds('modeOfAction', intendedPurposeData?.modeOfAction)}
               />
             ) : null}
             {getSaveStatusIcon('modeOfAction')}
@@ -814,11 +849,7 @@ export function StatementOfUseTab({
           <RichTextField
             value={localData.modeOfAction || ''}
             onChange={(html) => {
-              if (isFieldPFMode?.('modeOfAction')) {
-                handlePfLocalChange('modeOfAction', html);
-              } else {
-                handleTextFieldChange('modeOfAction', html);
-              }
+              handleTextFieldChange('modeOfAction', html);
             }}
             placeholder={lang('devicePurpose.statement.modeOfActionPlaceholder')}
             disabled={isLoading}
@@ -867,9 +898,11 @@ export function StatementOfUseTab({
                 currentProductId={productId}
                 itemId="valueProposition"
                 exclusionScope={fieldExclusion.getExclusionScope('valueProposition')}
-                onScopeChange={(id, scope) => fieldExclusion.setExclusionScope(id, scope)}
+                onScopeChange={createValueMatchScopeChange('valueProposition', intendedPurposeData?.valueProposition)}
                 defaultCurrentDeviceOnly
                 familyProductIds={familyProductIds}
+                summaryText={getMatchSummary('valueProposition', intendedPurposeData?.valueProposition)}
+                valueMatchingProductIds={getMatchingProductIds('valueProposition', intendedPurposeData?.valueProposition)}
               />
             ) : null}
             {getSaveStatusIcon('valueProposition')}
@@ -879,11 +912,7 @@ export function StatementOfUseTab({
           <RichTextField
             value={localData.valueProposition || ''}
             onChange={(html) => {
-              if (isFieldPFMode?.('valueProposition')) {
-                handlePfLocalChange('valueProposition', html);
-              } else {
-                handleTextFieldChange('valueProposition', html);
-              }
+              handleTextFieldChange('valueProposition', html);
             }}
             placeholder={lang('devicePurpose.statement.valuePropositionPlaceholder')}
             disabled={isLoading}
@@ -943,9 +972,11 @@ export function StatementOfUseTab({
                 currentProductId={productId}
                 itemId="clinicalBenefits"
                 exclusionScope={fieldExclusion.getExclusionScope('clinicalBenefits')}
-                onScopeChange={(id, scope) => fieldExclusion.setExclusionScope(id, scope)}
+                onScopeChange={createValueMatchScopeChange('clinicalBenefits', clinicalBenefits)}
                 defaultCurrentDeviceOnly
                 familyProductIds={familyProductIds}
+                summaryText={getMatchSummary('clinicalBenefits', clinicalBenefits)}
+                valueMatchingProductIds={getMatchingProductIds('clinicalBenefits', clinicalBenefits)}
               />
             ) : null}
             {getSaveStatusIcon('clinicalBenefits' as any)}
@@ -1013,9 +1044,11 @@ export function StatementOfUseTab({
                 currentProductId={productId}
                 itemId="essentialPerformance"
                 exclusionScope={fieldExclusion.getExclusionScope('essentialPerformance')}
-                onScopeChange={(id, scope) => fieldExclusion.setExclusionScope(id, scope)}
+                onScopeChange={createValueMatchScopeChange('essentialPerformance', intendedPurposeData?.essentialPerformance)}
                 defaultCurrentDeviceOnly
                 familyProductIds={familyProductIds}
+                summaryText={getMatchSummary('essentialPerformance', intendedPurposeData?.essentialPerformance)}
+                valueMatchingProductIds={getMatchingProductIds('essentialPerformance', intendedPurposeData?.essentialPerformance)}
               />
             ) : null}
             <TooltipProvider>

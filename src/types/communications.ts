@@ -50,6 +50,7 @@ export interface MessageAttachment {
   file_size: number;
   file_type: string | null;
   storage_path: string;
+  signed_url?: string;
   uploaded_at: string | null;
   uploaded_by: string | null;
 }

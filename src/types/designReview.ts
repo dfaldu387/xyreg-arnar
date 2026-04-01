@@ -153,14 +153,16 @@ export interface TechnicalFileSection {
   focus: string;
   /** MDR/IVDR legal reference */
   legalReference: string;
+  /** Tooltip description explaining what this section covers per MDR */
+  description: string;
 }
 
 export const TECHNICAL_FILE_SECTIONS: TechnicalFileSection[] = [
-  { id: 'TF-0', section: '0', label: 'Administrative', focus: 'Certificates, DoC, Basic UDI-DI', legalReference: 'MDR Art. 10 & 19' },
-  { id: 'TF-1-6', section: '1–6', label: 'Design & Specifications', focus: 'Materials, Manufacturing, V&V', legalReference: 'Annex II' },
-  { id: 'TF-7', section: '7', label: 'Risk Management', focus: 'FMEA, Risk/Benefit Analysis', legalReference: 'Annex I & ISO 14971' },
-  { id: 'TF-8', section: '8', label: 'Clinical', focus: 'CER, Literature Search', legalReference: 'Annex XIV' },
-  { id: 'TF-9', section: '9', label: 'Post-Market', focus: 'PMS Plan, PMCF Plan, PSUR', legalReference: 'Annex III' },
+  { id: 'TF-0', section: '0', label: 'Administrative', focus: 'Certificates, DoC, Basic UDI-DI', legalReference: 'MDR Art. 10 & 19', description: 'Administrative information including EU Declaration of Conformity, certificates issued by Notified Bodies, Basic UDI-DI registration, and general device identification data per MDR Article 10 and 19.' },
+  { id: 'TF-1-6', section: '1–6', label: 'Design & Specifications', focus: 'Materials, Manufacturing, V&V', legalReference: 'Annex II', description: 'Device description and specifications (§1), information supplied by the manufacturer (§2), design and manufacturing information (§3), general safety and performance requirements (§4), benefit-risk analysis and risk management (§5), and product verification and validation (§6) per MDR Annex II.' },
+  { id: 'TF-7', section: '7', label: 'Risk Management', focus: 'FMEA, Risk/Benefit Analysis', legalReference: 'Annex I & ISO 14971', description: 'Risk management documentation per MDR Annex I General Safety and Performance Requirements and ISO 14971, including hazard identification, risk estimation, risk evaluation, risk control measures, and overall residual risk evaluation.' },
+  { id: 'TF-8', section: '8', label: 'Clinical', focus: 'CER, Literature Search', legalReference: 'Annex XIV', description: 'Clinical evaluation and investigation documentation per MDR Annex XIV, including the Clinical Evaluation Report (CER), literature search and appraisal, clinical investigation plans and reports, and PMCF evaluation.' },
+  { id: 'TF-9', section: '9', label: 'Post-Market', focus: 'PMS Plan, PMCF Plan, PSUR', legalReference: 'Annex III', description: 'Post-market surveillance documentation per MDR Annex III, including the PMS Plan, Post-Market Clinical Follow-up (PMCF) Plan, Periodic Safety Update Report (PSUR), and trend reporting procedures.' },
 ];
 
 /** @deprecated Use PHASE_GATE_OPTIONS instead */

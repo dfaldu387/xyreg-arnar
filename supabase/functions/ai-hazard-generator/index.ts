@@ -48,7 +48,9 @@ serve(async (req) => {
   try {
     console.log('[ai-hazard-generator] Starting hazard generation');
     
-    const { companyId, categoryFilter, productData, requirementSpecifications, additionalPrompt, outputLanguage }: HazardSuggestionRequest = await req.json();
+    const requestBody = await req.json();
+    const { companyId, categoryFilter, productData, requirementSpecifications, additionalPrompt, outputLanguage } = requestBody as HazardSuggestionRequest;
+    const existingItems = (requestBody as any).existingItems as string[] | undefined;
     
     if (!companyId || !productData) {
       return new Response(JSON.stringify({
@@ -147,8 +149,12 @@ serve(async (req) => {
       hazardCount = '12-15';
     }
 
+    const existingItemsSection = existingItems && existingItems.length > 0
+      ? `\n\nEXISTING HAZARDS (DO NOT suggest these again or anything semantically equivalent):\n${existingItems.map(item => `- "${item}"`).join('\n')}\n\nGenerate ONLY NEW hazards that are substantially different from the above.`
+      : '';
+
     // Create comprehensive prompt for hazard identification
-    const prompt = `You are an expert medical device risk management consultant specializing in ISO 14971 hazard identification and analysis.
+    const prompt = `You are an expert medical device risk management consultant specializing in ISO 14971 hazard identification and analysis.${existingItemsSection}
 
 CRITICAL: You must analyze the existing requirement specifications below to identify hazards that could arise from these specific requirements. Each hazard should directly relate to potential failures or risks inherent in the stated requirements.
 

@@ -28,6 +28,7 @@ export interface UserNeedsAIRequest {
     };
   };
   categories?: string[];
+  existingItems?: string[];
 }
 
 export interface UserNeedsAIResponse {

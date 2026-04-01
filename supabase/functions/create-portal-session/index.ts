@@ -31,23 +31,61 @@ serve(async (req) => {
       throw new Error("Not authenticated");
     }
 
-    // Get customer_id from checkout sessions
-    const { data: checkoutSession } = await supabaseClient
-      .from("stripe_checkout_sessions")
-      .select("customer_id")
-      .eq("user_id", userData.user.id)
-      .not("customer_id", "is", null)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .single();
+    // Parse request body for companyId
+    let companyId: string | null = null;
+    try {
+      const body = await req.json();
+      companyId = body?.companyId || null;
+    } catch {
+      // No body provided
+    }
 
-    if (!checkoutSession?.customer_id) {
+    let customerId: string | null = null;
+
+    // 1. Check companies table for stripe_customer_id
+    if (companyId) {
+      const { data: company } = await supabaseClient
+        .from("companies")
+        .select("stripe_customer_id")
+        .eq("id", companyId)
+        .single();
+
+      customerId = company?.stripe_customer_id || null;
+    }
+
+    // 2. Fallback: check stripe_customers table
+    if (!customerId && companyId) {
+      const { data: stripeCustomer } = await supabaseClient
+        .from("stripe_customers")
+        .select("customer_id")
+        .eq("company_id", companyId)
+        .limit(1)
+        .single();
+
+      customerId = stripeCustomer?.customer_id || null;
+    }
+
+    // 3. Fallback: check checkout sessions (legacy)
+    if (!customerId) {
+      const { data: checkoutSession } = await supabaseClient
+        .from("stripe_checkout_sessions")
+        .select("customer_id")
+        .eq("user_id", userData.user.id)
+        .not("customer_id", "is", null)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .single();
+
+      customerId = checkoutSession?.customer_id || null;
+    }
+
+    if (!customerId) {
       throw new Error("No customer found");
     }
 
     // Create billing portal session
     const portalSession = await stripe.billingPortal.sessions.create({
-      customer: checkoutSession.customer_id,
+      customer: customerId,
       return_url: `${req.headers.get("origin")}/app/profile`,
     });
 

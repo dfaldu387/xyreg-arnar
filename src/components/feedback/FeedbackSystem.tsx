@@ -77,12 +77,16 @@ export function FeedbackSystem() {
       }
 
       let screenshotUrl = null;
+      const screenshotUrls: string[] = [];
 
-      // Upload screenshot to storage if provided
-      if (feedback.screenshot) {
+      // Upload all screenshots to storage
+      const imagesToUpload = feedback.screenshots?.length ? feedback.screenshots : (feedback.screenshot ? [feedback.screenshot] : []);
+      
+      for (const imageData of imagesToUpload) {
+        if (!imageData) continue;
         const screenshotFile = new File(
-          [await fetch(feedback.screenshot).then(r => r.blob())],
-          `feedback-${Date.now()}.png`,
+          [await fetch(imageData).then(r => r.blob())],
+          `feedback-${Date.now()}-${screenshotUrls.length}.png`,
           { type: 'image/png' }
         );
 
@@ -95,21 +99,25 @@ export function FeedbackSystem() {
           throw uploadError;
         }
 
-        screenshotUrl = uploadData.path;
+        screenshotUrls.push(uploadData.path);
       }
+      
+      screenshotUrl = screenshotUrls[0] || null;
 
       // Insert feedback data directly into the database
+      const insertData: any = {
+        user_id: session.user.id,
+        type: feedback.type,
+        title: feedback.title,
+        description: feedback.description,
+        screenshot_url: screenshotUrl,
+        screenshot_urls: screenshotUrls,
+        company_id: feedback.company_id,
+      };
+
       const { data, error } = await supabase
         .from('feedback_submissions')
-        .insert({
-          user_id: session.user.id,
-          type: feedback.type,
-          title: feedback.title,
-          description: feedback.description,
-          screenshot_url: screenshotUrl,
-          company_id: feedback.company_id,
-          // metadata: pageMetadata,
-        })
+        .insert(insertData)
         .select()
         .single();
 

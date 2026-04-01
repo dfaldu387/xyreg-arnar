@@ -30,7 +30,7 @@ const missionControlMenuItems: MenuItem[] = [
 
 const portfolioMenuItems: MenuItem[] = [
   { id: 'dashboard', name: 'Dashboard', icon: <BarChart3 className="w-4 h-4" /> },
-  { id: 'milestones', name: 'Milestones', icon: <Clock className="w-4 h-4" /> },
+  { id: 'milestones', name: 'Enterprise Roadmap', icon: <Clock className="w-4 h-4" /> },
   {
     id: 'commercial',
     name: 'Commercial Intelligence',
@@ -65,7 +65,7 @@ const portfolioMenuItems: MenuItem[] = [
   },
   {
     id: 'compliance-instances',
-    name: 'Compliance Instances',
+    name: 'Enterprise Compliance',
     icon: <CheckCircle className="w-4 h-4" />,
     children: [
       { id: 'documents', name: 'Documents' },
@@ -85,7 +85,7 @@ const portfolioMenuItems: MenuItem[] = [
   },
   { id: 'pms', name: 'Post-Market Surveillance', icon: <Eye className="w-4 h-4" /> },
   { id: 'training', name: 'Training', icon: <GraduationCap className="w-4 h-4" /> },
-  { id: 'communications', name: 'Communication', icon: <MessageSquare className="w-4 h-4" /> },
+  { id: 'quality-governance', name: 'Quality Governance', icon: <MessageSquare className="w-4 h-4" /> },
   { id: 'audit-log', name: 'Audit Log', icon: <FileBarChart className="w-4 h-4" /> }
 ];
 
@@ -165,7 +165,7 @@ const devicesMenuItems: MenuItem[] = [
   { id: 'milestones', name: 'Milestones', icon: <Timer className="w-4 h-4" /> },
   {
     id: 'compliance-instances',
-    name: 'Compliance Instances',
+    name: 'Enterprise Compliance',
     icon: <CheckCircle className="w-4 h-4" />,
     children: [
       { id: 'documents', name: 'Documents' },

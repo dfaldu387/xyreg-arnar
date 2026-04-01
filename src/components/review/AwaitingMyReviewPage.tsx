@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/context/AuthContext';
 import { useCompanyRole } from '@/context/CompanyRoleContext';
@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Loader2, FileText, Clock, AlertCircle, Eye, CheckSquare, File } from 'lucide-react';
 import { format } from 'date-fns';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { DocumentViewer } from "@/components/product/DocumentViewer";
 import { DocumentActionModal } from "@/components/review/DocumentActionModal";
 import { useTranslation } from "@/hooks/useTranslation";
@@ -43,6 +43,7 @@ export function AwaitingMyReviewPage({ companyId, userGroups, companyName, first
   const { user } = useAuth();
   const { activeRole } = useCompanyRole();
   const navigate = useNavigate();
+  const location = useLocation();
   const [documents, setDocuments] = useState<AssignedDocument[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -50,7 +51,70 @@ export function AwaitingMyReviewPage({ companyId, userGroups, companyName, first
   const [isViewerOpen, setIsViewerOpen] = useState(false);
   const [actionDocument, setActionDocument] = useState<AssignedDocument | null>(null);
   const [isActionModalOpen, setIsActionModalOpen] = useState(false);
-  
+  const [highlightedDocId, setHighlightedDocId] = useState<string | null>(null);
+  const lastHandledKey = useRef<string | null>(null);
+  const retryIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const fadeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Scroll + highlight + auto-open logic
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const docId = params.get('highlight');
+    const uniqueKey = params.get('t');
+    const shouldAutoOpen = params.get('autoopen') === 'true';
+    if (!docId) return;
+
+    const key = `${docId}-${uniqueKey}`;
+    if (lastHandledKey.current === key) return;
+
+    // Clear any previous retry
+    if (retryIntervalRef.current) clearInterval(retryIntervalRef.current);
+
+    // Try to find and scroll to the element — retry every 300ms until found (max 10 attempts)
+    let attempts = 0;
+    const tryScroll = () => {
+      attempts++;
+      const el = document.querySelector(`[data-doc-id="${docId}"]`) as HTMLElement;
+      if (el) {
+        lastHandledKey.current = key;
+        if (retryIntervalRef.current) clearInterval(retryIntervalRef.current);
+        if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
+        setHighlightedDocId(docId);
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        // Remove highlight after 5 seconds
+        fadeTimerRef.current = setTimeout(() => setHighlightedDocId(null), 5000);
+
+        // Auto-open document viewer if requested
+        if (shouldAutoOpen) {
+          setTimeout(() => {
+            const doc = documents.find(
+              (d) => d.id.replace(/^template-/, '') === docId
+            );
+            if (doc) {
+              setViewingDocument(doc);
+              setIsViewerOpen(true);
+            }
+          }, 600);
+        }
+        return;
+      }
+      if (attempts >= 10) {
+        if (retryIntervalRef.current) clearInterval(retryIntervalRef.current);
+      }
+    };
+
+    // First try immediately, then retry
+    tryScroll();
+    if (!lastHandledKey.current || lastHandledKey.current !== key) {
+      retryIntervalRef.current = setInterval(tryScroll, 300);
+    }
+
+    return () => {
+      if (retryIntervalRef.current) clearInterval(retryIntervalRef.current);
+      if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
+    };
+  }, [location.search, documents.length]);
+
   useEffect(() => {
     fetchAssignedDocuments();
   }, [companyId, userGroups]);
@@ -320,12 +384,6 @@ export function AwaitingMyReviewPage({ companyId, userGroups, companyName, first
         }
       }
 
-      console.log('AwaitingMyReview - Documents fetched:', {
-        regularDocs: mappedDocuments.length,
-        phaseDocs: mappedPhaseDocuments.length,
-        total: allDocuments.length,
-        userGroups
-      });
       setDocuments(allDocuments);
     } catch (err) {
       console.error('Error fetching assigned documents:', err);
@@ -384,6 +442,14 @@ export function AwaitingMyReviewPage({ companyId, userGroups, companyName, first
 
   return (
     <div className="container mx-auto py-8 px-4 max-w-7xl">
+      {highlightedDocId && (
+        <style>{`
+          @keyframes notification-pulse {
+            0%, 100% { box-shadow: 0 0 0 0 hsl(var(--primary) / 0.2), 0 10px 15px -3px hsl(var(--primary) / 0.15); }
+            50% { box-shadow: 0 0 16px 4px hsl(var(--primary) / 0.3), 0 10px 15px -3px hsl(var(--primary) / 0.2); }
+          }
+        `}</style>
+      )}
       {/* Header */}
       <div className="mb-8">
         <h1 className="text-3xl font-bold mb-2">{lang('reviewDashboard.awaitingMyReview')}</h1>
@@ -440,7 +506,15 @@ export function AwaitingMyReviewPage({ companyId, userGroups, companyName, first
         <div className="space-y-4">
           <h2 className="text-xl font-semibold mb-4">{lang('reviewDashboard.assignedDocuments')} ({documents.length})</h2>
           {documents.map((doc) => (
-            <Card key={doc.id} className="p-6 hover:shadow-md transition-shadow">
+            <Card
+              key={doc.id}
+              data-doc-id={doc.id.replace(/^template-/, '')}
+              className={`p-6 hover:shadow-md transition-shadow ${
+                highlightedDocId === doc.id.replace(/^template-/, '')
+                  ? 'outline outline-2 outline-primary bg-primary/5 animate-[notification-pulse_1.5s_ease-in-out_infinite]'
+                  : ''
+              }`}
+            >
               <div className="flex items-start justify-between">
                 <div className="flex-1">
                   <div className="flex items-center gap-3 mb-2">

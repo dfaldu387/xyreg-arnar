@@ -491,6 +491,27 @@ export function BasicUDIGenerationWizard({
                   )}
                 </Button>
               </div>
+
+              {/* AI Input Sources Indicator */}
+              {productData && (
+                <div className="rounded-md border bg-muted/30 p-2 mb-2">
+                  <p className="text-[10px] font-medium text-muted-foreground flex items-center gap-1 mb-1">
+                    <Settings className="h-3 w-3" />
+                    AI will use:
+                  </p>
+                  <div className="flex flex-wrap gap-1">
+                    {productData.name && <Badge variant="outline" className="text-[10px] px-1.5 py-0">Device Name</Badge>}
+                    {productData.intended_use && <Badge variant="outline" className="text-[10px] px-1.5 py-0">Intended Use</Badge>}
+                    {productData.description && <Badge variant="outline" className="text-[10px] px-1.5 py-0">Description</Badge>}
+                    {productData.class && <Badge variant="outline" className="text-[10px] px-1.5 py-0">Device Class</Badge>}
+                    {productData.device_components && <Badge variant="outline" className="text-[10px] px-1.5 py-0">Components</Badge>}
+                  </div>
+                  {hasInsufficientData && (
+                    <p className="text-[10px] text-amber-600 mt-1">⚠ Limited data — consider filling in more device details</p>
+                  )}
+                </div>
+              )}
+
               <Textarea
                 id="essential-characteristics"
                 value={formData.essentialCharacteristics}

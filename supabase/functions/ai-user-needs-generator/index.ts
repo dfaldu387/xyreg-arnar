@@ -71,7 +71,7 @@ serve(async (req) => {
     console.log('[ai-user-needs-generator] Starting user needs generation');
     
     const requestBody = await req.json();
-    const { additionalPrompt, outputLanguage } = requestBody as { additionalPrompt?: string; outputLanguage?: string };
+    const { additionalPrompt, outputLanguage, existingItems } = requestBody as { additionalPrompt?: string; outputLanguage?: string; existingItems?: string[] };
     console.log('[ai-user-needs-generator] Request body:', JSON.stringify(requestBody));
 
     const { companyId, productData } = requestBody;
@@ -152,6 +152,11 @@ IMPORTANT: Since this device will be marketed in ${marketNames}, include market-
 - Quality system requirements (e.g., ISO 13485, QSR for USA)` 
       : '';
 
+    // Build existing items exclusion section
+    const existingItemsSection = existingItems && existingItems.length > 0
+      ? `\n\nEXISTING USER NEEDS (DO NOT suggest these again or anything semantically equivalent):\n${existingItems.map(item => `- "${item}"`).join('\n')}\n\nGenerate ONLY NEW user needs that are substantially different from the above.`
+      : '';
+
     // Create prompt for AI
     const prompt = `You are a medical device expert tasked with identifying user needs for a medical device. Based on the product information provided, generate a comprehensive list of user needs that healthcare professionals and patients might have.
 
@@ -162,7 +167,7 @@ Product Information:
 - Indications for Use: ${indicationsForUse}
 - Target Population: ${targetPopulation}
 - Use Environment: ${useEnvironment}
-- Duration of Use: ${durationOfUse}${marketContext}
+- Duration of Use: ${durationOfUse}${marketContext}${existingItemsSection}
 
 Please generate 8-12 user needs that are specific, measurable, and relevant to this medical device. Each user need should:
 1. Be written from the user's perspective (healthcare professional, patient, or regulatory stakeholder)

@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef, useEffect } from 'react';
+import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
@@ -23,6 +23,7 @@ import { useFieldGovernance } from '@/hooks/useFieldGovernance';
 import { useMultiFieldGovernanceGuard } from '@/hooks/useMultiFieldGovernanceGuard';
 import { GovernanceBookmark } from '@/components/ui/GovernanceBookmark';
 import { GovernanceEditConfirmDialog } from '@/components/ui/GovernanceEditConfirmDialog';
+import { resolveFieldValue, normalizeScopeValue } from '@/hooks/useAutoSyncScope';
 const normalizeArrayField = (value: any): string[] => {
   if (!value) return [];
   if (Array.isArray(value)) return value;
@@ -83,6 +84,9 @@ interface ContextOfUseTabProps {
   };
   autoSyncScope?: (fieldKey: string, newValue: any) => void;
   familyProductIds?: string[];
+  familyProducts?: any[];
+  /** Direct access to scope-change-with-propagation for value-matching mode */
+  onScopeChangeWithPropagation?: (fieldKey: string, oldScope: import('@/hooks/useInheritanceExclusion').ItemExclusionScope, newScope: import('@/hooks/useInheritanceExclusion').ItemExclusionScope) => Promise<void>;
 }
 
 const predefinedUsers = [
@@ -180,6 +184,8 @@ export function ContextOfUseTab({
   fieldExclusion,
   autoSyncScope,
   familyProductIds,
+  familyProducts,
+  onScopeChangeWithPropagation,
 }: ContextOfUseTabProps) {
   const { lang } = useTranslation();
   const [searchParams] = useSearchParams();
@@ -211,6 +217,46 @@ export function ContextOfUseTab({
   const [showTriggerDesc, setShowTriggerDesc] = useState(() => !!(intendedPurposeData as any).useTriggerDescription);
   const timeoutRefs = useRef<Map<string, NodeJS.Timeout>>(new Map());
   const isInternalUpdateRef = useRef(false);
+
+  // Compute which family products have the same value as the current device for a given field
+  const getMatchingProductIds = useCallback((fieldKey: string, currentValue: any): string[] | undefined => {
+    if (!familyProducts?.length || !productId) return undefined;
+    const currentNormalized = JSON.stringify(normalizeScopeValue(fieldKey, currentValue));
+    return familyProducts
+      .filter(p => {
+        if (p.id === productId) return true; // current device always matches itself
+        return JSON.stringify(normalizeScopeValue(fieldKey, resolveFieldValue(p, fieldKey))) === currentNormalized;
+      })
+      .map(p => p.id);
+  }, [familyProducts, productId]);
+
+  // Compute match summary for scope badges (e.g. "2/4" = 2 of 4 devices share same value)
+  const getMatchSummary = useCallback((fieldKey: string, currentValue: any) => {
+    const matchIds = getMatchingProductIds(fieldKey, currentValue);
+    if (!matchIds || !familyProducts?.length) return undefined;
+    return `${matchIds.length}/${familyProducts.length}`;
+  }, [getMatchingProductIds, familyProducts]);
+
+  // Create scope change handler that uses value-matching as the old scope baseline,
+  // so newly checked devices are correctly detected and get the current value propagated.
+  const createValueMatchScopeChange = useCallback((fieldKey: string, currentValue: any) => {
+    return (id: string, newScope: import('@/hooks/useInheritanceExclusion').ItemExclusionScope) => {
+      if (onScopeChangeWithPropagation && familyProducts?.length) {
+        const matchIds = getMatchingProductIds(fieldKey, currentValue);
+        const nonMatchingIds = matchIds
+          ? (familyProductIds || []).filter(pid => !matchIds.includes(pid))
+          : [];
+        const oldScope: import('@/hooks/useInheritanceExclusion').ItemExclusionScope = {
+          excludedProductIds: nonMatchingIds,
+          excludedCategories: [],
+          isManualGroup: true,
+        };
+        return onScopeChangeWithPropagation(id, oldScope, newScope);
+      } else if (fieldExclusion) {
+        return fieldExclusion.setExclusionScope(id, newScope);
+      }
+    };
+  }, [onScopeChangeWithPropagation, familyProducts, getMatchingProductIds, familyProductIds, fieldExclusion]);
 
   // Governance data
   const FIELD_LABELS: Record<string, string> = {
@@ -281,14 +327,6 @@ export function ContextOfUseTab({
     onIntendedPurposeDataChange(updatedData);
 
     // Auto-sync scope
-    const scopeKeyMap: Record<string, string> = {
-      targetPopulation: 'intendedPatientPopulation',
-      useEnvironment: 'environmentOfUse',
-      durationOfUse: 'durationOfUse',
-      useTrigger: 'useTrigger',
-    };
-    if (scopeKeyMap[field]) autoSyncScope?.(scopeKeyMap[field], value);
-
     const timeoutId = setTimeout(() => {
       setSavingStates(prev => {
         const newSet = new Set(prev);
@@ -365,7 +403,6 @@ export function ContextOfUseTab({
     if (!intendedUsers.includes(selectedUser)) {
       const newUsers = [...intendedUsers, selectedUser];
       onIntendedUsersChange(newUsers);
-      autoSyncScope?.('intendedUsers', newUsers);
     }
   };
 
@@ -375,7 +412,6 @@ export function ContextOfUseTab({
     if (!intendedUsers.includes(trimmedValue)) {
       const newUsers = [...intendedUsers, trimmedValue];
       onIntendedUsersChange(newUsers);
-      autoSyncScope?.('intendedUsers', newUsers);
     }
     setOtherUserText('');
     setShowOtherUserInput(false);
@@ -386,7 +422,6 @@ export function ContextOfUseTab({
     const updated = [...intendedUsers];
     updated.splice(index, 1);
     onIntendedUsersChange(updated);
-    autoSyncScope?.('intendedUsers', updated);
   };
 
   // Environment handlers
@@ -559,9 +594,11 @@ export function ContextOfUseTab({
                 currentProductId={productId}
                 itemId="intendedPatientPopulation"
                 exclusionScope={fieldExclusion.getExclusionScope('intendedPatientPopulation')}
-                onScopeChange={(id, scope) => fieldExclusion.setExclusionScope(id, scope)}
+                onScopeChange={createValueMatchScopeChange('intendedPatientPopulation', intendedPurposeData?.targetPopulation)}
                 defaultCurrentDeviceOnly
                 familyProductIds={familyProductIds}
+                summaryText={getMatchSummary('intendedPatientPopulation', intendedPurposeData?.targetPopulation)}
+                valueMatchingProductIds={getMatchingProductIds('intendedPatientPopulation', intendedPurposeData?.targetPopulation)}
               />
             ) : null}
             {getSaveStatusIcon('targetPopulation')}
@@ -737,9 +774,11 @@ export function ContextOfUseTab({
                 currentProductId={productId}
                 itemId="intendedUsers"
                 exclusionScope={fieldExclusion.getExclusionScope('intendedUsers')}
-                onScopeChange={(id, scope) => fieldExclusion.setExclusionScope(id, scope)}
+                onScopeChange={createValueMatchScopeChange('intendedUsers', intendedUsers)}
                 defaultCurrentDeviceOnly
                 familyProductIds={familyProductIds}
+                summaryText={getMatchSummary('intendedUsers', intendedUsers)}
+                valueMatchingProductIds={getMatchingProductIds('intendedUsers', intendedUsers)}
               />
             ) : null}
             {getSaveStatusIcon('intendedUser')}
@@ -907,9 +946,11 @@ export function ContextOfUseTab({
                 currentProductId={productId}
                 itemId="durationOfUse"
                 exclusionScope={fieldExclusion.getExclusionScope('durationOfUse')}
-                onScopeChange={(id, scope) => fieldExclusion.setExclusionScope(id, scope)}
+                onScopeChange={createValueMatchScopeChange('durationOfUse', intendedPurposeData?.durationOfUse)}
                 defaultCurrentDeviceOnly
                 familyProductIds={familyProductIds}
+                summaryText={getMatchSummary('durationOfUse', intendedPurposeData?.durationOfUse)}
+                valueMatchingProductIds={getMatchingProductIds('durationOfUse', intendedPurposeData?.durationOfUse)}
               />
             ) : null}
             {getSaveStatusIcon('durationOfUse')}
@@ -1022,9 +1063,11 @@ export function ContextOfUseTab({
                 currentProductId={productId}
                 itemId="environmentOfUse"
                 exclusionScope={fieldExclusion.getExclusionScope('environmentOfUse')}
-                onScopeChange={(id, scope) => fieldExclusion.setExclusionScope(id, scope)}
+                onScopeChange={createValueMatchScopeChange('environmentOfUse', intendedPurposeData?.useEnvironment)}
                 defaultCurrentDeviceOnly
                 familyProductIds={familyProductIds}
+                summaryText={getMatchSummary('environmentOfUse', intendedPurposeData?.useEnvironment)}
+                valueMatchingProductIds={getMatchingProductIds('environmentOfUse', intendedPurposeData?.useEnvironment)}
               />
             ) : null}
             {getSaveStatusIcon('useEnvironment')}
@@ -1203,9 +1246,11 @@ export function ContextOfUseTab({
                 currentProductId={productId}
                 itemId="useTrigger"
                 exclusionScope={fieldExclusion.getExclusionScope('useTrigger')}
-                onScopeChange={(id, scope) => fieldExclusion.setExclusionScope(id, scope)}
+                onScopeChange={createValueMatchScopeChange('useTrigger', intendedPurposeData?.useTrigger)}
                 defaultCurrentDeviceOnly
                 familyProductIds={familyProductIds}
+                summaryText={getMatchSummary('useTrigger', intendedPurposeData?.useTrigger)}
+                valueMatchingProductIds={getMatchingProductIds('useTrigger', intendedPurposeData?.useTrigger)}
               />
             ) : null}
             {getSaveStatusIcon('useTrigger')}

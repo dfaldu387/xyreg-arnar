@@ -27,10 +27,58 @@ export function SOPTemplatePreviewDialog({ template, isOpen, onClose, onDraftCre
 
   const buildHtmlContent = (): string => {
     if (!sopContent) return `<h1>${template.name}</h1><p>${template.description || ''}</p>`;
-    
-    return sopContent.sections.map((section, idx) => 
-      `<h2>${section.title}</h2>\n<p>${section.content}</p>`
-    ).join('\n');
+
+    return sopContent.sections.map((section) => {
+      let content = section.content;
+
+      // Convert numbered sub-sections (e.g., "6.1 Title") to h3
+      content = content.replace(/^(\d+\.\d+(?:\.\d+)?)\s+([^\n]+)/gm, '<h3>$1 $2</h3>');
+
+      // Convert bullet lines (• or -) to proper HTML list
+      content = content.replace(/((?:^|\n)\s*[•\-]\s+[^\n]+(?:\n\s*[•\-]\s+[^\n]+)*)/g, (match) => {
+        const items = match.trim().split('\n').map(line => {
+          const text = line.replace(/^\s*[•\-]\s+/, '').trim();
+          return text ? `<li>${text}</li>` : '';
+        }).filter(Boolean).join('\n');
+        return `\n<ul>\n${items}\n</ul>\n`;
+      });
+
+      // Convert markdown tables (|...|) to HTML tables
+      content = content.replace(/((?:\|[^\n]+\|\n?)+)/g, (match) => {
+        const rows = match.trim().split('\n').filter(r => r.trim());
+        if (rows.length < 2) return match;
+        const isSep = (r: string) => /^\|[\s\-:|]+\|$/.test(r.trim());
+        const hasSep = rows.length > 1 && isSep(rows[1]);
+        let html = '<table>';
+        rows.forEach((row, i) => {
+          if (hasSep && i === 1) return;
+          const cells = row.split('|').filter(c => c.trim() !== '');
+          const tag = hasSep && i === 0 ? 'th' : 'td';
+          if (hasSep && i === 0) html += '<thead>';
+          if ((hasSep && i === 2) || (!hasSep && i === 0)) html += '<tbody>';
+          html += '<tr>' + cells.map(c => `<${tag}>${c.trim()}</${tag}>`).join('') + '</tr>';
+          if (hasSep && i === 0) html += '</thead>';
+        });
+        if (hasSep && rows.length > 2) html += '</tbody>';
+        html += '</table>';
+        return html;
+      });
+
+      // Convert **bold** to <strong>
+      content = content.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+
+      // Split remaining plain text by double newlines into paragraphs
+      const parts = content.split(/\n{2,}/);
+      content = parts.map(part => {
+        const trimmed = part.trim();
+        // Don't wrap if already an HTML block element
+        if (/^<(h[1-6]|ul|ol|table|div|blockquote)/i.test(trimmed)) return trimmed;
+        // Convert single newlines to <br>
+        return `<p>${trimmed.replace(/\n/g, '<br>')}</p>`;
+      }).join('\n');
+
+      return `<h2>${section.title}</h2>\n${content}`;
+    }).join('\n');
   };
 
   const templateKey = `SOP-TPL-${template.name?.replace(/\s+/g, '-')}`;

@@ -97,10 +97,10 @@ export function useInheritanceExclusion(
       .eq('id', productId);
   }, [productId, storageKey]);
 
-  // Get exclusion scope for an item
+  // Get exclusion scope for an item (stable reference — reads from ref)
   const getExclusionScope = useCallback((itemId: string): ItemExclusionScope => {
-    return scopes[itemId] || {};
-  }, [scopes]);
+    return scopesRef.current[itemId] || {};
+  }, []);
 
   // Set exclusion scope for an item — returns a promise that resolves after DB persistence
   const setExclusionScope = useCallback((itemId: string, scope: ItemExclusionScope): Promise<void> => {
@@ -110,16 +110,16 @@ export function useInheritanceExclusion(
     return persistScopes(next);
   }, [persistScopes]);
 
-  // Check if item excludes a specific product (or the current product)
+  // Check if item excludes a specific product (or the current product) (stable reference)
   const isExcludedForProduct = useCallback((itemId: string, targetProductId?: string): boolean => {
-    const scope = scopes[itemId];
+    const scope = scopesRef.current[itemId];
     if (!scope) return false;
     if (targetProductId) {
       return (scope.excludedProductIds || []).includes(targetProductId);
     }
     // Fallback: any exclusions at all
     return (scope.excludedProductIds?.length ?? 0) > 0 || (scope.excludedCategories?.length ?? 0) > 0;
-  }, [scopes]);
+  }, []);
 
   // Backward-compat alias
   const isFullyExcluded = isExcludedForProduct;
@@ -138,11 +138,11 @@ export function useInheritanceExclusion(
     });
   }, [persistScopes]);
 
-  // Get summary text for badge display
+  // Get summary text for badge display (stable reference)
   const getExclusionSummary = useCallback((itemId: string, totalProducts: number, validProductIds?: string[]): string => {
-    const scope = scopes[itemId];
+    const scope = scopesRef.current[itemId];
     if (!scope) return `All devices (${totalProducts})`;
-    
+
     // Filter excluded IDs to only count valid (current company) products
     let excludedCount = scope.excludedProductIds?.length ?? 0;
     if (validProductIds && scope.excludedProductIds) {
@@ -154,7 +154,7 @@ export function useInheritanceExclusion(
     if (excludedCount >= totalProducts) return 'No devices';
     const activeCount = totalProducts - excludedCount;
     return `${activeCount} of ${totalProducts} devices`;
-  }, [scopes]);
+  }, []);
 
   return {
     scopes,

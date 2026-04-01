@@ -3119,7 +3119,11 @@
     "communications": "Kommunikation",
     "unreadMessages": "Ungelesene Nachrichten",
     "highPriority": "Hohe Prioritat",
+    "awaitingResponse": "Wartet auf Antwort",
+    "onlineUsers": "Online-Benutzer",
     "activeThreads": "Aktive Threads",
+    "users": "Benutzer",
+    "myThreads": "Meine Threads",
     "recentMessages": "Aktuelle Nachrichten",
     "new": "Neu",
     "noRecentCommunications": "Keine aktuellen Kommunikationen",
@@ -3386,7 +3390,9 @@
       "pricingStrategy": "Preisstrategie",
       "pricingStrategyDesc": "Definieren und verwalten Sie Preisstrategien für Ihr gesamtes Produktportfolio.",
       "investors": "Investoren",
-      "investorsDesc": "Verwalten Sie einfach Investorenbeziehungen und Datenräume für Due Diligence."
+      "investorsDesc": "Verwalten Sie einfach Investorenbeziehungen und Datenräume für Due Diligence.",
+      "fundingGrants": "Fördermittel & Zuschüsse",
+      "fundingGrantsDesc": "Prüfen Sie die Förderfähigkeit, verfolgen Sie Anträge und verwalten Sie Unterlagen für EU-, US- und nationale Förderprogramme."
     },
     "blueprint": {
       "title": "Unternehmens-Venture-Blaupause",
@@ -4142,7 +4148,7 @@
     "failedToLoad": "Lückenanalyse-Daten konnten nicht geladen werden",
     "breadcrumbs": {
       "clientCompass": "Kundenkompass",
-      "complianceInstances": "Compliance-Instanzen",
+      "complianceInstances": "Regulatorik & Einreichungen",
       "gapAnalysis": "Lückenanalyse"
     },
     "actions": {
@@ -10576,7 +10582,7 @@
     "archives": "Archive",
     "tabs": {
       "lifecyclePhases": "Lebenszyklusphasen",
-      "complianceInstances": "Compliance-Instanzen",
+      "complianceInstances": "Regulatorik & Einreichungen",
       "clinicalTrials": "Klinische Studien",
       "templates": "Vorlagen",
       "users": "Benutzer",
@@ -13551,7 +13557,7 @@
       "resolvedThisMonth": "diesen Monat gelöst",
       "criticalPathFormula": "Anzahl(Elemente auf kritischem Pfad + Überfällig)",
       "criticalPathDescription": "Anzahl der Elemente auf kritischem Pfad oder überfällig, die sofortige Aufmerksamkeit erfordern",
-      "complianceInstances": "Compliance-Instanzen",
+      "complianceInstances": "Regulatorik & Einreichungen",
       "totalTrackedItems": "Gesamt verfolgte Elemente",
       "completionRate": "Fertigstellungsrate",
       "complianceFormula": "Gesamtzahl Compliance-Instanzen",
@@ -14028,7 +14034,7 @@
   },
   "pageHeader": {
     "executiveDashboard": "Executive Dashboard",
-    "complianceInstances": "Compliance-Instanzen",
+    "complianceInstances": "Regulatorik & Einreichungen",
     "xyregGenesis": "Xyreg Genesis",
     "businessCase": "Geschäftsfall",
     "commercialIntelligence": "Kommerzielle Intelligenz",
@@ -15652,10 +15658,21 @@
     "qualityAssurancePreview": "Qualitaetssicherung:",
     "engineeringLead": "Technische Leitung",
     "qualityManager": "Qualitaetsmanager",
-    "independentReviewer": "Unabhaengiger Pruefer"
+    "independentReviewer": "Unabhaengiger Pruefer",
+    "productPageTitle": "Designbewertung",
+    "productPageSubtitle": "ISO 13485 §7.3.5 — Formale Designbewertungen mit Baselining und Nachweissicherung",
+    "totalReviews": "Bewertungen gesamt",
+    "completedBaselines": "Abgeschlossene Baselines",
+    "openFindings": "Offene Feststellungen",
+    "noReviewsYet": "Noch keine Designbewertungen vorhanden. Erstellen Sie eine, um zu beginnen.",
+    "baseline": "Baseline",
+    "findings": "Feststellungen",
+    "deleteConfirm": "\"{{title}}\" loeschen? Dies kann nicht rueckgaengig gemacht werden.",
+    "deleteFailed": "Loeschen fehlgeschlagen",
+    "deleteSuccess": "Designbewertung geloescht"
   },
   "deviceProcessEngine": {
-    "deviceStatusTab": "Geraetestatus",
+    "deviceStatusTab": "Geräte-Dashboard",
     "processEngineTab": "Geraete-Prozessmotor",
     "title": "Geraete-Prozessmotor",
     "iso13485": "(ISO 13485)",

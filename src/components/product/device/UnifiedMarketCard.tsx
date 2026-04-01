@@ -90,6 +90,7 @@ interface UnifiedMarketCardProps {
   belongsToFamily?: boolean;
   familyProductIds?: string[];
   fieldExclusion?: FieldExclusionHook;
+  valueMatchingProductIds?: string[];
 }
 
 // Market Entry Information with bureaucracy steps
@@ -236,6 +237,7 @@ export function UnifiedMarketCard({
   belongsToFamily = false,
   familyProductIds,
   fieldExclusion,
+  valueMatchingProductIds,
 }: UnifiedMarketCardProps) {
   const { lang } = useTranslation();
   const [isExpanded, setIsExpanded] = useState(autoExpand && market.selected);
@@ -572,6 +574,7 @@ export function UnifiedMarketCard({
                     onScopeChange={(id, scope) => fieldExclusion.setExclusionScope(id, scope)}
                     defaultCurrentDeviceOnly
                     familyProductIds={familyProductIds}
+                    valueMatchingProductIds={valueMatchingProductIds}
                   />
                 )}
                 <div className="transform transition-transform duration-300 ease-in-out">

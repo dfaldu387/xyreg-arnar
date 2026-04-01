@@ -42,7 +42,6 @@ import { useCompanyId } from "@/hooks/useCompanyId";
 import { supabase } from "@/integrations/supabase/client";
 import { Notification, NotificationService } from "@/services/notificationService";
 import { toast } from "sonner";
-import { createPortal } from "react-dom";
 // Note: useRouteProtection removed - ProtectedRoute and CompanyRouteGuard already handle security
 import { ImpersonationBanner } from "@/components/ui/ImpersonationBanner";
 import { RegulatoryDisclaimer } from "./RegulatoryDisclaimer";
@@ -75,388 +74,8 @@ import { useNavigationSearch } from "@/hooks/useNavigationSearch";
 import { getModifierSymbol } from "@/utils/keyboard";
 import { MobileDeviceBanner } from "@/components/ui/MobileDeviceBanner";
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "@/components/ui/tooltip";
-const NotificationDropdown = () => {
-  const [isOpen, setIsOpen] = useState(false);
-  const companyId = useCompanyId();
-  const { user } = useAuth();
-  const notificationService = new NotificationService();
-  const { lang } = useTranslation();
-  const [unreadCount, setUnreadCount] = useState(0);
-  const [notifications, setNotifications] = useState<Notification[]>([]);
-  const [dropdownPosition, setDropdownPosition] = useState({ top: 0, right: 0 });
-  const dropdownRef = useRef(null);
-  const buttonRef = useRef(null);
-  const intervalRef = useRef<NodeJS.Timeout | null>(null);
-
-  // Fetch notifications function
-  const fetchNotifications = async () => {
-    if (!companyId) return;
-
-    try {
-      const notificationsData = await notificationService.getNotifications(companyId, user?.id);
-
-      if (notificationsData) {
-        setNotifications(notificationsData);
-        const unreadCount = notificationsData.filter((n) => !n.is_read).length;
-        setUnreadCount(unreadCount);
-      }
-    } catch (error) {
-      console.error("❌ Error fetching notifications:", error);
-    }
-  };
-
-  // Real-time subscription setup
-  useEffect(() => {
-    if (!companyId) return;
-
-    // console.log("🔄 Setting up real-time subscription for company:", companyId);
-
-    const channel = supabase
-      .channel("notifications")
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "notifications",
-          filter: `company_id=eq.${companyId}`,
-        },
-        (payload) => {
-          // console.log("🔄 [Real-time] Notification change:", payload);
-          fetchNotifications();
-        },
-      )
-      .subscribe((status) => {
-        // console.log("📡 Real-time subscription status:", status);
-      });
-
-    return () => {
-      // console.log("🧹 Cleaning up real-time subscription");
-      supabase.removeChannel(channel);
-    };
-  }, [companyId]);
-
-  // Calculate dropdown position when opening
-  const handleToggleDropdown = () => {
-    if (!isOpen && buttonRef.current) {
-      const rect = buttonRef.current.getBoundingClientRect();
-      const scrollY = window.scrollY;
-      const scrollX = window.scrollX;
-
-      setDropdownPosition({
-        top: rect.bottom + scrollY + 8,
-        right: window.innerWidth - rect.right - scrollX,
-      });
-    }
-    setIsOpen(!isOpen);
-  };
-
-  // Close dropdown when clicking outside
-  useEffect(() => {
-    const handleClickOutside = (event) => {
-      if (
-        dropdownRef.current &&
-        !dropdownRef.current.contains(event.target) &&
-        buttonRef.current &&
-        !buttonRef.current.contains(event.target)
-      ) {
-        setIsOpen(false);
-      }
-    };
-
-    const handleEscape = (event) => {
-      if (event.key === "Escape") {
-        setIsOpen(false);
-      }
-    };
-
-    if (isOpen) {
-      document.addEventListener("mousedown", handleClickOutside);
-      document.addEventListener("keydown", handleEscape);
-    }
-
-    return () => {
-      document.removeEventListener("mousedown", handleClickOutside);
-      document.removeEventListener("keydown", handleEscape);
-    };
-  }, [isOpen]);
-
-  // Close dropdown on window resize
-  useEffect(() => {
-    const handleResize = () => {
-      if (isOpen) {
-        setIsOpen(false);
-      }
-    };
-
-    window.addEventListener("resize", handleResize);
-    return () => window.removeEventListener("resize", handleResize);
-  }, [isOpen]);
-
-  // Refresh notifications when dropdown opens
-  useEffect(() => {
-    if (isOpen) {
-      // console.log("🔄 Dropdown opened, refreshing notifications");
-      fetchNotifications();
-    }
-  }, []);
-
-  const markAsRead = async (id: string) => {
-    // console.log("✅ Marking notification as read:", id);
-
-    setUnreadCount((prev) => Math.max(0, prev - 1));
-    setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, is_read: true } : n)));
-
-    const error = await notificationService.markAsRead(id);
-    if (error) {
-      console.error("❌ Failed to mark notification as read:", error);
-      setUnreadCount((prev) => prev + 1);
-      setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, is_read: false } : n)));
-      toast.error("Failed to mark notification as read");
-    }
-  };
-
-  const markAllAsRead = async () => {
-    // console.log("✅ Marking all notifications as read");
-
-    const originalNotifications = [...notifications];
-    const originalUnreadCount = unreadCount;
-
-    setUnreadCount(0);
-    setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })));
-
-    const error = await notificationService.markAllAsRead(companyId, user?.id);
-    if (error) {
-      console.error("❌ Failed to mark all notifications as read:", error);
-      setNotifications(originalNotifications);
-      setUnreadCount(originalUnreadCount);
-      toast.error("Failed to mark all notifications as read");
-    }
-  };
-
-  const removeNotification = async (notificationId: string) => {
-    // console.log("🗑️ Removing notification:", notificationId);
-
-    const originalNotifications = [...notifications];
-    const removedNotification = notifications.find((n) => n.id === notificationId);
-
-    setNotifications((prev) => prev.filter((n) => n.id !== notificationId));
-    if (removedNotification && !removedNotification.is_read) {
-      setUnreadCount((prev) => Math.max(0, prev - 1));
-    }
-
-    const error = await notificationService.removeNotification(notificationId);
-    if (error) {
-      console.error("❌ Failed to remove notification:", error);
-      setNotifications(originalNotifications);
-      if (removedNotification && !removedNotification.is_read) {
-        setUnreadCount((prev) => prev + 1);
-      }
-      toast.error("Failed to remove notification");
-    }
-  };
-
-  const getTypeIconAndColor = (type) => {
-    switch (type) {
-      case "group_create":
-      case "group_created":
-        return { icon: CheckCircle, color: "text-green-600" };
-      case "group_edit":
-      case "group_edited":
-        return { icon: AlertTriangle, color: "text-yellow-600" };
-      case "group_delete":
-      case "group_deleted":
-        return { icon: XCircle, color: "text-red-600" };
-      case "group_member_added":
-        return { icon: UserPlus, color: "text-green-600" };
-      case "group_member_removed":
-        return { icon: UserMinus, color: "text-red-600" };
-      default:
-        return { icon: AlertTriangle, color: "text-slate-400" };
-    }
-  };
-
-  const getBorderColor = (type) => {
-    switch (type) {
-      case "group_create":
-      case "group_created":
-        return "border-green-400";
-      case "group_edit":
-      case "group_edited":
-        return "border-yellow-400";
-      case "group_delete":
-      case "group_deleted":
-        return "border-red-400";
-      case "group_member_added":
-        return "border-green-400";
-      case "group_member_removed":
-        return "border-red-400";
-      default:
-        return "border-slate-200";
-    }
-  };
-
-  return (
-    <>
-      <div className="relative">
-        <Button
-          ref={buttonRef}
-          variant="outline"
-          size="icon"
-          onClick={handleToggleDropdown}
-          className="relative hover:bg-slate-100 transition-colors"
-          aria-expanded={isOpen}
-          aria-haspopup="true"
-        >
-          <Bell className="h-4 w-4" />
-          {unreadCount > 0 && (
-            <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full h-5 w-5 flex items-center justify-center font-semibold animate-pulse">
-              {unreadCount > 9 ? "9+" : unreadCount}
-            </span>
-          )}
-        </Button>
-      </div>
-
-      {isOpen &&
-        createPortal(
-          <>
-            <div className="fixed inset-0 bg-black/10 z-40" onClick={() => setIsOpen(false)} />
-
-            <div
-              ref={dropdownRef}
-              className="fixed w-96 h-[500px] bg-white rounded-xl shadow-2xl border border-slate-200 z-50 flex flex-col overflow-hidden"
-              style={{
-                top: `${dropdownPosition.top}px`,
-                right: `${dropdownPosition.right}px`,
-              }}
-            >
-              <div className="p-4 border-b border-slate-200 bg-slate-50 rounded-t-xl flex-shrink-0">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-lg font-semibold text-slate-900 truncate">{lang("appLayout.notifications")}</h3>
-                  <div className="flex items-center gap-2 flex-shrink-0">
-                    {unreadCount > 0 && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={markAllAsRead}
-                        className="text-blue-600 hover:text-blue-700 hover:bg-blue-50 whitespace-nowrap"
-                      >
-                        {lang("appLayout.markAllRead")}
-                      </Button>
-                    )}
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => setIsOpen(false)}
-                      className="h-6 w-6 hover:bg-slate-200 flex-shrink-0"
-                    >
-                      <X className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
-                {unreadCount > 0 && (
-                  <p className="text-sm text-slate-600 mt-1 truncate">
-                    {unreadCount === 1
-                      ? lang("appLayout.unreadNotifications").replace("{{count}}", String(unreadCount))
-                      : lang("appLayout.unreadNotificationsPlural").replace("{{count}}", String(unreadCount))}
-                  </p>
-                )}
-              </div>
-
-              <div className="flex-1 overflow-y-auto overflow-x-auto">
-                {notifications.length === 0 ? (
-                  <div className="p-8 text-center h-full flex flex-col items-center justify-center">
-                    <Bell className="h-12 w-12 text-slate-300 mb-3" />
-                    <h4 className="text-lg font-medium text-slate-900 mb-1">{lang("appLayout.noNotifications")}</h4>
-                    <p className="text-slate-600">{lang("appLayout.allCaughtUp")}</p>
-                  </div>
-                ) : (
-                  <div className="divide-y divide-slate-100 min-w-0">
-                    {notifications.map((notification) => {
-                      const { icon: IconComponent, color } = getTypeIconAndColor(notification.type);
-                      return (
-                        <div
-                          key={notification.id}
-                          className={`p-4 transition-all duration-200 hover:bg-slate-50 border-l-4 ${getBorderColor(notification.type)} ${
-                            !notification.is_read ? "bg-blue-50/30" : ""
-                          } min-w-0`}
-                        >
-                          <div className="flex items-start gap-3 min-w-0">
-                            <div
-                              className={`p-2 rounded-lg flex-shrink-0 ${
-                                notification.is_read ? "bg-slate-200" : "bg-white shadow-sm"
-                              }`}
-                            >
-                              <IconComponent className={`h-5 w-5 ${color}`} />
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-start justify-between gap-2 min-w-0">
-                                <h4
-                                  className={`text-sm font-semibold leading-tight break-words min-w-0 ${
-                                    notification.is_read ? "text-slate-600" : "text-slate-900"
-                                  }`}
-                                >
-                                  {notification.title}
-                                </h4>
-                                <div className="flex items-center gap-1 flex-shrink-0">
-                                  {!notification.is_read && (
-                                    <Button
-                                      variant="ghost"
-                                      size="icon"
-                                      onClick={() => markAsRead(notification.id)}
-                                      className="h-6 w-6 text-green-600 hover:text-green-700 hover:bg-green-100"
-                                      title="Mark as read"
-                                    >
-                                      <Check className="h-3 w-3" />
-                                    </Button>
-                                  )}
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    onClick={() => removeNotification(notification.id)}
-                                    className="h-6 w-6 text-slate-400 hover:text-red-600 hover:bg-red-50"
-                                    title="Remove notification"
-                                  >
-                                    <X className="h-3 w-3" />
-                                  </Button>
-                                </div>
-                              </div>
-                              {notification.message && (
-                                <p
-                                  className={`text-sm mt-1 leading-relaxed break-words min-w-0 ${
-                                    notification.is_read ? "text-slate-500" : "text-slate-700"
-                                  }`}
-                                >
-                                  {notification.message}
-                                </p>
-                              )}
-                              <div className="flex items-center gap-1 mt-2 min-w-0">
-                                <Clock className="h-3 w-3 text-slate-400 flex-shrink-0" />
-                                <span className="text-xs text-slate-500 truncate">{notification.time}</span>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-
-              {notifications.length > 0 && (
-                <div className="p-3 border-t border-slate-200 bg-slate-50 rounded-b-xl flex-shrink-0">
-                  <Button variant="ghost" className="w-full text-sm text-slate-600 hover:text-slate-900 truncate">
-                    {lang("appLayout.viewAllNotifications")}
-                  </Button>
-                </div>
-              )}
-            </div>
-          </>,
-          document.body,
-        )}
-    </>
-  );
-};
+import { NotificationBell } from "@/components/layout/NotificationBell";
+import { ThreadSheetProvider } from "@/context/ThreadSheetContext";
 
 
 export default function AppLayout() {
@@ -1048,22 +667,29 @@ export default function AppLayout() {
               .eq('is_active', true)
               .limit(1);
 
-            const allowedIds = matrixRows?.[0]?.product_ids || [];
+            const matrixData = matrixRows?.[0] || null;
 
-            if (!allowedIds.includes(lastProduct)) {
-              // No access to stored product — clear and navigate to first accessible one
-              localStorage.removeItem(productKey);
-              localStorage.removeItem(routeKey);
+            // Only enforce restriction if an active matrix record exists
+            if (matrixData) {
+              const allowedIds = new Set<string>(matrixData.product_ids || []);
 
-              if (allowedIds.length > 0) {
-                setSelectedProduct(allowedIds[0]);
-                navigate(`/app/product/${allowedIds[0]}`);
-              } else {
-                setSelectedProduct(null);
-                toast.error('You do not have access to any devices');
+              if (!allowedIds.has(lastProduct)) {
+                // No access to stored product — clear and navigate to first accessible one
+                localStorage.removeItem(productKey);
+                localStorage.removeItem(routeKey);
+
+                if (allowedIds.size > 0) {
+                  const firstAllowed = Array.from(allowedIds)[0];
+                  setSelectedProduct(firstAllowed);
+                  navigate(`/app/product/${firstAllowed}`);
+                } else {
+                  setSelectedProduct(null);
+                  toast.error('You do not have access to any devices');
+                }
+                return;
               }
-              return;
             }
+            // No active matrix record means unrestricted access — allow navigation
           }
 
           // Access validated — restore last viewed device
@@ -1167,8 +793,8 @@ export default function AppLayout() {
       <SidebarProvider>
         <div className="min-h-screen flex bg-gray-50 w-full">
           <SuperAdminSidebar />
-          <div className="flex-1 ml-4 flex flex-col min-h-0">
-            <header className="flex h-16 shrink-0 items-center mt-4 justify-between gap-2 px-4  border-b bg-background">
+          <div className="flex-1 flex flex-col min-h-0">
+            <header className="flex h-12 shrink-0 items-center justify-between gap-2 px-4 py-8 border-b bg-background sticky top-0 z-10">
               <div className="flex items-center gap-3">
                 <div>
                   <div className="text-2xl font-semibold text-teal-700">{superAdminLang("appLayout.superAdmin")}</div>
@@ -1191,6 +817,7 @@ export default function AppLayout() {
   }
 
   return (
+    <ThreadSheetProvider>
     <div className="min-h-screen flex w-full bg-gray-50 overflow-x-hidden">
       {/* Product Route Validator - validates product UUIDs */}
       <ProductRouteValidator />
@@ -1276,7 +903,7 @@ export default function AppLayout() {
                 <BookOpen className="h-4 w-4" />
               </Button>
               <LanguageSwitcher />
-              <NotificationDropdown />
+              <NotificationBell />
               <UserNav />
             </div>
           </div>
@@ -1320,5 +947,6 @@ export default function AppLayout() {
       {/* Mobile Device Banner - suggests desktop for better experience */}
       <MobileDeviceBanner />
     </div>
+    </ThreadSheetProvider>
   );
 }

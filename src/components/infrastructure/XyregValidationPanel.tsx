@@ -5,24 +5,29 @@ import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { CheckCircle2, Clock, AlertTriangle, Download, ArrowRight, Shield, Layers, ChevronRight } from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { CheckCircle2, Clock, AlertTriangle, Download, ArrowRight, Shield, Layers, ChevronRight, Building, ArrowUpCircle, PackageOpen, FileText } from 'lucide-react';
 import { XYREG_MODULE_GROUPS, type XyregModuleGroup } from '@/data/xyregModuleGroups';
 import { CORE_SERVICES } from '@/data/coreModuleDependencies';
 import { ModuleGroupChecklist } from './ModuleGroupChecklist';
+import { ValidationCoverageDashboard } from './ValidationCoverageDashboard';
 import { toast } from 'sonner';
 import { useTranslation } from '@/hooks/useTranslation';
+import { useCompanyId } from '@/hooks/useCompanyId';
+import { useCompanyAdoptedRelease, useAdoptRelease } from '@/hooks/useCompanyAdoptedRelease';
+import { useAvailableXyregReleases } from '@/hooks/useAvailableXyregReleases';
+import { useCumulativeChangelog } from '@/hooks/useCumulativeChangelog';
 
 interface XyregValidationPanelProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  companyId?: string;
 }
 
 type ValidationStatus = 'validated' | 'pending' | 'invalidated' | 'not_started';
 
 function getModuleStatus(_groupId: string): ValidationStatus {
-  // Mock: in real implementation, query customer_validation_records
   const statuses: ValidationStatus[] = ['validated', 'pending', 'not_started', 'invalidated'];
-  // Deterministic mock based on group id hash
   const hash = _groupId.split('').reduce((a, c) => a + c.charCodeAt(0), 0);
   return statuses[hash % statuses.length];
 }
@@ -49,12 +54,51 @@ function RiskBadge({ risk }: { risk: 'low' | 'medium' | 'high' }) {
   return <Badge className={`text-xs ${colors[risk]}`}>{risk}</Badge>;
 }
 
-export function XyregValidationPanel({ open, onOpenChange }: XyregValidationPanelProps) {
+export function XyregValidationPanel({ open, onOpenChange, companyId: propCompanyId }: XyregValidationPanelProps) {
   const { lang } = useTranslation();
+  const hookCompanyId = useCompanyId();
+  const resolvedCompanyId = propCompanyId || hookCompanyId || '';
   const [selectedGroup, setSelectedGroup] = useState<XyregModuleGroup | null>(null);
+  const [selectedReleaseId, setSelectedReleaseId] = useState<string>('');
 
-  const currentVersion = 'v2.4.1';
+  // Fetch adopted release for this company
+  const { data: adoptedRelease, isLoading: isLoadingAdoption } = useCompanyAdoptedRelease(resolvedCompanyId);
+  // Fetch all available published releases
+  const { data: availableReleases = [] } = useAvailableXyregReleases();
+  // Mutation to adopt a release
+  const adoptRelease = useAdoptRelease(resolvedCompanyId);
+
+  const [showChangelog, setShowChangelog] = useState(false);
+
+  // Check if there's a newer release available
+  const newerReleases = adoptedRelease
+    ? availableReleases.filter(r => r.id !== adoptedRelease.release_id)
+    : [];
+  const latestAvailable = availableReleases.length > 0 ? availableReleases[0] : null;
+  const hasNewerVersion = adoptedRelease && latestAvailable && latestAvailable.id !== adoptedRelease.release_id;
+
+  // Cumulative changelog: from current adopted release to latest available
+  const { data: cumulativeChangelog = [] } = useCumulativeChangelog(
+    adoptedRelease?.release_date ?? null,
+    hasNewerVersion ? latestAvailable!.release_date : null
+  );
+
+  const currentVersion = adoptedRelease?.version ? `v${adoptedRelease.version}` : null;
+  const currentReleaseDate = adoptedRelease?.release_date ?? null;
   const validatedCount = XYREG_MODULE_GROUPS.filter(g => getModuleStatus(g.id) === 'validated').length;
+
+  const handleAdoptRelease = (releaseId: string) => {
+    adoptRelease.mutate(releaseId, {
+      onSuccess: () => {
+        const release = availableReleases.find(r => r.id === releaseId);
+        toast.success(`Adopted XYREG v${release?.version ?? ''}. Validation cycle started.`);
+        setSelectedReleaseId('');
+      },
+      onError: () => {
+        toast.error('Failed to adopt release. Please try again.');
+      },
+    });
+  };
 
   const handleSaveValidation = (data: any) => {
     console.log('Saving validation for', selectedGroup?.id, data);
@@ -62,6 +106,7 @@ export function XyregValidationPanel({ open, onOpenChange }: XyregValidationPane
     setSelectedGroup(null);
   };
 
+  // Sub-view: Module Group Checklist
   if (selectedGroup) {
     return (
       <Sheet open={open} onOpenChange={onOpenChange}>
@@ -77,6 +122,9 @@ export function XyregValidationPanel({ open, onOpenChange }: XyregValidationPane
           <ScrollArea className="h-[calc(100vh-80px)] px-6 pb-6">
             <ModuleGroupChecklist
               moduleGroup={selectedGroup}
+              companyId={resolvedCompanyId}
+              releaseVersion={adoptedRelease?.version}
+              releaseDate={adoptedRelease?.release_date}
               onSave={handleSaveValidation}
             />
           </ScrollArea>
@@ -97,23 +145,157 @@ export function XyregValidationPanel({ open, onOpenChange }: XyregValidationPane
 
         <ScrollArea className="h-[calc(100vh-80px)] px-6 pb-6">
           <div className="space-y-6">
-            {/* Version & Status Summary */}
-            <Card className="border-primary/20">
-              <CardContent className="pt-4 pb-3">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-medium">{lang('infrastructure.validationPanel.currentVersion')}</p>
-                    <p className="text-2xl font-bold text-primary">{currentVersion}</p>
+            {/* Validation Coverage Dashboard */}
+            <ValidationCoverageDashboard />
+
+            {/* Release Adoption Section */}
+            {!adoptedRelease && !isLoadingAdoption ? (
+              /* No adopted release — show picker */
+              <Card className="border-primary/30 bg-primary/5">
+                <CardContent className="pt-4 pb-4">
+                  <div className="flex items-start gap-3">
+                    <PackageOpen className="h-5 w-5 text-primary mt-0.5 shrink-0" />
+                    <div className="flex-1 space-y-3">
+                      <div>
+                        <p className="text-sm font-semibold">Select XYREG Version to Validate</p>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          Choose which software release your organization will validate against. You can skip versions.
+                        </p>
+                      </div>
+                      {availableReleases.length > 0 ? (
+                        <div className="flex items-center gap-2">
+                          <Select value={selectedReleaseId} onValueChange={setSelectedReleaseId}>
+                            <SelectTrigger className="w-[200px] h-8 text-sm">
+                              <SelectValue placeholder="Select version..." />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {availableReleases.map(r => (
+                                <SelectItem key={r.id} value={r.id}>
+                                  v{r.version} — {new Date(r.release_date).toLocaleDateString()}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <Button
+                            size="sm"
+                            disabled={!selectedReleaseId || adoptRelease.isPending}
+                            onClick={() => handleAdoptRelease(selectedReleaseId)}
+                          >
+                            {adoptRelease.isPending ? 'Adopting...' : 'Start Validation'}
+                          </Button>
+                        </div>
+                      ) : (
+                        <p className="text-xs text-muted-foreground italic">No published releases available yet.</p>
+                      )}
+                    </div>
                   </div>
-                  <div className="text-right">
-                    <p className="text-sm font-medium">{lang('infrastructure.validationPanel.moduleGroupsValidated')}</p>
-                    <p className="text-2xl font-bold">
-                      {validatedCount}<span className="text-muted-foreground text-lg">/{XYREG_MODULE_GROUPS.length}</span>
-                    </p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
+                </CardContent>
+              </Card>
+            ) : (
+              /* Has adopted release — show version + optional upgrade banner */
+              <>
+                <Card className="border-primary/20">
+                  <CardContent className="pt-4 pb-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-medium">{lang('infrastructure.validationPanel.currentVersion')}</p>
+                        <p className="text-2xl font-bold text-primary">{currentVersion ?? '...'}</p>
+                        {currentReleaseDate && (
+                          <p className="text-xs text-muted-foreground">
+                            Adopted {new Date(adoptedRelease!.adopted_at).toLocaleDateString()}
+                          </p>
+                        )}
+                      </div>
+                      <div className="text-right">
+                        <p className="text-sm font-medium">{lang('infrastructure.validationPanel.moduleGroupsValidated')}</p>
+                        <p className="text-2xl font-bold">
+                          {validatedCount}<span className="text-muted-foreground text-lg">/{XYREG_MODULE_GROUPS.length}</span>
+                        </p>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* New version available banner */}
+                {hasNewerVersion && (
+                  <Card className="border-blue-200 bg-blue-50/50">
+                    <CardContent className="py-3 px-4 space-y-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <ArrowUpCircle className="h-4 w-4 text-blue-600 shrink-0" />
+                          <div>
+                            <p className="text-sm font-medium text-blue-900">
+                              New version available: v{latestAvailable!.version}
+                            </p>
+                            <p className="text-xs text-blue-700">
+                              Released {new Date(latestAvailable!.release_date).toLocaleDateString()}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          {cumulativeChangelog.length > 0 && (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="text-blue-700 hover:bg-blue-100 text-xs"
+                              onClick={() => setShowChangelog(!showChangelog)}
+                            >
+                              <FileText className="h-3 w-3 mr-1" />
+                              {showChangelog ? 'Hide changes' : `View changes (${cumulativeChangelog.length})`}
+                            </Button>
+                          )}
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="border-blue-300 text-blue-700 hover:bg-blue-100"
+                            disabled={adoptRelease.isPending}
+                            onClick={() => handleAdoptRelease(latestAvailable!.id)}
+                          >
+                            <ArrowUpCircle className="h-3 w-3 mr-1" />
+                            {adoptRelease.isPending ? 'Upgrading...' : 'Upgrade'}
+                          </Button>
+                        </div>
+                      </div>
+
+                      {/* Cumulative changelog */}
+                      {showChangelog && cumulativeChangelog.length > 0 && (
+                        <div className="border-t border-blue-200 pt-3 space-y-3">
+                          <p className="text-xs font-semibold text-blue-900">
+                            Changes since {currentVersion}:
+                          </p>
+                          {cumulativeChangelog.map((entry) => (
+                            <div key={entry.version} className="space-y-1">
+                              <p className="text-xs font-medium text-blue-800">
+                                v{entry.version} — {new Date(entry.release_date).toLocaleDateString()}
+                              </p>
+                              {entry.impacted_module_groups && entry.impacted_module_groups.length > 0 && (
+                                <div className="flex flex-wrap gap-1 pl-3">
+                                  {entry.impacted_module_groups.map(moduleId => {
+                                    const group = XYREG_MODULE_GROUPS.find(g => g.id === moduleId);
+                                    return (
+                                      <Badge key={moduleId} variant="outline" className="text-[9px] py-0 border-blue-300 text-blue-700">
+                                        {group?.name || moduleId}
+                                      </Badge>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                              {entry.changelog ? (
+                                <div className="text-xs text-blue-700 pl-3 whitespace-pre-line">
+                                  {entry.changelog}
+                                </div>
+                              ) : (
+                                <p className="text-xs text-blue-600/60 pl-3 italic">No changelog provided</p>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                )}
+              </>
+            )}
 
             {/* Download Kit */}
             <Button
@@ -162,10 +344,15 @@ export function XyregValidationPanel({ open, onOpenChange }: XyregValidationPane
               <div className="space-y-2">
                 {XYREG_MODULE_GROUPS.map(group => {
                   const status = getModuleStatus(group.id);
+                  const expiredDeps = group.infrastructureDependencies?.filter(dep => {
+                    const expiredAssetIds = ['FAC-005', 'DIG-005', 'MNT-004'];
+                    return expiredAssetIds.includes(dep.assetId);
+                  }) || [];
+
                   return (
                     <Card
                       key={group.id}
-                      className="cursor-pointer hover:bg-muted/30 transition-colors"
+                      className={`cursor-pointer hover:bg-muted/30 transition-colors ${expiredDeps.length > 0 ? 'border-amber-300' : ''}`}
                       onClick={() => setSelectedGroup(group)}
                     >
                       <CardContent className="py-3 px-4">
@@ -183,6 +370,16 @@ export function XyregValidationPanel({ open, onOpenChange }: XyregValidationPane
                                 <Badge variant="secondary" className="text-[10px] py-0">+{group.features.length - 3}</Badge>
                               )}
                             </div>
+                            {expiredDeps.length > 0 && (
+                              <div className="mt-1.5 space-y-0.5">
+                                {expiredDeps.map(dep => (
+                                  <div key={dep.assetId} className="flex items-center gap-1.5 text-[10px] text-amber-700">
+                                    <Building className="h-3 w-3 shrink-0" />
+                                    <span>Infrastructure dependency expired: <strong>{dep.assetName}</strong></span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
                           </div>
                           <div className="flex items-center gap-2 ml-2">
                             <StatusBadge status={status} lang={lang} />

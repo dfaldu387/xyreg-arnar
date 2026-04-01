@@ -1,4 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMemo } from 'react';
 import { DeviceComponentsService, type CreateDeviceComponentData, type UpdateDeviceComponentData } from '@/services/deviceComponentsService';
 import { toast } from 'sonner';
 
@@ -12,7 +13,10 @@ export function useDeviceComponents(productId: string | undefined) {
 
 export function useDeviceComponentTree(productId: string | undefined) {
   const query = useDeviceComponents(productId);
-  const tree = query.data ? DeviceComponentsService.buildTree(query.data) : [];
+  const tree = useMemo(
+    () => query.data ? DeviceComponentsService.buildTree(query.data) : [],
+    [query.data]
+  );
   return { ...query, tree };
 }
 

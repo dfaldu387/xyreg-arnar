@@ -2,11 +2,8 @@ import React, { useState, useCallback } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Save, FlaskConical, CheckCircle2, Info, Upload, X, FileImage, FileVideo, ExternalLink, Sparkles, Loader2, Plus, Globe } from "lucide-react";
+import { Save, FlaskConical, CheckCircle2, Info, Upload, X, FileImage, FileVideo, ExternalLink, Sparkles, Loader2, Plus, FileUp } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -15,7 +12,7 @@ import {
   DialogDescription,
   DialogFooter,
 } from "@/components/ui/dialog";
-import { UsabilityEngineeringFile, updateUsabilityEngineeringFile } from "@/services/usabilityEngineeringService";
+import { UsabilityEngineeringFile } from "@/services/usabilityEngineeringService";
 import { toast } from "sonner";
 import { useQueryClient, useQuery } from "@tanstack/react-query";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -23,14 +20,13 @@ import { supabase } from "@/integrations/supabase/client";
 import { useDropzone } from "react-dropzone";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useLanguage } from "@/context/LanguageContext";
+import { useUsabilityStudies } from "@/hooks/useUsabilityStudies";
+import { StudyCardV2 } from "./StudyCard";
+import { UsabilityStudyRow } from "@/services/usabilityStudyService";
+import { updateUsabilityStudy, createUsabilityStudy } from "@/services/usabilityStudyService";
+import { UsabilityDocumentImporter } from "./UsabilityDocumentImporter";
+import { AIContextSourcesPanel } from "@/components/product/ai-assistant/AIContextSourcesPanel";
 
-const LANGUAGE_OPTIONS = [
-  { value: 'en', label: 'English' },
-  { value: 'de', label: 'Deutsch' },
-  { value: 'fr', label: 'Français' },
-  { value: 'fi', label: 'Suomi' },
-];
-import { StudyCard, UsabilityStudy, createEmptyStudy, parseStudies } from "./StudyCard";
 
 interface EvaluationPlanTabProps {
   uef: UsabilityEngineeringFile;
@@ -59,21 +55,18 @@ export function EvaluationPlanTab({ uef, productId, companyId, disabled }: Evalu
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
 
-  const [formativeStudies, setFormativeStudies] = useState<UsabilityStudy[]>(
-    () => parseStudies(uef.formative_plan, 'formative')
-  );
-  const [summativeStudies, setSummativeStudies] = useState<UsabilityStudy[]>(
-    () => parseStudies(uef.summative_plan, 'summative')
-  );
+  // Use DB-backed studies
+  const { studies: formativeStudies, createStudy, isCreating } = useUsabilityStudies(productId, 'formative');
+  const { studies: summativeStudies } = useUsabilityStudies(productId, 'summative');
 
-  const [isSaving, setIsSaving] = useState(false);
   const [isUploading, setIsUploading] = useState<'formative' | 'summative' | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [showAIDialog, setShowAIDialog] = useState(false);
   const { language: appLanguage } = useLanguage();
   const [additionalPrompt, setAdditionalPrompt] = useState('');
   const [outputLanguage, setOutputLanguage] = useState<string>(appLanguage);
-  const [evalSourceChecks, setEvalSourceChecks] = useState<Set<number>>(new Set([0, 1, 2, 3]));
+  const [showImporter, setShowImporter] = useState<'formative' | 'summative' | null>(null);
+
   // Fetch evidence files from storage
   const { data: formativeFiles = [], refetch: refetchFormative } = useQuery({
     queryKey: ['usability-evidence', productId, 'formative'],
@@ -138,23 +131,45 @@ export function EvaluationPlanTab({ uef, productId, companyId, disabled }: Evalu
       if (error) throw error;
 
       if (result?.success && result?.plan) {
-        // AI returns structured study arrays
-        const mapStudy = (s: any, section: 'formative' | 'summative'): UsabilityStudy => ({
-          id: `${section}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-          name: s.name || '',
-          study_type: s.study_type || 'other',
-          objective: s.objective || '',
-          method: s.method || '',
-          participants: s.participants || '',
-          tasks: s.tasks || '',
-          acceptance_criteria: s.acceptance_criteria || '',
-          status: 'draft',
-        });
-        const fStudies = (result.plan.formative_studies || []).map((s: any) => mapStudy(s, 'formative'));
-        const sStudies = (result.plan.summative_studies || []).map((s: any) => mapStudy(s, 'summative'));
-        if (fStudies.length) setFormativeStudies(prev => [...prev, ...fStudies]);
-        if (sStudies.length) setSummativeStudies(prev => [...prev, ...sStudies]);
-        toast.success(`Added ${fStudies.length + sStudies.length} AI-suggested studies. Review and save when ready.`);
+        const fStudies = result.plan.formative_studies || [];
+        const sStudies = result.plan.summative_studies || [];
+        let count = 0;
+
+        for (const s of fStudies) {
+          createStudy({
+            product_id: productId,
+            company_id: companyId,
+            uef_id: uef.id,
+            study_type: 'formative',
+            name: s.name || '',
+            study_subtype: s.study_type || 'other',
+            objective: s.objective || '',
+            method: s.method || '',
+            participants_text: s.participants || '',
+            tasks_text: s.tasks || '',
+            acceptance_criteria: s.acceptance_criteria || '',
+            status: 'draft',
+          } as any);
+          count++;
+        }
+        for (const s of sStudies) {
+          createStudy({
+            product_id: productId,
+            company_id: companyId,
+            uef_id: uef.id,
+            study_type: 'summative',
+            name: s.name || '',
+            study_subtype: s.study_type || 'other',
+            objective: s.objective || '',
+            method: s.method || '',
+            participants_text: s.participants || '',
+            tasks_text: s.tasks || '',
+            acceptance_criteria: s.acceptance_criteria || '',
+            status: 'draft',
+          } as any);
+          count++;
+        }
+        toast.success(`Added ${count} AI-suggested studies.`);
       } else {
         throw new Error(result?.error || 'Failed to generate plans');
       }
@@ -172,34 +187,37 @@ export function EvaluationPlanTab({ uef, productId, companyId, disabled }: Evalu
     }
   };
 
-  const handleSave = async () => {
-    setIsSaving(true);
+  // Study update handler – debounced save to DB
+  const handleStudyChange = async (study: UsabilityStudyRow, updates: Partial<UsabilityStudyRow>) => {
     try {
-      await updateUsabilityEngineeringFile(uef.id, {
-        formative_plan: JSON.stringify(formativeStudies),
-        summative_plan: JSON.stringify(summativeStudies),
-      });
-      queryClient.invalidateQueries({ queryKey: ['usability-engineering-file', productId] });
-      toast.success('Evaluation Plan saved');
-    } catch (error) {
-      toast.error('Failed to save Evaluation Plan');
-    } finally {
-      setIsSaving(false);
+      await updateUsabilityStudy(study.id, updates);
+      queryClient.invalidateQueries({ queryKey: ['usability-studies', productId] });
+    } catch {
+      toast.error('Failed to save study');
     }
   };
 
-  // Study CRUD helpers
-  const updateFormativeStudy = (idx: number, updated: UsabilityStudy) => {
-    setFormativeStudies(prev => prev.map((s, i) => i === idx ? updated : s));
+  const handleDeleteStudy = async (studyId: string) => {
+    try {
+      const { error } = await supabase.from('usability_studies').delete().eq('id', studyId);
+      if (error) throw error;
+      queryClient.invalidateQueries({ queryKey: ['usability-studies', productId] });
+      toast.success('Study removed');
+    } catch {
+      toast.error('Failed to delete study');
+    }
   };
-  const deleteFormativeStudy = (idx: number) => {
-    setFormativeStudies(prev => prev.filter((_, i) => i !== idx));
-  };
-  const updateSummativeStudy = (idx: number, updated: UsabilityStudy) => {
-    setSummativeStudies(prev => prev.map((s, i) => i === idx ? updated : s));
-  };
-  const deleteSummativeStudy = (idx: number) => {
-    setSummativeStudies(prev => prev.filter((_, i) => i !== idx));
+
+  const addNewStudy = (section: 'formative' | 'summative') => {
+    createStudy({
+      product_id: productId,
+      company_id: companyId,
+      uef_id: uef.id,
+      study_type: section,
+      name: '',
+      study_subtype: section === 'formative' ? 'heuristic_evaluation' : 'simulated_use',
+      status: 'draft',
+    } as any);
   };
 
   // File upload/delete
@@ -313,13 +331,13 @@ export function EvaluationPlanTab({ uef, productId, companyId, disabled }: Evalu
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <Button variant="outline" onClick={() => setShowImporter('formative')} disabled={disabled}>
+            <FileUp className="h-4 w-4 mr-2" />
+            Import from Document
+          </Button>
           <Button variant="outline" onClick={() => setShowAIDialog(true)} disabled={disabled || isGenerating}>
             {isGenerating ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Sparkles className="h-4 w-4 mr-2" />}
             {isGenerating ? 'Generating...' : 'AI Suggestions'}
-          </Button>
-          <Button onClick={handleSave} disabled={disabled || isSaving}>
-            <Save className="h-4 w-4 mr-2" />
-            {isSaving ? 'Saving...' : 'Save Changes'}
           </Button>
         </div>
       </div>
@@ -327,8 +345,8 @@ export function EvaluationPlanTab({ uef, productId, companyId, disabled }: Evalu
       <Alert>
         <Info className="h-4 w-4" />
         <AlertDescription>
-          Add individual studies for each evaluation round. Attach evidence photos/videos per section.
-          Test cases are created and executed in the Verification &amp; Validation module.
+          Add individual studies for each evaluation round. Studies are auto-saved to the database.
+          Attach evidence photos/videos per section. Test cases are created and executed in the V&V module.
         </AlertDescription>
       </Alert>
 
@@ -350,11 +368,7 @@ export function EvaluationPlanTab({ uef, productId, companyId, disabled }: Evalu
               </div>
             </div>
             {!disabled && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setFormativeStudies(prev => [...prev, createEmptyStudy('formative')])}
-              >
+              <Button variant="outline" size="sm" onClick={() => addNewStudy('formative')} disabled={isCreating}>
                 <Plus className="h-4 w-4 mr-1" />
                 Add Study
               </Button>
@@ -367,13 +381,13 @@ export function EvaluationPlanTab({ uef, productId, companyId, disabled }: Evalu
               No formative studies yet. Add one or generate with AI.
             </p>
           )}
-          {formativeStudies.map((study, idx) => (
-            <StudyCard
+          {formativeStudies.map((study) => (
+            <StudyCardV2
               key={study.id}
               study={study}
               section="formative"
-              onChange={(updated) => updateFormativeStudy(idx, updated)}
-              onDelete={() => deleteFormativeStudy(idx)}
+              onChange={(updates) => handleStudyChange(study, updates)}
+              onDelete={() => handleDeleteStudy(study.id)}
               disabled={disabled}
               defaultOpen={!study.name}
             />
@@ -411,11 +425,7 @@ export function EvaluationPlanTab({ uef, productId, companyId, disabled }: Evalu
               </div>
             </div>
             {!disabled && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setSummativeStudies(prev => [...prev, createEmptyStudy('summative')])}
-              >
+              <Button variant="outline" size="sm" onClick={() => addNewStudy('summative')} disabled={isCreating}>
                 <Plus className="h-4 w-4 mr-1" />
                 Add Study
               </Button>
@@ -428,13 +438,13 @@ export function EvaluationPlanTab({ uef, productId, companyId, disabled }: Evalu
               No summative studies yet. Add one or generate with AI.
             </p>
           )}
-          {summativeStudies.map((study, idx) => (
-            <StudyCard
+          {summativeStudies.map((study) => (
+            <StudyCardV2
               key={study.id}
               study={study}
               section="summative"
-              onChange={(updated) => updateSummativeStudy(idx, updated)}
-              onDelete={() => deleteSummativeStudy(idx)}
+              onChange={(updates) => handleStudyChange(study, updates)}
+              onDelete={() => handleDeleteStudy(study.id)}
               disabled={disabled}
               defaultOpen={!study.name}
             />
@@ -466,57 +476,17 @@ export function EvaluationPlanTab({ uef, productId, companyId, disabled }: Evalu
               Generate formative and summative study drafts using AI
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-4 py-2">
-            <div className="space-y-2">
-              <h4 className="text-sm font-medium">Context sources</h4>
-              <div className="divide-y divide-border rounded-md border bg-muted/20">
-                {['Product definition (name, class, intended use)',
-                  'Usability hazards (human-factors related)',
-                  'UI Characteristics (features & safety relevance)',
-                  'Intended users & use environments'].map((item, i) => (
-                  <div key={i} className="flex items-center gap-2 px-3 py-2 text-sm">
-                    <Checkbox
-                      checked={evalSourceChecks.has(i)}
-                      onCheckedChange={() => {
-                        const next = new Set(evalSourceChecks);
-                        next.has(i) ? next.delete(i) : next.add(i);
-                        setEvalSourceChecks(next);
-                      }}
-                      className="h-3.5 w-3.5"
-                    />
-                    <span>{item}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="flex items-center gap-3">
-              <Label className="text-sm font-medium flex items-center gap-1.5 whitespace-nowrap">
-                <Globe className="h-3.5 w-3.5 text-muted-foreground" />
-                Output language
-              </Label>
-              <Select value={outputLanguage} onValueChange={setOutputLanguage}>
-                <SelectTrigger className="w-40">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {LANGUAGE_OPTIONS.map(opt => (
-                    <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-1.5">
-              <Label className="text-sm font-medium">Additional instructions (optional)</Label>
-              <Textarea
-                placeholder="Add specific instructions for the AI generation..."
-                className="min-h-[60px] text-sm resize-y"
-                value={additionalPrompt}
-                onChange={(e) => setAdditionalPrompt(e.target.value)}
-              />
-            </div>
-          </div>
+          <AIContextSourcesPanel
+            productId={productId}
+            additionalSources={[
+              'Usability Hazards (human-factors)',
+              'UI Characteristics',
+              'Intended Users & Use Environments',
+            ]}
+            mode="select"
+            onLanguageChange={setOutputLanguage}
+            onPromptChange={setAdditionalPrompt}
+          />
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowAIDialog(false)}>
               Cancel
@@ -534,6 +504,22 @@ export function EvaluationPlanTab({ uef, productId, companyId, disabled }: Evalu
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Document Importer */}
+      {showImporter && (
+        <UsabilityDocumentImporter
+          open={!!showImporter}
+          onOpenChange={(open) => { if (!open) setShowImporter(null); }}
+          studyType={showImporter}
+          productId={productId}
+          companyId={companyId}
+          uefId={uef.id}
+          onImport={async (data) => {
+            await createUsabilityStudy(data as any);
+            queryClient.invalidateQueries({ queryKey: ['usability-studies', productId] });
+          }}
+        />
+      )}
     </div>
   );
 }

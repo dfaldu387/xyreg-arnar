@@ -4,6 +4,7 @@ import { X, BookOpen, ChevronDown, Eye, Circle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
+import { Textarea } from '@/components/ui/textarea';
 import { Sparkles, Wand2, CheckCircle2, XCircle, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
@@ -44,6 +45,7 @@ export function AIAutoFillDialog({
   const [selectedRefDocIds, setSelectedRefDocIds] = useState<string[]>([]);
   const [expandedSectionId, setExpandedSectionId] = useState<string | null>(null);
   const [currentGeneratingTitle, setCurrentGeneratingTitle] = useState('');
+  const [additionalInstructions, setAdditionalInstructions] = useState('');
   const { documents: refDocuments } = useReferenceDocuments(companyId);
 
   React.useEffect(() => {
@@ -54,6 +56,7 @@ export function AIAutoFillDialog({
       setSelectedRefDocIds([]);
       setExpandedSectionId(null);
       setCurrentGeneratingTitle('');
+      setAdditionalInstructions('');
     }
   }, [open, template]);
 
@@ -131,8 +134,11 @@ export function AIAutoFillDialog({
 
     try {
       let prompt = `Generate comprehensive draft content for the "${section.title}" section following medical device industry best practices and regulatory standards (ISO 13485, FDA 21 CFR 820, EU MDR). Write professional, concise content appropriate for a ${template.type || 'QMS'} document titled "${template.name}".`;
+      if (additionalInstructions.trim()) {
+        prompt += `\n\nAdditional instructions: ${additionalInstructions.trim()}`;
+      }
       if (referenceContext) {
-        prompt += ` Use the following reference documents as context to ground your output:\n\n${referenceContext}`;
+        prompt += `\n\nUse the following reference documents as context to ground your output:\n\n${referenceContext}`;
       }
 
       const { data, error } = await supabase.functions.invoke('ai-content-generator', {
@@ -291,10 +297,37 @@ export function AIAutoFillDialog({
           </DialogPrimitive.Close>
 
           <div className="space-y-4">
+            {/* AI Input Sources Indicator */}
+            <div className="rounded-lg border bg-muted/30 p-3">
+              <h4 className="text-sm font-medium flex items-center gap-2 mb-2">
+                <BookOpen className="h-4 w-4 text-muted-foreground" />
+                AI Input Sources
+              </h4>
+              <div className="divide-y divide-border rounded-md border bg-muted/20">
+                <div className="flex items-center gap-2 px-2.5 py-1.5 text-xs">
+                  <CheckCircle2 className="h-3 w-3 text-green-600 dark:text-green-400 shrink-0" />
+                  <span className="font-medium">Template</span>
+                  <span className="text-muted-foreground truncate">{template.name}</span>
+                </div>
+                <div className="flex items-center gap-2 px-2.5 py-1.5 text-xs">
+                  <CheckCircle2 className="h-3 w-3 text-green-600 dark:text-green-400 shrink-0" />
+                  <span className="font-medium">Sections</span>
+                  <span className="text-muted-foreground">{selectedCount} selected</span>
+                </div>
+                {selectedRefDocIds.length > 0 && (
+                  <div className="flex items-center gap-2 px-2.5 py-1.5 text-xs">
+                    <CheckCircle2 className="h-3 w-3 text-green-600 dark:text-green-400 shrink-0" />
+                    <span className="font-medium">Reference Docs</span>
+                    <span className="text-muted-foreground">{selectedRefDocIds.length} document(s)</span>
+                  </div>
+                )}
+              </div>
+            </div>
+
             {/* Reference Documents Picker */}
             {refDocuments.length > 0 && (
               <div>
-                <h3 className="font-semibold text-gray-700 mb-2 flex items-center gap-2">
+                <h3 className="font-semibold text-foreground mb-2 flex items-center gap-2">
                   <BookOpen className="w-4 h-4" />
                   Reference Documents as Context
                 </h3>
@@ -518,6 +551,19 @@ export function AIAutoFillDialog({
                 )}
               </div>
             )}
+
+            {/* Additional Instructions */}
+            <div>
+              <label className="text-sm font-semibold text-gray-700">Additional instructions (optional)</label>
+              <Textarea
+                value={additionalInstructions}
+                onChange={(e) => setAdditionalInstructions(e.target.value)}
+                disabled={isGenerating || isDone}
+                rows={3}
+                className="mt-1.5 text-sm bg-blue-50/50 border-blue-100 focus:border-blue-300 resize-y"
+                placeholder="Add specific instructions for the AI generation..."
+              />
+            </div>
 
             {/* Actions */}
             <div className="flex justify-end gap-3 pt-2">

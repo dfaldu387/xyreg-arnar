@@ -406,6 +406,71 @@ export function useMissionControlData(options: MissionControlOptions = {}) {
         }
       }
 
+      // Fetch unread app_notifications (review assignments, communication, etc.) for current user
+      if (user?.id) {
+        const targetCompanyIdForAppNotifs = options.companyId && options.companyId !== 'all' ? options.companyId : (userCompanyIds[0] || null);
+        if (targetCompanyIdForAppNotifs) {
+          // Fetch review notifications
+          const { data: reviewNotifs } = await supabase
+            .from('app_notifications')
+            .select('*')
+            .eq('user_id', user.id)
+            .eq('company_id', targetCompanyIdForAppNotifs)
+            .eq('is_read', false)
+            .eq('is_archived', false)
+            .neq('category', 'communication')
+            .order('created_at', { ascending: false })
+            .limit(20);
+
+          // Fetch communication notifications separately (so they aren't pushed out by review ones)
+          const { data: commNotifRows } = await supabase
+            .from('app_notifications')
+            .select('*')
+            .eq('user_id', user.id)
+            .eq('company_id', targetCompanyIdForAppNotifs)
+            .eq('is_read', false)
+            .eq('is_archived', false)
+            .eq('category', 'communication')
+            .order('created_at', { ascending: false })
+            .limit(50);
+
+          // Deduplicate communication notifications by thread — keep only the latest per thread
+          const commByThread = new Map<string, any>();
+          (commNotifRows || []).forEach((notif: any) => {
+            const threadKey = notif.entity_id || notif.id;
+            if (!commByThread.has(threadKey)) {
+              commByThread.set(threadKey, notif);
+            }
+          });
+
+          // Add review notifications
+          (reviewNotifs || []).forEach((notif: any) => {
+            actionItems.push({
+              id: `app-notif-${notif.id}`,
+              title: notif.title,
+              description: notif.message || notif.action || 'New notification',
+              type: 'approval',
+              priority: notif.priority === 'high' || notif.priority === 'urgent' ? 'high' : 'medium',
+              dueDate: notif.metadata?.due_date ? new Date(notif.metadata.due_date) : (notif.created_at ? new Date(notif.created_at) : undefined),
+              url: notif.action_url || undefined,
+            });
+          });
+
+          // Add communication notifications (one per thread)
+          for (const notif of commByThread.values()) {
+            actionItems.push({
+              id: `app-notif-${notif.id}`,
+              title: notif.title,
+              description: notif.message || notif.action || 'New message',
+              type: 'communication',
+              priority: notif.priority === 'high' || notif.priority === 'urgent' ? 'high' : 'medium',
+              dueDate: notif.created_at ? new Date(notif.created_at) : undefined,
+              threadId: notif.entity_type === 'communication_thread' ? notif.entity_id : undefined,
+            });
+          }
+        }
+      }
+
       // Fetch pending review documents as approval action items
       if (user?.id) {
         const targetCompanyId = options.companyId && options.companyId !== 'all' ? options.companyId : (userCompanyIds[0] || null);

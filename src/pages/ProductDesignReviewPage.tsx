@@ -13,6 +13,7 @@ import { DesignReviewCreateDialog } from '@/components/design-review/DesignRevie
 import { useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
+import { useTranslation } from '@/hooks/useTranslation';
 
 function StatusBadge({ status }: { status: string }) {
   const variants: Record<string, string> = {
@@ -35,6 +36,7 @@ export default function ProductDesignReviewPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [createOpen, setCreateOpen] = useState(false);
+  const { lang } = useTranslation();
 
   // Get product's company_id
   const { data: product } = useQuery({
@@ -81,33 +83,33 @@ export default function ProductDesignReviewPage() {
         <div>
           <h1 className="text-2xl font-bold flex items-center gap-2">
             <ClipboardCheck className="h-6 w-6 text-primary" />
-            Design Review
+            {lang('designReview.productPageTitle')}
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
-            ISO 13485 §7.3.5 — Formal design reviews with baselining and evidence lock
+            {lang('designReview.productPageSubtitle')}
           </p>
         </div>
         <Button onClick={() => setCreateOpen(true)}>
-          <Plus className="h-4 w-4 mr-2" /> New Design Review
+          <Plus className="h-4 w-4 mr-2" /> {lang('designReview.newDesignReview')}
         </Button>
       </div>
 
       {/* Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <Card>
-          <CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Total Reviews</CardTitle></CardHeader>
+          <CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">{lang('designReview.totalReviews')}</CardTitle></CardHeader>
           <CardContent><p className="text-2xl font-bold">{totalReviews}</p></CardContent>
         </Card>
         <Card>
-          <CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Active</CardTitle></CardHeader>
+          <CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">{lang('designReview.active')}</CardTitle></CardHeader>
           <CardContent><p className="text-2xl font-bold text-amber-600">{activeReviews}</p></CardContent>
         </Card>
         <Card>
-          <CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Completed Baselines</CardTitle></CardHeader>
+          <CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">{lang('designReview.completedBaselines')}</CardTitle></CardHeader>
           <CardContent><p className="text-2xl font-bold text-green-600">{completedBaselines}</p></CardContent>
         </Card>
         <Card>
-          <CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Open Findings</CardTitle></CardHeader>
+          <CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">{lang('designReview.openFindings')}</CardTitle></CardHeader>
           <CardContent>
             <p className="text-2xl font-bold text-red-600">
               {Object.values(findingCounts || {}).reduce((sum, c) => sum + (c as any).open, 0)}
@@ -122,14 +124,14 @@ export default function ProductDesignReviewPage() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>DR ID</TableHead>
-                <TableHead>Title</TableHead>
-                <TableHead>Type</TableHead>
-                <TableHead>Phase</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Findings</TableHead>
-                <TableHead>Baseline</TableHead>
-                <TableHead>Date</TableHead>
+                <TableHead>{lang('designReview.drId')}</TableHead>
+                <TableHead>{lang('designReview.title')}</TableHead>
+                <TableHead>{lang('designReview.type')}</TableHead>
+                <TableHead>{lang('designReview.phase')}</TableHead>
+                <TableHead>{lang('designReview.status')}</TableHead>
+                <TableHead>{lang('designReview.findings')}</TableHead>
+                <TableHead>{lang('designReview.baseline')}</TableHead>
+                <TableHead>{lang('designReview.date')}</TableHead>
                 <TableHead className="w-10"></TableHead>
               </TableRow>
             </TableHeader>
@@ -137,7 +139,7 @@ export default function ProductDesignReviewPage() {
               {reviews.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
-                    No design reviews yet. Create one to get started.
+                    {lang('designReview.noReviewsYet')}
                   </TableCell>
                 </TableRow>
               ) : (
@@ -177,11 +179,11 @@ export default function ProductDesignReviewPage() {
                             className="h-7 w-7 text-muted-foreground hover:text-destructive"
                             onClick={async (e) => {
                               e.stopPropagation();
-                              if (!confirm(`Delete "${review.title}"? This cannot be undone.`)) return;
+                              if (!confirm(lang('designReview.deleteConfirm', { title: review.title }))) return;
                               const { error } = await supabase.from('design_reviews' as any).delete().eq('id', review.id);
-                              if (error) { toast.error('Failed to delete'); return; }
+                              if (error) { toast.error(lang('designReview.deleteFailed')); return; }
                               queryClient.invalidateQueries({ queryKey: ['design-reviews'] });
-                              toast.success('Design review deleted');
+                              toast.success(lang('designReview.deleteSuccess'));
                             }}
                           >
                             <Trash2 className="h-4 w-4" />

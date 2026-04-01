@@ -45,7 +45,7 @@ interface SendForReviewStepProps {
 }
 
 const ROLE_LABELS = {
-  prepared_by: 'Prepared By',
+  prepared_by: 'Issued By',
   reviewed_by: 'Reviewed By',
   approved_by: 'Approved By'
 };

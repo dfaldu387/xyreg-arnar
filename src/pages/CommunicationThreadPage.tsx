@@ -9,7 +9,7 @@ import { ArrowLeft, MessageCircle } from "lucide-react";
 import { MessageTimeline } from "@/components/communications/MessageTimeline";
 import { useCompanyRole } from "@/context/CompanyRoleContext";
 import { useTranslation } from '@/hooks/useTranslation';
-import { useCommunicationThreads, useThreadMessages } from '@/hooks/useCommunicationThreads';
+import { useCommunicationThreads, useThreadMessages, useTypingIndicator } from '@/hooks/useCommunicationThreads';
 import { useCompanyId } from '@/hooks/useCompanyId';
 import { getParticipantName, getParticipantInitials, getParticipantEmail, getParticipantOrg } from '@/utils/participantUtils';
 import { Skeleton } from "@/components/ui/skeleton";
@@ -32,10 +32,11 @@ export default function CommunicationThreadPage() {
   const { threads, sendMessage } = useCommunicationThreads({ companyId: companyId || undefined });
   const thread = threads.find(t => t.id === threadId);
   const { data: messages = [], isLoading: messagesLoading } = useThreadMessages(threadId || null);
+  const { typingUsers, sendTyping } = useTypingIndicator(threadId || null);
 
-  const handleSendMessage = async (content: string) => {
+  const handleSendMessage = async (content: string, files?: File[]) => {
     if (threadId) {
-      await sendMessage.mutateAsync({ threadId, content });
+      await sendMessage.mutateAsync({ threadId, content, files });
     }
   };
 
@@ -153,6 +154,8 @@ export default function CommunicationThreadPage() {
           messages={messages}
           threadId={thread.id}
           onSendMessage={handleSendMessage}
+          typingUsers={typingUsers}
+          onTyping={sendTyping}
         />
       )}
     </div>

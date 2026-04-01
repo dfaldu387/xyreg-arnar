@@ -337,13 +337,9 @@ export const isoTooltips: Record<string, { role: string; reference?: string }> =
     role: "Complete technical file / design dossier for regulatory submissions.",
     reference: "ISO 13485 §4.2.4 (Control of Documents) / MDR Annex II"
   },
-  "Technical File Archive": {
-    role: "Archived versions of technical files and regulatory submission packages.",
-    reference: "ISO 13485 §4.2.5 (Control of Records)"
-  },
-  "Market Approvals": {
-    role: "Tracking regulatory approvals, clearances, and certifications across markets.",
-    reference: "ISO 13485 §7.2 (Customer-Related Processes)"
+  "Technical File": {
+    role: "Auditor-ready view of your complete technical dossier, organized by MDR Annex II/III structure, with market approval status and certificates.",
+    reference: "ISO 13485 §4.2.4 / MDR Annex II-III"
   },
 
   // ── Green: Post-Market ──
@@ -361,10 +357,6 @@ export const isoTooltips: Record<string, { role: string; reference?: string }> =
   },
   "Investor Marketplace": {
     role: "Investment opportunity showcase and investor engagement platform."
-  },
-  "Device Status": {
-    role: "Real-time overview of device regulatory compliance status and key milestones.",
-    reference: "ISO 13485 §7.3.2 (Design & Development Planning)"
   },
   "User Access": {
     role: "Control team permissions and manage user roles for competency and access.",

@@ -1,6 +1,6 @@
 import React, { useMemo, useEffect } from "react";
 import { Link } from "react-router-dom";
-import { Layers, DollarSign, ChevronRight, Globe, FileKey } from "lucide-react";
+import { Layers, DollarSign, ChevronRight, Globe, FileKey, LayoutGrid, AlertTriangle } from "lucide-react";
 import { SidebarMenuButton, SidebarMenuSub, SidebarMenuSubItem, useSidebar } from "@/components/ui/sidebar";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { useSidebarState } from "@/hooks/useSidebarState";
@@ -22,6 +22,11 @@ export function PortfolioGroup({ userRole, currentCompany, location }: Portfolio
 
   const portfolioItems = [
     {
+      title: "Portfolio Views",
+      path: `${baseUrl}/portfolio-landing?tab=portfolio`,
+      icon: LayoutGrid,
+    },
+    {
       title: "Budget Dashboard",
       path: `${baseUrl}/portfolio-landing?tab=budget`,
       icon: DollarSign,
@@ -35,6 +40,11 @@ export function PortfolioGroup({ userRole, currentCompany, location }: Portfolio
       title: "Investors",
       path: `${baseUrl}/portfolio-landing?tab=investors`,
       icon: FileKey,
+    },
+    {
+      title: "Portfolio Risk Map",
+      path: `${baseUrl}/portfolio-landing?tab=risk-map`,
+      icon: AlertTriangle,
     },
   ];
 

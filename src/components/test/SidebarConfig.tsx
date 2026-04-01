@@ -317,9 +317,12 @@ export const defaultSidebarConfig: SidebarConfig = {
             { id: 'company-feasibility', name: 'Portfolio Business Cases', icon: <ClipboardCheck className="w-4 h-4" />, route: '/app/company/:companyName/commercial?tab=feasibility-studies' },
             { id: 'company-market-analysis', name: 'Market Analysis', icon: <BarChart3 className="w-4 h-4" />, route: '/app/company/:companyName/commercial?tab=market-analysis' },
             { id: 'company-commercial-performance', name: 'Commercial Performance', icon: <TrendingUp className="w-4 h-4" />, route: '/app/company/:companyName/commercial?tab=commercial-performance' },
+            { id: 'commercial-variance-analysis', name: 'Variance Analysis', icon: <TrendingDown className="w-4 h-4" />, route: '/app/company/:companyName/commercial?tab=variance-analysis' },
             { id: 'company-pricing-strategy', name: 'Pricing Strategy', icon: <DollarSign className="w-4 h-4" />, route: '/app/company/:companyName/commercial?tab=pricing-strategy' },
             { id: 'company-reimbursement-strategy', name: 'Global Reimbursement Strategy', icon: <Globe className="w-4 h-4" />, route: '/app/company/:companyName/commercial?tab=reimbursement-strategy' },
             { id: 'company-market-access', name: 'Global Market Access', icon: <Globe className="w-4 h-4" />, route: '/app/company/:companyName/commercial?tab=market-access' },
+            { id: 'commercial-investors', name: 'Investors', icon: <Database className="w-4 h-4" />, route: '/app/company/:companyName/commercial?tab=investors' },
+            { id: 'commercial-funding-grants', name: 'Funding & Grants', icon: <Briefcase className="w-4 h-4" />, route: '/app/company/:companyName/commercial?tab=funding-grants' },
           ]
         },
         {
@@ -439,10 +442,16 @@ export const defaultSidebarConfig: SidebarConfig = {
           children: [
             { id: 'xyreg-genesis', name: 'XyReg Genesis', icon: <Crosshair className="w-4 h-4" />, route: '/app/product/:id/business-case?tab=genesis' },
             { id: 'venture-blueprint', name: 'Venture Blueprint', icon: <Map className="w-4 h-4" />, route: '/app/product/:id/business-case?tab=venture-blueprint' },
+            { id: 'business-canvas', name: 'Business Canvas', icon: <Layers className="w-4 h-4" />, route: '/app/product/:id/business-case?tab=business-canvas' },
+            { id: 'team-profile', name: 'Team', icon: <Users className="w-4 h-4" />, route: '/app/product/:id/business-case?tab=team-profile' },
             { id: 'market-analysis', name: 'Market Analysis', icon: <BarChart3 className="w-4 h-4" />, route: '/app/product/:id/business-case?tab=market-analysis' },
+            { id: 'gtm-strategy', name: 'GTM', icon: <TrendingUp className="w-4 h-4" />, route: '/app/product/:id/business-case?tab=gtm-strategy' },
+            { id: 'use-of-proceeds', name: 'Use of Proceeds', icon: <DollarSign className="w-4 h-4" />, route: '/app/product/:id/business-case?tab=use-of-proceeds' },
+            { id: 'rnpv', name: 'rNPV Analysis', icon: <Calculator className="w-4 h-4" />, route: '/app/product/:id/business-case?tab=rnpv' },
             { id: 'reimbursement', name: 'Reimbursement', icon: <DollarSign className="w-4 h-4" />, route: '/app/product/:id/business-case?tab=reimbursement' },
             { id: 'pricing', name: 'Pricing Strategy', icon: <DollarSign className="w-4 h-4" />, route: '/app/product/:id/business-case?tab=pricing-strategy' },
-            { id: 'rnpv', name: 'rNPV Analysis', icon: <Calculator className="w-4 h-4" />, route: '/app/product/:id/business-case?tab=rnpv' }
+            { id: 'exit-strategy', name: 'Strategic Horizon', icon: <Target className="w-4 h-4" />, route: '/app/product/:id/business-case?tab=exit-strategy' },
+            { id: 'ip-strategy', name: 'IP Strategy', icon: <Lightbulb className="w-4 h-4" />, route: '/app/product/:id/business-case?tab=ip-strategy' },
           ]
         },
         {
@@ -454,8 +463,8 @@ export const defaultSidebarConfig: SidebarConfig = {
             { id: 'overview', name: 'Overview', icon: <Info className="w-4 h-4" />, route: '/app/product/:id/device-information?tab=overview' },
             { id: 'general', name: 'General', icon: <Settings className="w-4 h-4" />, route: '/app/product/:id/device-information?tab=basics' },
             { id: 'purpose', name: 'Intended Purpose', icon: <Target className="w-4 h-4" />, route: '/app/product/:id/device-information?tab=purpose' },
-            { id: 'identification', name: 'Identification', icon: <QrCode className="w-4 h-4" />, route: '/app/product/:id/device-information?tab=identification' },
             { id: 'markets-tab', name: 'Market & Regulatory', icon: <Globe className="w-4 h-4" />, route: '/app/product/:id/device-information?tab=markets-regulatory' },
+            { id: 'identification', name: 'Identification', icon: <QrCode className="w-4 h-4" />, route: '/app/product/:id/device-information?tab=identification' },
             { id: 'bundles', name: 'Bundles', icon: <Package2 className="w-4 h-4" />, route: '/app/product/:id/device-information?tab=bundles' },
             { id: 'variants', name: 'Variants', icon: <GitBranch className="w-4 h-4" />, route: '/app/product/:id/device-information?tab=variants' }
           ]
@@ -541,8 +550,7 @@ export const defaultSidebarConfig: SidebarConfig = {
             { id: 'gap-analysis', name: 'Gap Analysis', icon: <ClipboardCheck className="w-4 h-4" />, route: '/app/product/:id/gap-analysis' },
             { id: 'activities', name: 'Activities', icon: <Activity className="w-4 h-4" />, route: '/app/product/:id/activities' },
             { id: 'documents', name: 'Technical Documentation', icon: <FileText className="w-4 h-4" />, route: '/app/product/:id/documents' },
-            { id: 'technical-file-archive', name: 'Technical File Archive', icon: <FileText className="w-4 h-4" />, route: '/app/product/:id/technical-file-archive', upcoming: true },
-            { id: 'market-approvals', name: 'Market Approvals', icon: <FileText className="w-4 h-4" />, route: '/app/product/:id/market-approvals', upcoming: true },
+            { id: 'technical-file', name: 'Technical File', icon: <FileText className="w-4 h-4" />, route: '/app/product/:id/technical-file' },
             { id: 'pms', name: 'Post-Market Surveillance', icon: <Eye className="w-4 h-4" />, route: '/app/product/:id/post-market-surveillance' },
           ]
         }
@@ -781,12 +789,6 @@ export const defaultSidebarConfig: SidebarConfig = {
         route: '/app/company/:companyName/settings?tab=clinical-trials'
       },
       {
-        id: 'templates',
-        name: 'Templates',
-        icon: <Files className="w-5 h-5" />,
-        route: '/app/company/:companyName/settings?tab=templates'
-      },
-      {
         id: 'users',
         name: 'Users',
         icon: <Users className="w-5 h-5" />,
@@ -803,12 +805,6 @@ export const defaultSidebarConfig: SidebarConfig = {
         name: 'Reviewers',
         icon: <UserCheck className="w-5 h-5" />,
         route: '/app/company/:companyName/settings?tab=reviewers'
-      },
-      {
-        id: 'training',
-        name: 'Training',
-        icon: <BookOpen className="w-5 h-5" />,
-        route: '/app/company/:companyName/settings?tab=training'
       },
       {
         id: 'general',
@@ -1015,8 +1011,7 @@ const menuItemTranslationKeys: Record<string, string> = {
   'company-design-review': 'sidebar.menuItems.designReview',
   'documents': 'sidebar.menuItems.technicalDocumentation',
   'gap-analysis': 'sidebar.menuItems.gapAnalysis',
-  'technical-file-archive': 'sidebar.menuItems.technicalFileArchive',
-  'market-approvals': 'sidebar.menuItems.marketApprovals',
+  'technical-file': 'sidebar.menuItems.technicalFile',
   'activities': 'sidebar.menuItems.activities',
   'audits': 'sidebar.menuItems.audits',
   'pms': 'sidebar.menuItems.postMarketSurveillance',

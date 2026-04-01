@@ -29,7 +29,7 @@ export function useUserDocumentAccess() {
     }
 
     if (!companyId) {
-      setAllowedDocumentIds(new Set());
+      setAllowedDocumentIds(null);
       setIsLoading(false);
       return;
     }
@@ -45,9 +45,15 @@ export function useUserDocumentAccess() {
 
         if (error) {
           console.error('Error fetching document permissions:', error);
-          setAllowedDocumentIds(new Set());
+          setAllowedDocumentIds(null);
         } else {
-          setAllowedDocumentIds(new Set(data?.document_ids || []));
+          const ids = data?.document_ids;
+          // Empty or null document_ids means all access
+          if (!ids || ids.length === 0) {
+            setAllowedDocumentIds(null);
+          } else {
+            setAllowedDocumentIds(new Set(ids));
+          }
         }
       } catch (err) {
         console.error('Error fetching document permissions:', err);

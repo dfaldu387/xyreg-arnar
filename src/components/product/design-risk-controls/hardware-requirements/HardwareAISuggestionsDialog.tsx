@@ -11,6 +11,7 @@ import { HardwareRequirementsAIService, HardwareRequirementSuggestion } from "@/
 import { requirementSpecificationsService } from "@/services/requirementSpecificationsService";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { deduplicateSuggestions } from '@/utils/deduplicateSuggestions';
 
 interface Suggestion {
   description: string;
@@ -48,8 +49,10 @@ export function HardwareAISuggestionsDialog({
       // Fetch system requirements first
       const systemRequirements = await requirementSpecificationsService.getByProductAndType(productId, 'system');
       
+      // Fetch existing hardware requirements for deduplication
+      const existingHWReqs = await requirementSpecificationsService.getByProductAndType(productId, 'hardware');
+      const existingDescriptions = existingHWReqs.map(r => r.description).filter(Boolean);
       
-      // TODO: Get actual product data
       const productData = {};
       
       const response = await HardwareRequirementsAIService.generateHardwareRequirements({
@@ -60,13 +63,22 @@ export function HardwareAISuggestionsDialog({
           requirement_id: sr.requirement_id,
           description: sr.description
         })),
-        selectedCategories: []
+        selectedCategories: [],
+        existingItems: existingDescriptions,
       });
-      return response;
+      return { response, existingDescriptions };
     },
-    onSuccess: (response) => {
+    onSuccess: ({ response, existingDescriptions }) => {
       if (response.success && response.suggestions) {
-        setSuggestions(response.suggestions);
+        const { filtered, removedCount } = deduplicateSuggestions(
+          response.suggestions,
+          existingDescriptions,
+          s => s.description
+        );
+        if (removedCount > 0) {
+          toast.info(`${removedCount} duplicate suggestion(s) filtered out`);
+        }
+        setSuggestions(filtered);
         toast.success(lang('hardwareRequirements.suggestions.generateSuccess'));
       } else {
         toast.error(response.error || lang('hardwareRequirements.suggestions.generateError'));

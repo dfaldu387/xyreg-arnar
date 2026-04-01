@@ -172,6 +172,16 @@ export function usePhaseDocuments(companyId: string, productId?: string) {
           const phaseNameMap = new Map<string, string>();
           (phasesData || []).forEach((p) => phaseNameMap.set(p.id, p.name));
 
+          // Get the product's active lifecycle phase IDs (company_phases IDs)
+          const { data: lifecyclePhasesData } = await supabase
+            .from("lifecycle_phases")
+            .select("phase_id")
+            .eq("product_id", productId);
+
+          const lifecyclePhaseIds = (lifecyclePhasesData || [])
+            .map((lp: any) => lp.phase_id)
+            .filter(Boolean);
+
           // Fetch documents without INNER JOIN to avoid foreign key issues
           const { data: productData, error: productError } = await (supabase as any)
             .from("phase_assigned_document_template")
@@ -210,8 +220,17 @@ export function usePhaseDocuments(companyId: string, productId?: string) {
             .eq("product_id", productId)
             .eq("document_scope", "product_document");
 
+          // Filter to only include docs belonging to the product's active lifecycle phases (+ no phase)
+          let filteredProductData = productData || [];
+          if (lifecyclePhaseIds.length > 0) {
+            const lifecyclePhaseIdSet = new Set(lifecyclePhaseIds);
+            filteredProductData = filteredProductData.filter((doc: any) =>
+              !doc.phase_id || lifecyclePhaseIdSet.has(doc.phase_id)
+            );
+          }
+
           // Add phase name to each document
-          phaseDocsData = (productData || []).map((doc: any) => ({
+          phaseDocsData = filteredProductData.map((doc: any) => ({
             ...doc,
             company_phases: {
               id: doc.phase_id,
@@ -460,45 +479,34 @@ export function usePhaseDocuments(companyId: string, productId?: string) {
             const phaseNameMap = new Map<string, string>();
             (phasesData || []).forEach((p) => phaseNameMap.set(p.id, p.name));
 
+            // Get the product's active lifecycle phase IDs
+            const { data: lifecyclePhasesData } = await supabase
+              .from("lifecycle_phases")
+              .select("phase_id")
+              .eq("product_id", productId);
+
+            const lifecyclePhaseIds = (lifecyclePhasesData || [])
+              .map((lp: any) => lp.phase_id)
+              .filter(Boolean);
+            const lifecyclePhaseIdSet = new Set(lifecyclePhaseIds);
+
             const { data: productData, error: productError } = await (supabase as any)
               .from("phase_assigned_document_template")
-              .select(
-                `
-                id,
-                name,
-                status,
-                document_type,
-                tech_applicability,
-                created_at,
-                updated_at,
-                file_path,
-                file_name,
-                due_date,
-                approval_date,
-                phase_id,
-                description,
-                reviewer_group_ids,
-                reviewers,
-                sub_section,
-                section_ids,
-                document_reference,
-                version,
-                date,
-                is_current_effective_version,
-                brief_summary,
-                authors_ids,
-                need_template_update,
-                is_record,
-                reference_document_ids,
-                tags
-              `,
-              )
+              .select(PHASE_DOC_SELECT)
               .eq("company_id", companyId)
               .eq("product_id", productId)
               .eq("document_scope", "product_document");
 
+            // Filter to only include docs from the product's lifecycle phases (+ no phase)
+            let filteredData = productData || [];
+            if (lifecyclePhaseIdSet.size > 0) {
+              filteredData = filteredData.filter((doc: any) =>
+                !doc.phase_id || lifecyclePhaseIdSet.has(doc.phase_id)
+              );
+            }
+
             // Add phase name to each document
-            phaseDocsData = (productData || []).map((doc: any) => ({
+            phaseDocsData = filteredData.map((doc: any) => ({
               ...doc,
               company_phases: {
                 id: doc.phase_id,

@@ -1,8 +1,8 @@
 
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Mail } from "lucide-react";
-import { Dialog, DialogTrigger } from "@/components/ui/dialog";
+import { Mail, AlertTriangle } from "lucide-react";
+import { Dialog, DialogTrigger, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AddCompanyUserDialog } from "@/components/permissions/AddCompanyUserDialog";
 import { UserInvitationsTable } from "@/components/permissions/UserInvitationsTable";
@@ -19,6 +19,9 @@ interface HybridUserManagementProps {
 
 export function HybridUserManagement({ companyId }: HybridUserManagementProps) {
   const [addUserDialogOpen, setAddUserDialogOpen] = useState(false);
+  const [removeDialogOpen, setRemoveDialogOpen] = useState(false);
+  const [userToRemove, setUserToRemove] = useState<string | null>(null);
+  const [isRemoving, setIsRemoving] = useState(false);
   const { lang } = useTranslation();
 
   const { users, isLoading: usersLoading, error: usersError, removeUser, fetchUsers } = useCompanyUsers(companyId);
@@ -26,17 +29,24 @@ export function HybridUserManagement({ companyId }: HybridUserManagementProps) {
 
   const handleUserAction = async () => {
     setAddUserDialogOpen(false);
-    // Refresh all lists
     await Promise.all([
       fetchUsers(),
       fetchInvitations()
     ]);
   };
 
-  const handleRemoveUser = async (userId: string) => {
-    if (confirm(lang('companySettings.usersAccess.confirmRemoveUser'))) {
-      await removeUser(userId);
-    }
+  const handleRemoveUser = (userId: string) => {
+    setUserToRemove(userId);
+    setRemoveDialogOpen(true);
+  };
+
+  const confirmRemoveUser = async () => {
+    if (!userToRemove) return;
+    setIsRemoving(true);
+    await removeUser(userToRemove);
+    setIsRemoving(false);
+    setRemoveDialogOpen(false);
+    setUserToRemove(null);
   };
 
   const isLoading = usersLoading || invitationsLoading;
@@ -130,6 +140,37 @@ export function HybridUserManagement({ companyId }: HybridUserManagementProps) {
           <UserInvitationsTable companyId={companyId} />
         </TabsContent>
       </Tabs>
+
+      {/* Remove User Confirmation Dialog */}
+      <Dialog open={removeDialogOpen} onOpenChange={setRemoveDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-destructive" />
+              Remove User
+            </DialogTitle>
+            <DialogDescription>
+              Are you sure you want to remove this user from the company? This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="flex gap-2 sm:justify-end">
+            <Button
+              variant="outline"
+              onClick={() => { setRemoveDialogOpen(false); setUserToRemove(null); }}
+              disabled={isRemoving}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={confirmRemoveUser}
+              disabled={isRemoving}
+            >
+              {isRemoving ? 'Removing...' : 'Remove User'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

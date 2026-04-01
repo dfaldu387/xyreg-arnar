@@ -4,9 +4,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Checkbox } from "@/components/ui/checkbox";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Separator } from "@/components/ui/separator";
 import { useInvitations } from "@/hooks/useInvitations";
 import { usePendingUsers } from "@/hooks/usePendingUsers";
 import { toast } from "sonner";
@@ -15,6 +18,7 @@ import { MultiDepartmentSelector, type DepartmentAssignment, type MultiDepartmen
 import { DeviceAccessSelector } from "./DeviceAccessSelector";
 import { DocumentPermissionSelector } from "./DocumentPermissionSelector";
 import { useTranslation } from "@/hooks/useTranslation";
+import { ALL_COMPANY_MODULES, MODULE_DISPLAY_NAMES } from "@/types/userCompanyModuleAccess";
 
 interface AddCompanyUserDialogProps {
   onUserInvited?: () => void;
@@ -42,6 +46,10 @@ export function AddCompanyUserDialog({ onUserInvited, onUserAdded, onAddUser, co
   const [departmentAssignments, setDepartmentAssignments] = useState<DepartmentAssignment[]>([]);
   const [selectedProductIds, setSelectedProductIds] = useState<string[]>([]);
   const [selectedDocumentIds, setSelectedDocumentIds] = useState<string[]>([]);
+  const [hasModuleRestriction, setHasModuleRestriction] = useState(false);
+  const [selectedModuleIds, setSelectedModuleIds] = useState<string[]>([]);
+  const [tempSelectedModuleIds, setTempSelectedModuleIds] = useState<string[]>([]);
+  const [isModuleDialogOpen, setIsModuleDialogOpen] = useState(false);
   const deptSelectorRef = useRef<MultiDepartmentSelectorRef>(null);
 
   const { sendInvitation } = useInvitations(companyId);
@@ -123,6 +131,29 @@ export function AddCompanyUserDialog({ onUserInvited, onUserAdded, onAddUser, co
     }
   };
 
+  const saveInvitationModuleAccess = async (invitationId: string, moduleIds: string[]) => {
+    // Always clear old records first (handles re-invite case)
+    await (supabase as any)
+      .from('invitation_module_access')
+      .delete()
+      .eq('invitation_id', invitationId);
+
+    if (moduleIds.length === 0) return;
+
+    const { error } = await (supabase as any)
+      .from('invitation_module_access')
+      .insert({
+        invitation_id: invitationId,
+        company_id: companyId,
+        module_ids: moduleIds,
+      });
+
+    if (error) {
+      console.error('Error saving invitation module access:', error);
+      toast.error('Failed to save company access');
+    }
+  };
+
   const saveInvitationDepartmentAssignments = async (invitationId: string, assignments: DepartmentAssignment[]) => {
     // Always clear old assignments first (handles re-invite case)
     await supabase
@@ -201,6 +232,11 @@ export function AddCompanyUserDialog({ onUserInvited, onUserAdded, onAddUser, co
           await saveInvitationDocumentAccess(result.invitationId, selectedDocumentIds);
         }
 
+        // Save module access selections
+        if (hasModuleRestriction && selectedModuleIds.length > 0) {
+          await saveInvitationModuleAccess(result.invitationId, selectedModuleIds);
+        }
+
         toast.success(`Invitation sent to ${formData.email}`);
         onUserInvited?.();
         onAddUser?.(); // Legacy support
@@ -220,6 +256,8 @@ export function AddCompanyUserDialog({ onUserInvited, onUserAdded, onAddUser, co
         setDepartmentAssignments([]);
         setSelectedProductIds([]);
         setSelectedDocumentIds([]);
+        setHasModuleRestriction(false);
+        setSelectedModuleIds([]);
       }
     } catch (error) {
       console.error('Error sending invitation:', error);
@@ -269,6 +307,8 @@ export function AddCompanyUserDialog({ onUserInvited, onUserAdded, onAddUser, co
         setDepartmentAssignments([]);
         setSelectedProductIds([]);
         setSelectedDocumentIds([]);
+        setHasModuleRestriction(false);
+        setSelectedModuleIds([]);
       }
     } catch (error) {
       console.error('Error creating pending user:', error);
@@ -402,20 +442,47 @@ export function AddCompanyUserDialog({ onUserInvited, onUserAdded, onAddUser, co
                    </div>
                  )}
 
-                {/* Device Access */}
-                <DeviceAccessSelector
-                  companyId={companyId}
-                  selectedProductIds={selectedProductIds}
-                  onChange={setSelectedProductIds}
-                />
+                {/* Permission & Access Section */}
+                <Separator />
+                <div className="space-y-3">
+                  <h4 className="text-sm font-semibold">Permission & Access</h4>
+                  <div className="grid grid-cols-[1fr_auto_auto] items-center gap-x-3 gap-y-3">
+                    <Label>Company Modules</Label>
+                    <Switch
+                      checked={hasModuleRestriction}
+                      onCheckedChange={(checked) => {
+                        setHasModuleRestriction(checked);
+                        if (checked && selectedModuleIds.length === 0) {
+                          setTempSelectedModuleIds([]);
+                          setIsModuleDialogOpen(true);
+                        }
+                        if (!checked) {
+                          setSelectedModuleIds([]);
+                        }
+                      }}
+                    />
+                    <span className="text-sm text-muted-foreground">
+                      {hasModuleRestriction ? `${selectedModuleIds.length} selected` : 'All Modules'}
+                    </span>
 
-                {/* Document Permissions */}
-                <DocumentPermissionSelector
-                  companyId={companyId}
-                  selectedProductIds={selectedProductIds}
-                  selectedDocumentIds={selectedDocumentIds}
-                  onChange={setSelectedDocumentIds}
-                />
+                    <DeviceAccessSelector
+                      companyId={companyId}
+                      selectedProductIds={selectedProductIds}
+                      onChange={(ids) => { setSelectedProductIds(ids); setSelectedDocumentIds([]); }}
+                      label="Devices"
+                      inline
+                    />
+
+                    <DocumentPermissionSelector
+                      companyId={companyId}
+                      selectedProductIds={selectedProductIds}
+                      selectedDocumentIds={selectedDocumentIds}
+                      onChange={setSelectedDocumentIds}
+                      label="Documents"
+                      inline
+                    />
+                  </div>
+                </div>
 
             <div className="flex justify-end space-x-2 pt-4">
               <Button type="submit" disabled={isSubmitting}>
@@ -539,20 +606,47 @@ export function AddCompanyUserDialog({ onUserInvited, onUserAdded, onAddUser, co
               </div>
             )}
 
-            {/* Device Access */}
-            <DeviceAccessSelector
-              companyId={companyId}
-              selectedProductIds={selectedProductIds}
-              onChange={setSelectedProductIds}
-            />
+            {/* Permission & Access Section */}
+            <Separator />
+            <div className="space-y-3">
+              <h4 className="text-sm font-semibold">Permission & Access</h4>
+              <div className="grid grid-cols-[1fr_auto_auto] items-center gap-x-3 gap-y-3">
+                <Label>Company Modules</Label>
+                <Switch
+                  checked={hasModuleRestriction}
+                  onCheckedChange={(checked) => {
+                    setHasModuleRestriction(checked);
+                    if (checked && selectedModuleIds.length === 0) {
+                      setTempSelectedModuleIds([]);
+                      setIsModuleDialogOpen(true);
+                    }
+                    if (!checked) {
+                      setSelectedModuleIds([]);
+                    }
+                  }}
+                />
+                <span className="text-sm text-muted-foreground">
+                  {hasModuleRestriction ? `${selectedModuleIds.length} selected` : 'All Modules'}
+                </span>
 
-            {/* Document Permissions */}
-            <DocumentPermissionSelector
-              companyId={companyId}
-              selectedProductIds={selectedProductIds}
-              selectedDocumentIds={selectedDocumentIds}
-              onChange={setSelectedDocumentIds}
-            />
+                <DeviceAccessSelector
+                  companyId={companyId}
+                  selectedProductIds={selectedProductIds}
+                  onChange={setSelectedProductIds}
+                  label="Devices"
+                  inline
+                />
+
+                <DocumentPermissionSelector
+                  companyId={companyId}
+                  selectedProductIds={selectedProductIds}
+                  selectedDocumentIds={selectedDocumentIds}
+                  onChange={setSelectedDocumentIds}
+                  label="Documents"
+                  inline
+                />
+              </div>
+            </div>
 
             <div className="flex justify-end space-x-2 pt-4">
               <Button type="submit" disabled={isSubmitting}>
@@ -562,6 +656,103 @@ export function AddCompanyUserDialog({ onUserInvited, onUserAdded, onAddUser, co
           </form>
         </TabsContent>
       </Tabs>
+
+      {/* Module Selection Dialog */}
+      <Dialog open={isModuleDialogOpen} onOpenChange={setIsModuleDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Select Dashboard Modules</DialogTitle>
+            <DialogDescription>
+              Choose which dashboard modules this user can access. When no modules are selected, user can access all modules.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium">
+                {tempSelectedModuleIds.length} of {ALL_COMPANY_MODULES.length} modules selected
+              </span>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  if (tempSelectedModuleIds.length === ALL_COMPANY_MODULES.length) {
+                    setTempSelectedModuleIds([]);
+                  } else {
+                    setTempSelectedModuleIds([...ALL_COMPANY_MODULES]);
+                  }
+                }}
+              >
+                {tempSelectedModuleIds.length === ALL_COMPANY_MODULES.length ? 'Deselect All' : 'Select All'}
+              </Button>
+            </div>
+
+            <Separator />
+
+            <ScrollArea className="h-64">
+              <div className="space-y-2">
+                {ALL_COMPANY_MODULES.map((moduleId) => (
+                  <div
+                    key={moduleId}
+                    className="flex items-center space-x-3 p-2 rounded-lg hover:bg-muted/50"
+                  >
+                    <Checkbox
+                      id={`invite-module-${moduleId}`}
+                      checked={tempSelectedModuleIds.includes(moduleId)}
+                      onCheckedChange={(checked) => {
+                        if (checked) {
+                          setTempSelectedModuleIds(prev => [...prev, moduleId]);
+                        } else {
+                          setTempSelectedModuleIds(prev => prev.filter(id => id !== moduleId));
+                        }
+                      }}
+                    />
+                    <div className="flex-1 min-w-0">
+                      <label
+                        htmlFor={`invite-module-${moduleId}`}
+                        className="text-sm font-medium cursor-pointer"
+                      >
+                        {MODULE_DISPLAY_NAMES[moduleId] || moduleId}
+                      </label>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </ScrollArea>
+
+            <Separator />
+
+            <div className="flex justify-end space-x-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setTempSelectedModuleIds([...selectedModuleIds]);
+                  if (selectedModuleIds.length === 0) {
+                    setHasModuleRestriction(false);
+                  }
+                  setIsModuleDialogOpen(false);
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                onClick={() => {
+                  setSelectedModuleIds([...tempSelectedModuleIds]);
+                  if (tempSelectedModuleIds.length === 0) {
+                    setHasModuleRestriction(false);
+                  }
+                  setIsModuleDialogOpen(false);
+                }}
+              >
+                Save Changes
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </DialogContent>
   );
 }

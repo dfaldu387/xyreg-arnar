@@ -6,6 +6,7 @@ import { Plus } from 'lucide-react';
 import { useTranslation } from '@/hooks/useTranslation';
 import { WIDGET_REGISTRY } from '@/hooks/useDashboardWidgets';
 import { Badge } from '@/components/ui/badge';
+import { hasEditorPrivileges } from '@/utils/roleUtils';
 
 interface WidgetPaletteProps {
   enabledWidgetIds: string[];
@@ -17,7 +18,8 @@ export function WidgetPalette({ enabledWidgetIds, onToggleWidget, userRole }: Wi
   const { lang } = useTranslation();
 
   const isAdmin = userRole === 'admin';
-  const visibleWidgets = WIDGET_REGISTRY.filter(w => !w.adminOnly || isAdmin);
+  const canViewAdminWidgets = hasEditorPrivileges(userRole || 'viewer');
+  const visibleWidgets = WIDGET_REGISTRY.filter(w => !w.adminOnly || canViewAdminWidgets);
 
   return (
     <Popover>

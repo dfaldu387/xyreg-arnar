@@ -1,11 +1,11 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { MessageTimeline } from "@/components/communications/MessageTimeline";
 import { CommunicationThread } from '@/types/communications';
 import { useTranslation } from '@/hooks/useTranslation';
-import { useThreadMessages, useCommunicationThreads } from '@/hooks/useCommunicationThreads';
+import { useThreadMessages, useCommunicationThreads, useTypingIndicator } from '@/hooks/useCommunicationThreads';
 import { getParticipantName, getParticipantInitials } from '@/utils/participantUtils';
 import { Skeleton } from "@/components/ui/skeleton";
 
@@ -19,12 +19,21 @@ export function ThreadDetailSheet({ thread, open, onOpenChange }: ThreadDetailSh
   const { lang } = useTranslation();
   const { data: messages = [], isLoading: messagesLoading } = useThreadMessages(open ? thread?.id ?? null : null);
   const { markThreadRead, sendMessage } = useCommunicationThreads();
+  const { typingUsers, sendTyping } = useTypingIndicator(open ? thread?.id ?? null : null);
+  const [markedRead, setMarkedRead] = useState(false);
 
-  // Mark thread as read when opened
+  // Mark thread as read when opened or when new unread messages arrive while open
   useEffect(() => {
     if (open && thread?.id && (thread.my_unread_count || 0) > 0) {
-      markThreadRead.mutate(thread.id);
+      markThreadRead.mutate(thread.id, {
+        onSuccess: () => setMarkedRead(true),
+      });
     }
+  }, [open, thread?.id, thread?.my_unread_count]);
+
+  // Reset when thread changes or sheet closes
+  useEffect(() => {
+    if (!open) setMarkedRead(false);
   }, [open, thread?.id]);
 
   if (!thread) return null;
@@ -39,15 +48,15 @@ export function ThreadDetailSheet({ thread, open, onOpenChange }: ThreadDetailSh
   };
 
   const participants = thread.participants || [];
-  const unreadCount = thread.my_unread_count || 0;
+  const unreadCount = markedRead ? 0 : (thread.my_unread_count || 0);
 
-  const handleSendMessage = async (content: string) => {
-    await sendMessage.mutateAsync({ threadId: thread.id, content });
+  const handleSendMessage = async (content: string, files?: File[]) => {
+    await sendMessage.mutateAsync({ threadId: thread.id, content, files });
   };
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent className="w-full sm:max-w-2xl overflow-y-auto">
+      <SheetContent className="w-full sm:max-w-2xl flex flex-col overflow-hidden">
         <SheetHeader className="space-y-3 pb-4 border-b">
           <SheetTitle className="text-xl">{thread.title}</SheetTitle>
           <div className="flex items-center gap-3 flex-wrap">
@@ -85,7 +94,7 @@ export function ThreadDetailSheet({ thread, open, onOpenChange }: ThreadDetailSh
           </div>
         </SheetHeader>
 
-        <div className="pt-4">
+        <div className="flex-1 overflow-hidden pt-4">
           {messagesLoading ? (
             <div className="space-y-4">
               {[1, 2, 3].map(i => <Skeleton key={i} className="h-20 w-full" />)}
@@ -95,6 +104,8 @@ export function ThreadDetailSheet({ thread, open, onOpenChange }: ThreadDetailSh
               messages={messages}
               threadId={thread.id}
               onSendMessage={handleSendMessage}
+              typingUsers={typingUsers}
+              onTyping={sendTyping}
             />
           )}
         </div>

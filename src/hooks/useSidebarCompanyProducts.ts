@@ -104,6 +104,7 @@ export function useSidebarCompanyProducts(companyIdentifier: string | undefined)
 
       // Filter products by user's device access restrictions
       let accessFilteredData = data || [];
+      let hasActiveMatrixRestriction = false;
       if (userId) {
         // Check if user is owner or admin — they always see all devices
         const { data: accessRows, error: accessError } = await supabase
@@ -141,75 +142,18 @@ export function useSidebarCompanyProducts(companyIdentifier: string | undefined)
 
           if (matrixData && matrixData.product_ids && matrixData.product_ids.length > 0) {
             // User has specific device access — filter to only those products
-            const allowedProductIds = new Set(matrixData.product_ids);
+            const allowedProductIds = new Set<string>(matrixData.product_ids);
             accessFilteredData = accessFilteredData.filter((product: any) => allowedProductIds.has(product.id));
+            hasActiveMatrixRestriction = true;
             console.log('Filtered products:', accessFilteredData.length);
-          } else {
-            // No matrix record or empty product_ids — user has zero device access
-            accessFilteredData = [];
-            console.log('No device access - empty result');
           }
+          // No active matrix record means no restriction — user can access all devices
         }
         // Owners/admins see all devices (no filtering)
       }
 
-      // For Zimmer, filter to only show main device per basic_udi_di
-      // Main device is identified by having a UDI-DI that matches the pattern for main devices
-      let filteredData = accessFilteredData;
-      // if (isZimmer) {
-        // Group products by basic_udi_di
-        const basicUdiGroups = new Map<string, any[]>();
-        filteredData.forEach((product: any) => {
-          const basicUdi = product.basic_udi_di;
-          if (basicUdi) {
-            if (!basicUdiGroups.has(basicUdi)) {
-              basicUdiGroups.set(basicUdi, []);
-            }
-            basicUdiGroups.get(basicUdi)!.push(product);
-          }
-        });
-
-        // For each basic_udi_di group, find the main device
-        const mainDevices = new Map<string, any>();
-        
-        basicUdiGroups.forEach((products, basicUdi) => {
-          // Try to find main device by UDI-DI pattern
-          // Main devices typically have UDI-DI values like 00880304809727 or 00880304810167
-          // Look for the product with the most "standard" UDI-DI (often the one with the lowest numeric suffix)
-          let mainDevice = products[0]; // Default to first product
-          
-          // Sort products by UDI-DI to find the "primary" one
-          // Main device often has the lowest UDI-DI suffix or is the first created
-          const sortedProducts = [...products].sort((a, b) => {
-            // If both have UDI-DI, compare them
-            if (a.udi_di && b.udi_di) {
-              // Extract numeric suffix from UDI-DI (last digits)
-              const aSuffix = a.udi_di.replace(/\D/g, '').slice(-6);
-              const bSuffix = b.udi_di.replace(/\D/g, '').slice(-6);
-              if (aSuffix && bSuffix) {
-                return aSuffix.localeCompare(bSuffix);
-              }
-            }
-            // If one has UDI-DI and other doesn't, prefer the one with UDI-DI
-            if (a.udi_di && !b.udi_di) return -1;
-            if (!a.udi_di && b.udi_di) return 1;
-            // Otherwise, prefer earlier created (lower inserted_at)
-            return new Date(a.inserted_at || 0).getTime() - new Date(b.inserted_at || 0).getTime();
-          });
-          
-          mainDevice = sortedProducts[0];
-          mainDevices.set(basicUdi, mainDevice);
-        });
-
-        // Include products without basic_udi_di
-        filteredData.forEach((product: any) => {
-          if (!product.basic_udi_di) {
-            mainDevices.set(product.id, product);
-          }
-        });
-
-        filteredData = Array.from(mainDevices.values());
-      // }
+      // Return all products — L2ContextualBar handles family grouping via useProductsByBasicUDI
+      const filteredData = accessFilteredData;
       
       // Type assertion needed because Supabase types may not include module_id yet
       return filteredData.map((product: any) => {

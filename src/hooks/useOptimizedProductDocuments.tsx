@@ -182,13 +182,8 @@ export function useOptimizedProductDocuments(productId: string, companyId: strin
         throw docsError;
       }
 
-      // console.log('Product-specific documents loaded from documents table:', productDocsFromDocuments);
-
-      // Also check phase_assigned_document_template for product-specific documents (those without template_source_id)
-      // Some product-specific documents might have been created with a phase_id
-      // Fetch ALL product documents from phase_assigned_document_template (no phase_id filter)
-      // Fetch product docs without INNER JOIN to avoid dropping results when phase_id doesn't match company_phases
-      const { data: productSpecificDocsFromPhaseTable, error: phaseDocsError } = await supabase
+      // Fetch product documents from phase_assigned_document_template
+      const { data: rawPhaseTableDocs, error: phaseDocsError } = await supabase
             .from('phase_assigned_document_template')
             .select('*')
             .eq('product_id', productId)
@@ -197,10 +192,18 @@ export function useOptimizedProductDocuments(productId: string, companyId: strin
 
       if (phaseDocsError) {
         console.error('Error loading product-specific documents from phase_assigned_document_template:', phaseDocsError);
-        // Don't throw, just log - these are optional
       }
 
-      // console.log('Product-specific documents loaded from phase_assigned_document_template:', productSpecificDocsFromPhaseTable?.length || 0);
+      // Filter to only include docs from the product's active lifecycle phases (+ no phase)
+      const lifecycleCompanyPhaseIds = new Set(
+        (mergedPhases || []).map((lp: any) => lp.phase_id).filter(Boolean)
+      );
+
+      const productSpecificDocsFromPhaseTable = lifecycleCompanyPhaseIds.size > 0
+        ? (rawPhaseTableDocs || []).filter((doc: any) =>
+            !doc.phase_id || lifecycleCompanyPhaseIds.has(doc.phase_id)
+          )
+        : (rawPhaseTableDocs || []);
 
       // Template instances are now handled by the main query above
       // The phase_assigned_document_template table doesn't have template_source_id column
@@ -379,7 +382,6 @@ export function useOptimizedProductDocuments(productId: string, companyId: strin
       });
       
       const uniqueDocs = Array.from(uniqueDocsMap.values());
-      // console.log('Documents after deduplication:', uniqueDocs.length, 'from', allDocs.length);
 
       // Transform documents
       const optimizedDocs: OptimizedDocument[] = uniqueDocs.map(doc => {
@@ -430,7 +432,7 @@ export function useOptimizedProductDocuments(productId: string, companyId: strin
       });
 
       setDocuments(optimizedDocs);
-      
+
       // Transform productSpecificDocsWithCore to match OptimizedDocument interface
       const optimizedProductSpecificDocs: OptimizedDocument[] = productSpecificDocsWithCore.map((doc: any) => {
         const phaseName = phaseMap.get(doc.phase_id) || 'Unknown Phase';

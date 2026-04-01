@@ -98,18 +98,23 @@ export function useProductCompanyGuard(product: Product | null | undefined, isPr
           .limit(1);
 
         const matrixData = matrixRows?.[0] || null;
-        const allowedProductIds = matrixData?.product_ids || [];
 
-        if (allowedProductIds.length === 0 || !allowedProductIds.includes(product.id)) {
-          console.error('[ACCESS DENIED] User does not have device access to this product:', {
-            productId: product.id,
-            productName: product.name,
-            allowedProductIds,
-          });
+        // If there's an active matrix record, enforce its product_ids restriction
+        // If no active record exists, user has unrestricted access (no filtering needed)
+        if (matrixData) {
+          const allowedProductIds = new Set<string>(matrixData.product_ids || []);
 
-          toast.error('Access denied: You do not have access to this device');
-          navigate('/app', { replace: true });
-          return;
+          if (!allowedProductIds.has(product.id)) {
+            console.error('[ACCESS DENIED] User does not have device access to this product:', {
+              productId: product.id,
+              productName: product.name,
+              allowedProductIds: Array.from(allowedProductIds),
+            });
+
+            toast.error('Access denied: You do not have access to this device');
+            navigate('/app', { replace: true });
+            return;
+          }
         }
       }
 

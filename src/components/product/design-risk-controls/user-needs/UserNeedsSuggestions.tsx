@@ -13,6 +13,9 @@ import {
   type UserNeedSuggestion,
   type UserNeedsAIRequest
 } from '@/services/userNeedsAIService';
+import { supabase } from '@/integrations/supabase/client';
+import { deduplicateSuggestions } from '@/utils/deduplicateSuggestions';
+import { toast } from 'sonner';
 import {
   Select,
   SelectContent,
@@ -85,6 +88,13 @@ export function UserNeedsSuggestions({
     setSuggestions([]);
 
     try {
+      // Fetch existing user needs for deduplication
+      const { data: existingNeeds } = await supabase
+        .from('user_needs')
+        .select('description')
+        .eq('product_id', productId);
+      const existingDescriptions = (existingNeeds || []).map(n => n.description).filter(Boolean);
+
       const purposeData = productData.intended_purpose_data || {};
       
       const request: UserNeedsAIRequest = {
@@ -104,6 +114,7 @@ export function UserNeedsSuggestions({
           markets: productData.markets || []
         },
         categories: selectedCategory === 'all' ? undefined : [selectedCategory],
+        existingItems: existingDescriptions,
         additionalPrompt: additionalPrompt || undefined,
         outputLanguage: outputLanguage || undefined,
       } as any;
@@ -111,7 +122,15 @@ export function UserNeedsSuggestions({
       const response = await UserNeedsAIService.generateUserNeedsSuggestions(request);
 
       if (response.success && response.suggestions) {
-        setSuggestions(response.suggestions);
+        const { filtered, removedCount } = deduplicateSuggestions(
+          response.suggestions,
+          existingDescriptions,
+          s => s.description
+        );
+        if (removedCount > 0) {
+          toast.info(`${removedCount} duplicate suggestion(s) filtered out`);
+        }
+        setSuggestions(filtered);
       } else {
         throw new Error(response.error || 'Failed to generate suggestions');
       }

@@ -280,7 +280,6 @@ export function TemplateManagementTab({ companyId, onOpenAiTemplateDialog, onOpe
           case 'category': aVal = a.category || ''; bVal = b.category || ''; break;
           case 'scope': aVal = a.scope || ''; bVal = b.scope || ''; break;
           case 'created': aVal = a.created_at || ''; bVal = b.created_at || ''; break;
-          case 'created': aVal = a.created_at || ''; bVal = b.created_at || ''; break;
         }
         
         const cmp = aVal.localeCompare(bVal, undefined, { sensitivity: 'base' });

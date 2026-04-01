@@ -3,30 +3,32 @@ import { useSearchParams } from "react-router-dom";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { FileText, Plus, Users, AlertTriangle, ClipboardCheck, BarChart3, Monitor } from "lucide-react";
+import { FileText, Plus, Users, AlertTriangle, ClipboardCheck, BarChart3, Monitor, BookOpen } from "lucide-react";
 import { useUsabilityEngineeringFile } from "@/hooks/useUsabilityEngineeringFile";
 import { UseSpecificationTab } from "./UseSpecificationTab";
 import { UICharacteristicsTab } from "./UICharacteristicsTab";
 import { UsabilityHazardsTab } from "./UsabilityHazardsTab";
 import { EvaluationPlanTab } from "./EvaluationPlanTab";
+import { EvaluationReportTab } from "./EvaluationReportTab";
 import { ValidationResultsTab } from "./ValidationResultsTab";
 import { UEFSummaryTab } from "./UEFSummaryTab";
 import { useTranslation } from "@/hooks/useTranslation";
-
-interface UsabilityEngineeringModuleProps {
-  productId: string;
-  companyId: string;
-  disabled?: boolean;
-}
 
 const SUB_TABS = [
   { value: 'use-specification', label: 'Use Specification', icon: Users, clause: '5.1' },
   { value: 'ui-characteristics', label: 'UI Characteristics', icon: Monitor, clause: '5.2' },
   { value: 'usability-hazards', label: 'Usability Hazards', icon: AlertTriangle, clause: '5.3-5.4' },
   { value: 'evaluation-plan', label: 'Evaluation Plan', icon: ClipboardCheck, clause: '5.5' },
-  { value: 'validation-results', label: 'Validation Results', icon: BarChart3, clause: '5.7/5.9' },
+  { value: 'evaluation-reports', label: 'Evaluation Reports', icon: BookOpen, clause: '5.7/5.9' },
+  { value: 'validation-results', label: 'Validation Results', icon: BarChart3, clause: '' },
   { value: 'uef-summary', label: 'UEF Summary', icon: FileText, clause: '' },
 ];
+
+interface UsabilityEngineeringModuleProps {
+  productId: string;
+  companyId: string;
+  disabled?: boolean;
+}
 
 export function UsabilityEngineeringModule({ productId, companyId, disabled }: UsabilityEngineeringModuleProps) {
   const { lang } = useTranslation();
@@ -87,7 +89,7 @@ export function UsabilityEngineeringModule({ productId, companyId, disabled }: U
   return (
     <div className="space-y-4">
       <Tabs value={activeSubTab} onValueChange={handleSubTabChange}>
-        <TabsList className="grid w-full grid-cols-6">
+        <TabsList className="grid w-full grid-cols-7">
           {SUB_TABS.map((tab) => (
             <TabsTrigger 
               key={tab.value} 
@@ -118,6 +120,10 @@ export function UsabilityEngineeringModule({ productId, companyId, disabled }: U
 
         <TabsContent value="evaluation-plan" className="mt-4">
           <EvaluationPlanTab uef={uef} productId={productId} companyId={companyId} disabled={disabled} />
+        </TabsContent>
+
+        <TabsContent value="evaluation-reports" className="mt-4">
+          <EvaluationReportTab productId={productId} companyId={companyId} disabled={disabled} />
         </TabsContent>
 
         <TabsContent value="validation-results" className="mt-4">

@@ -20,6 +20,8 @@ describe('resolveFieldValue', () => {
     user_instructions: null,
     storage_sterility_handling: null,
     images: null,
+    product_platform: null,
+    trl_level: null,
   };
 
   it('resolves top-level columns', () => {

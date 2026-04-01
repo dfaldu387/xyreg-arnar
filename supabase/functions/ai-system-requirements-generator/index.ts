@@ -16,7 +16,7 @@ serve(async (req) => {
   }
 
   try {
-    const { companyId, productData, userNeeds, selectedCategories, additionalPrompt, outputLanguage } = await req.json();
+    const { companyId, productData, userNeeds, selectedCategories, additionalPrompt, outputLanguage, existingItems } = await req.json();
     
     console.log('[ai-system-requirements-generator] Starting system requirements generation');
     console.log('[ai-system-requirements-generator] Request:', {
@@ -36,9 +36,13 @@ serve(async (req) => {
     // Build system prompt for system requirements AI role as "system architect"
     const hasUserNeeds = userNeeds && userNeeds.length > 0;
     
+    const existingItemsSection = existingItems && existingItems.length > 0
+      ? `\n\nEXISTING REQUIREMENTS (DO NOT suggest these again or anything semantically equivalent):\n${existingItems.map((item: string) => `- "${item}"`).join('\n')}\n\nGenerate ONLY NEW requirements that are substantially different from the above.`
+      : '';
+
     let systemPrompt;
     if (hasUserNeeds) {
-      systemPrompt = `You are a System Architect for medical device development. Your role is to translate user needs into measurable, testable system requirements that can be implemented by engineering teams.
+      systemPrompt = `You are a System Architect for medical device development. Your role is to translate user needs into measurable, testable system requirements that can be implemented by engineering teams.${existingItemsSection}
 
 CONTEXT:
 - Device: ${productData.product_name || 'Medical Device'}
@@ -67,7 +71,7 @@ Generate 5-8 system requirements that derive from the provided user needs. Each 
 - Include acceptance criteria that can be tested
 - Consider potential risks that need to be addressed`;
     } else {
-      systemPrompt = `You are a System Architect for medical device development. Your role is to generate fundamental system requirements for medical devices based on industry standards and best practices.
+      systemPrompt = `You are a System Architect for medical device development. Your role is to generate fundamental system requirements for medical devices based on industry standards and best practices.${existingItemsSection}
 
 CONTEXT:
 - Device: ${productData.product_name || 'Medical Device'}

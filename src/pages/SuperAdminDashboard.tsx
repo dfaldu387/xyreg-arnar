@@ -193,20 +193,6 @@ export default function SuperAdminDashboard() {
               </CardHeader>
             </Card>
 
-            <Card
-              className="cursor-pointer hover:shadow-md transition-shadow"
-              onClick={() => navigate("/super-admin/app/variant-documents")}
-            >
-              <CardHeader>
-                <CardTitle className="flex items-center space-x-2">
-                  <Layers className="h-5 w-5" />
-                  <span>Variant Documents</span>
-                </CardTitle>
-                <CardDescription>
-                  View variant devices and manage inherited documents
-                </CardDescription>
-              </CardHeader>
-            </Card>
 
             <Card
               className="cursor-pointer hover:shadow-md transition-shadow"

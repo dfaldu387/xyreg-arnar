@@ -18,6 +18,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { SystemRequirementsAIService } from "@/services/systemRequirementsAIService";
 import { requirementSpecificationsService } from "@/services/requirementSpecificationsService";
 import { useTranslation } from "@/hooks/useTranslation";
+import { deduplicateSuggestions } from '@/utils/deduplicateSuggestions';
 
 interface AISuggestionsDialogProps {
   open: boolean;
@@ -125,18 +126,35 @@ export function AISuggestionsDialog({
     mutationFn: async () => {
       setIsGenerating(true);
       const request = buildRequest();
+      
+      // Fetch existing system requirements for deduplication
+      const existingReqs = await requirementSpecificationsService.getByProductAndType(productId, 'system');
+      const existingDescriptions = existingReqs.map(r => r.description).filter(Boolean);
+
       console.log('[AISuggestionsDialog] Sending request with', {
         productDataKeys: Object.keys(request.productData),
         userNeedsCount: request.userNeeds.length,
         selectedContext: selectedContextKeys,
+        existingItemsCount: existingDescriptions.length,
       });
-      const response = await SystemRequirementsAIService.generateSystemRequirements(request);
-      return response;
+      const response = await SystemRequirementsAIService.generateSystemRequirements({
+        ...request,
+        existingItems: existingDescriptions,
+      });
+      return { response, existingDescriptions };
     },
-    onSuccess: (response) => {
+    onSuccess: ({ response, existingDescriptions }) => {
       if (response.success && response.suggestions) {
-        setSuggestions(response.suggestions);
-        toast.success(lang('systemRequirements.suggestions.generateSuccess').replace('{count}', String(response.suggestions.length)));
+        const { filtered, removedCount } = deduplicateSuggestions(
+          response.suggestions,
+          existingDescriptions,
+          s => s.description
+        );
+        if (removedCount > 0) {
+          toast.success(`${removedCount} duplicate(s) filtered out`);
+        }
+        setSuggestions(filtered);
+        toast.success(lang('systemRequirements.suggestions.generateSuccess').replace('{count}', String(filtered.length)));
       } else {
         toast.error(response.error || lang('systemRequirements.suggestions.generateError'));
       }

@@ -36,6 +36,7 @@ export interface HazardAIRequest {
     category: string;
     linked_risks: string;
   }>;
+  existingItems?: string[];
 }
 
 export interface HazardAIResponse {

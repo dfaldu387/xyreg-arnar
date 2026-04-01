@@ -192,18 +192,20 @@ export function FeaturesTab({
 
     if (!company_id || !productId) return;
 
-    // Copy feature to all included products that don't have it yet
+    // Copy feature to all included family products that don't have it yet
     const feature = keyFeatures.find(f => f.name === itemId);
     if (feature) {
       const newExcluded = new Set(newScope.excludedProductIds || []);
-      const { data: allProducts } = await supabase
-        .from('products')
-        .select('id, key_features')
-        .eq('company_id', company_id)
-        .eq('is_archived', false);
+      const targetIds = (familyProductIds || []).filter(id => id !== productId && !newExcluded.has(id));
+      const { data: allProducts } = targetIds.length > 0
+        ? await supabase
+            .from('products')
+            .select('id, key_features')
+            .in('id', targetIds)
+        : { data: [] };
 
       if (allProducts) {
-        const includedOthers = allProducts.filter(p => p.id !== productId && !newExcluded.has(p.id));
+        const includedOthers = allProducts;
         await Promise.all(includedOthers.map(async (tp) => {
           const existing = normalizeKeyFeatures(tp.key_features);
           if (existing.some(f => f.name === itemId)) return;
@@ -215,31 +217,39 @@ export function FeaturesTab({
 
     // Mirror scope to family products (reusable utility)
     await mirrorScopeToFamilyProducts(itemId, scopeWithFlag, 'feature_exclusion_scopes', productId, company_id, parentProductId);
-  }, [productId, company_id, keyFeatures, setFeatureExclusionScope, parentProductId]);
+  }, [productId, company_id, keyFeatures, setFeatureExclusionScope, parentProductId, familyProductIds]);
 
   // Wrap component scope change with propagation: copy component to included devices & mirror scope
+  // itemId is now the component's database ID (not name) for unique scope per component
   const handleComponentScopeChange = useCallback(async (itemId: string, newScope: import('@/hooks/useInheritanceExclusion').ItemExclusionScope) => {
     const scopeWithFlag = { ...newScope, isManualGroup: true };
     await setComponentExclusionScope(itemId, scopeWithFlag);
 
-    // Cascade exclusions to descendant components: children can't have wider scope than parent
+    // Look up the component name for cross-product operations
+    const sourceComp = dbComponents.find(c => c.id === itemId);
+    const compName = sourceComp?.name || itemId;
+
+    // Cascade exclusions to descendant components by ID (children can't have wider scope than parent)
     const parentExcludedIds = newScope.excludedProductIds || [];
-    const cascadedScopes: Array<{ name: string; scope: import('@/hooks/useInheritanceExclusion').ItemExclusionScope }> = [];
+    const cascadedScopes: Array<{ id: string; name: string; scope: import('@/hooks/useInheritanceExclusion').ItemExclusionScope }> = [];
     if (parentExcludedIds.length > 0 && dbComponents.length > 0) {
-      const findDescendantNames = (parentName: string): string[] => {
-        const parent = dbComponents.find(c => c.name === parentName);
-        if (!parent) return [];
-        const children = dbComponents.filter(c => c.parent_ids?.includes(parent.id));
-        const names: string[] = [];
+      const findDescendantIds = (parentId: string): string[] => {
+        const children = dbComponents.filter(c => c.parent_ids?.includes(parentId));
+        const ids: string[] = [];
         for (const child of children) {
-          names.push(child.name);
-          names.push(...findDescendantNames(child.name));
+          ids.push(child.id);
+          ids.push(...findDescendantIds(child.id));
         }
-        return names;
+        return ids;
       };
 
-      for (const descName of findDescendantNames(itemId)) {
-        const childScope = getComponentExclusionScope(descName);
+      for (const descId of findDescendantIds(itemId)) {
+        // Check scope by ID first, fall back to name (backward compat)
+        const descComp = dbComponents.find(c => c.id === descId);
+        let childScope = getComponentExclusionScope(descId);
+        if (!childScope.excludedProductIds?.length && !(childScope as any).isManualGroup && descComp) {
+          childScope = getComponentExclusionScope(descComp.name);
+        }
         const childExcluded = childScope.excludedProductIds || [];
         const missingIds = parentExcludedIds.filter(id => !childExcluded.includes(id));
         if (missingIds.length > 0) {
@@ -248,27 +258,18 @@ export function FeaturesTab({
             excludedProductIds: [...childExcluded, ...missingIds],
             isManualGroup: true,
           };
-          await setComponentExclusionScope(descName, updatedChildScope);
-          cascadedScopes.push({ name: descName, scope: updatedChildScope });
+          await setComponentExclusionScope(descId, updatedChildScope);
+          cascadedScopes.push({ id: descId, name: descComp?.name || descId, scope: updatedChildScope });
         }
       }
     }
 
     if (!company_id || !productId) return;
 
-    // Get all family products
-    const { data: allProducts } = await supabase
-      .from('products')
-      .select('id, field_scope_overrides')
-      .eq('company_id', company_id)
-      .eq('is_archived', false);
-
-    if (!allProducts) return;
-
     const newExcluded = new Set(newScope.excludedProductIds || []);
 
-    // Copy component to included products that don't have it yet, including hierarchy
-    const includedOtherIds = allProducts.filter(p => p.id !== productId && !newExcluded.has(p.id)).map(p => p.id);
+    // Copy component to included family products that don't have it yet, including hierarchy
+    const includedOtherIds = (familyProductIds || []).filter(id => id !== productId && !newExcluded.has(id));
     if (includedOtherIds.length > 0) {
       // Get ALL source components and hierarchy for this product
       const { data: allSourceComps } = await supabase
@@ -279,9 +280,6 @@ export function FeaturesTab({
       const { data: sourceHierarchy } = sourceCompIds.length > 0
         ? await supabase.from('device_component_hierarchy').select('parent_id, child_id').in('child_id', sourceCompIds)
         : { data: [] };
-
-      // Build name→component map for source
-      const sourceByName = new Map((allSourceComps || []).map(c => [c.name, c]));
 
       // Fetch master device's component names to avoid duplicating "Shared" components
       const masterCompNames = new Set<string>();
@@ -327,7 +325,6 @@ export function FeaturesTab({
 
         // Copy hierarchy relationships
         if (sourceHierarchy && sourceHierarchy.length > 0) {
-          // Get existing hierarchy on target to avoid duplicates
           const targetCompIds = [...sourceIdToTargetId.values()];
           const { data: existingHierarchy } = targetCompIds.length > 0
             ? await supabase.from('device_component_hierarchy').select('parent_id, child_id').in('child_id', targetCompIds)
@@ -348,13 +345,64 @@ export function FeaturesTab({
       }
     }
 
-    // Mirror scope (parent + cascaded children) to family products
-    await mirrorScopeToFamilyProducts(itemId, scopeWithFlag, 'component_exclusion_scopes', productId, company_id, parentProductId);
-    // Also mirror cascaded child scopes
-    for (const cs of cascadedScopes) {
-      await mirrorScopeToFamilyProducts(cs.name, cs.scope, 'component_exclusion_scopes', productId, company_id, parentProductId);
+    // Mirror scope to family products using component IDs (not names)
+    // Each family product has its own component IDs, so we map source→target by name
+    const otherFamilyIds = (familyProductIds || []).filter(id => id !== productId);
+    if (otherFamilyIds.length > 0) {
+      // Fetch components for all family products to find matching ones by name
+      const { data: familyComps } = await supabase
+        .from('device_components')
+        .select('id, product_id, name')
+        .in('product_id', otherFamilyIds);
+
+      // Build name→id mapping per product
+      const compsByProduct = new Map<string, Map<string, string>>();
+      for (const fc of (familyComps || [])) {
+        if (!compsByProduct.has(fc.product_id)) compsByProduct.set(fc.product_id, new Map());
+        if (!compsByProduct.get(fc.product_id)!.has(fc.name)) {
+          compsByProduct.get(fc.product_id)!.set(fc.name, fc.id);
+        }
+      }
+
+      // Fetch scope overrides for all family products
+      const { data: familyProductRows } = await supabase
+        .from('products')
+        .select('id, field_scope_overrides')
+        .in('id', otherFamilyIds);
+
+      await Promise.all((familyProductRows || []).map(async (tp: any) => {
+        const overrides = { ...((tp.field_scope_overrides as Record<string, any>) || {}) };
+        const scopes = { ...(overrides['component_exclusion_scopes'] || {}) };
+        const targetNameToId = compsByProduct.get(tp.id) || new Map();
+
+        // Mirror main component scope under target's component ID
+        const targetCompId = targetNameToId.get(compName);
+        if (targetCompId) {
+          scopes[targetCompId] = scopeWithFlag;
+          // Clean up old name-based entry
+          if (scopes[compName]) delete scopes[compName];
+        } else {
+          scopes[compName] = scopeWithFlag; // fallback if component not yet on target
+        }
+
+        // Mirror cascaded child scopes
+        for (const cs of cascadedScopes) {
+          const targetChildId = targetNameToId.get(cs.name);
+          if (targetChildId) {
+            scopes[targetChildId] = cs.scope;
+            if (scopes[cs.name]) delete scopes[cs.name];
+          } else {
+            scopes[cs.name] = cs.scope;
+          }
+        }
+
+        overrides['component_exclusion_scopes'] = scopes;
+        return supabase.from('products')
+          .update({ field_scope_overrides: overrides } as any)
+          .eq('id', tp.id);
+      }));
     }
-  }, [productId, company_id, setComponentExclusionScope, getComponentExclusionScope, dbComponents, parentProductId]);
+  }, [productId, company_id, setComponentExclusionScope, getComponentExclusionScope, dbComponents, parentProductId, familyProductIds, masterDeviceId]);
 
   // Backward compat: derive simple excluded arrays for rendering
   const excludedFeatures = useMemo(() => {
@@ -861,77 +909,85 @@ export function FeaturesTab({
         </div>
 
         <div className="space-y-2">
-          {/* Master features (shown on variant in linked mode) */}
-          {isLinkedFeatures && masterKeyFeatures.filter(f => !isFeatureExcluded(f.name, productId)).map((feature, masterIdx) => (
-            <Droppable key={`master-drop-${masterIdx}`} droppableId={`feature-drop-${masterIdx}`}>
-              {(provided, snapshot) => (
-                <div
-                  ref={provided.innerRef}
-                  {...provided.droppableProps}
-                  className={`transition-colors rounded-md ${snapshot.isDraggingOver ? 'ring-2 ring-primary/50 bg-primary/5' : ''}`}
-                >
-                  {renderFeatureRow(feature, masterIdx, {
-                    isMasterItem: true,
-                    isExcluded: false,
-                    scopePopover: company_id ? (
-                      <InheritanceExclusionPopover
-                        companyId={company_id}
-                        currentProductId={productId!}
-                        itemId={feature.name}
-                        exclusionScope={getFeatureExclusionScope(feature.name)}
-                        onScopeChange={handleFeatureScopeChange}
-                        defaultCurrentDeviceOnly
-                        familyProductIds={familyProductIds}
-                      />
-                    ) : undefined,
-                  })}
-                  {provided.placeholder}
-                </div>
+          {!featureExclusionsLoaded ? (
+            <div className="flex justify-center py-8">
+              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+            </div>
+          ) : (
+            <>
+              {/* Master features (shown on variant in linked mode) */}
+              {isLinkedFeatures && masterKeyFeatures.filter(f => !isFeatureExcluded(f.name, productId)).map((feature, masterIdx) => (
+                <Droppable key={`master-drop-${masterIdx}`} droppableId={`feature-drop-${masterIdx}`}>
+                  {(provided, snapshot) => (
+                    <div
+                      ref={provided.innerRef}
+                      {...provided.droppableProps}
+                      className={`transition-colors rounded-md ${snapshot.isDraggingOver ? 'ring-2 ring-primary/50 bg-primary/5' : ''}`}
+                    >
+                      {renderFeatureRow(feature, masterIdx, {
+                        isMasterItem: true,
+                        isExcluded: false,
+                        scopePopover: company_id ? (
+                          <InheritanceExclusionPopover
+                            companyId={company_id}
+                            currentProductId={productId!}
+                            itemId={feature.name}
+                            exclusionScope={getFeatureExclusionScope(feature.name)}
+                            onScopeChange={handleFeatureScopeChange}
+                            defaultCurrentDeviceOnly
+                            familyProductIds={familyProductIds}
+                          />
+                        ) : undefined,
+                      })}
+                      {provided.placeholder}
+                    </div>
+                  )}
+                </Droppable>
+              ))}
+
+              {/* Local features */}
+              {keyFeatures.map((feature, index) => {
+                if (isLinkedFeatures && masterKeyFeatures.some(mf => mf.name === feature.name)) return null;
+                if (isFeatureExcluded(feature.name, productId)) return null;
+                const displayIndex = isLinkedFeatures ? masterKeyFeatures.length + index : index;
+                return (
+                  <Droppable key={`local-drop-${index}`} droppableId={`feature-drop-local-${index}`}>
+                    {(provided, snapshot) => (
+                      <div
+                        ref={provided.innerRef}
+                        {...provided.droppableProps}
+                        className={`transition-colors rounded-md ${snapshot.isDraggingOver ? 'ring-2 ring-primary/50 bg-primary/5' : ''}`}
+                      >
+                        {renderFeatureRow(feature, displayIndex, {
+                          isMasterItem: false,
+                          isExcluded: false,
+                          scopePopover: company_id && productId ? (
+                            <InheritanceExclusionPopover
+                              companyId={company_id}
+                              currentProductId={productId}
+                              itemId={feature.name}
+                              exclusionScope={getFeatureExclusionScope(feature.name)}
+                              onScopeChange={handleFeatureScopeChange}
+                              defaultCurrentDeviceOnly
+                              familyProductIds={familyProductIds}
+                            />
+                          ) : undefined,
+                          onEdit: () => handleEditFeature(index),
+                          onRemove: () => handleRemoveFeature(index),
+                        })}
+                        {provided.placeholder}
+                      </div>
+                    )}
+                  </Droppable>
+                );
+              })}
+
+              {keyFeatures.length === 0 && (!isLinkedFeatures || masterKeyFeatures.length === 0) && (
+                <p className="text-muted-foreground text-center py-8">
+                  No key features defined yet. Click "Add Feature" to define the key features of your device.
+                </p>
               )}
-            </Droppable>
-          ))}
-
-          {/* Local features */}
-          {keyFeatures.map((feature, index) => {
-            if (isLinkedFeatures && masterKeyFeatures.some(mf => mf.name === feature.name)) return null;
-            if (isFeatureExcluded(feature.name, productId)) return null;
-            const displayIndex = isLinkedFeatures ? masterKeyFeatures.length + index : index;
-            return (
-              <Droppable key={`local-drop-${index}`} droppableId={`feature-drop-local-${index}`}>
-                {(provided, snapshot) => (
-                  <div
-                    ref={provided.innerRef}
-                    {...provided.droppableProps}
-                    className={`transition-colors rounded-md ${snapshot.isDraggingOver ? 'ring-2 ring-primary/50 bg-primary/5' : ''}`}
-                  >
-                    {renderFeatureRow(feature, displayIndex, {
-                      isMasterItem: false,
-                      isExcluded: false,
-                      scopePopover: company_id && productId ? (
-                        <InheritanceExclusionPopover
-                          companyId={company_id}
-                          currentProductId={productId}
-                          itemId={feature.name}
-                          exclusionScope={getFeatureExclusionScope(feature.name)}
-                          onScopeChange={handleFeatureScopeChange}
-                          defaultCurrentDeviceOnly
-                          familyProductIds={familyProductIds}
-                        />
-                      ) : undefined,
-                      onEdit: () => handleEditFeature(index),
-                      onRemove: () => handleRemoveFeature(index),
-                    })}
-                    {provided.placeholder}
-                  </div>
-                )}
-              </Droppable>
-            );
-          })}
-
-          {keyFeatures.length === 0 && (!isLinkedFeatures || masterKeyFeatures.length === 0) && (
-            <p className="text-muted-foreground text-center py-8">
-              No key features defined yet. Click "Add Feature" to define the key features of your device.
-            </p>
+            </>
           )}
         </div>
       </div>
@@ -1021,6 +1077,7 @@ export function FeaturesTab({
             setComponentExclusionScope={handleComponentScopeChange}
             isComponentExcluded={isComponentExcluded}
             isLoading={isLoading}
+            exclusionsLoaded={componentExclusionsLoaded}
             renderComponentRow={renderDbComponentRow}
             addDialogOpen={componentAddDialogOpen}
             onAddDialogOpenChange={setComponentAddDialogOpen}
@@ -1035,7 +1092,7 @@ export function FeaturesTab({
           <DeviceComponentsSection
             productId={productId}
             companyId={company_id}
-            isLoading={isLoading}
+            isLoading={isLoading || !componentExclusionsLoaded}
             availableFeatures={keyFeatures.map(f => ({ name: f.name }))}
             bomItems={bomItems || []}
             hideCardHeader
@@ -1085,6 +1142,7 @@ function SelectiveComponentsSectionDb({
   setComponentExclusionScope,
   isComponentExcluded,
   isLoading: externalLoading,
+  exclusionsLoaded = true,
   renderComponentRow,
   addDialogOpen,
   onAddDialogOpenChange,
@@ -1099,6 +1157,7 @@ function SelectiveComponentsSectionDb({
   setComponentExclusionScope: (itemId: string, scope: import('@/hooks/useInheritanceExclusion').ItemExclusionScope) => void;
   isComponentExcluded: (itemId: string, targetProductId?: string) => boolean;
   isLoading?: boolean;
+  exclusionsLoaded?: boolean;
   renderComponentRow: (comp: DbDeviceComponent, opts: any) => React.ReactNode;
   addDialogOpen: boolean;
   onAddDialogOpenChange: (open: boolean) => void;
@@ -1151,7 +1210,7 @@ function SelectiveComponentsSectionDb({
   
 
   const dialogOpen = addDialogOpen || editingComponent !== null;
-  const loading = externalLoading || masterLoading || localLoading;
+  const loading = externalLoading || masterLoading || localLoading || !exclusionsLoaded;
 
   const potentialParents = useMemo(() => {
     if (!localFlat) return [];
@@ -1319,25 +1378,31 @@ function SelectiveComponentsSectionDb({
 
   return (
     <div className="space-y-3">
-      {loading && <div className="flex justify-center py-2"><Loader2 className="h-4 w-4 animate-spin" /></div>}
+      {loading ? (
+        <div className="flex justify-center py-8">
+          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+        </div>
+      ) : (
+        <>
+          <Droppable droppableId="components-source" isDropDisabled>
+            {(provided) => (
+              <div ref={provided.innerRef} {...provided.droppableProps} className="space-y-2">
+                {/* Master components with toggle */}
+                {renderTree(masterTree, true, 0, 'master')}
 
-      <Droppable droppableId="components-source" isDropDisabled>
-        {(provided) => (
-          <div ref={provided.innerRef} {...provided.droppableProps} className="space-y-2">
-            {/* Master components with toggle */}
-            {renderTree(masterTree, true, 0, 'master')}
+                {/* Local-only components */}
+                {renderTree(localTree, false, 0, 'local')}
+                {provided.placeholder}
+              </div>
+            )}
+          </Droppable>
 
-            {/* Local-only components */}
-            {renderTree(localTree, false, 0, 'local')}
-            {provided.placeholder}
-          </div>
-        )}
-      </Droppable>
-
-      {masterTree.length === 0 && localTree.length === 0 && !loading && (
-        <p className="text-muted-foreground text-center py-8">
-          No components added yet. Click "Add Component" to define the physical or software components of your device.
-        </p>
+          {masterTree.length === 0 && localTree.length === 0 && (
+            <p className="text-muted-foreground text-center py-8">
+              No components added yet. Click "Add Component" to define the physical or software components of your device.
+            </p>
+          )}
+        </>
       )}
 
       <p className="text-xs text-muted-foreground">

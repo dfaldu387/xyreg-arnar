@@ -3148,7 +3148,11 @@
     "communications": "Communications",
     "unreadMessages": "Unread Messages",
     "highPriority": "High Priority",
+    "awaitingResponse": "Awaiting Response",
+    "onlineUsers": "Online Users",
     "activeThreads": "Active Threads",
+    "users": "Users",
+    "myThreads": "My Threads",
     "recentMessages": "Recent Messages",
     "new": "New",
     "noRecentCommunications": "No recent communications",
@@ -3415,7 +3419,9 @@
       "pricingStrategy": "Pricing Strategy",
       "pricingStrategyDesc": "Define and manage pricing strategies across your product portfolio.",
       "investors": "Investors",
-      "investorsDesc": "Easily manage investor relationships and data rooms for due diligence."
+      "investorsDesc": "Easily manage investor relationships and data rooms for due diligence.",
+      "fundingGrants": "Funding & Grants",
+      "fundingGrantsDesc": "Assess eligibility, track applications, and manage documentation for EU, US, and national funding programmes."
     },
     "blueprint": {
       "title": "Company Venture Blueprint",
@@ -4171,7 +4177,7 @@
     "failedToLoad": "Failed to load gap analysis data",
     "breadcrumbs": {
       "clientCompass": "Client Compass",
-      "complianceInstances": "Compliance Instances",
+      "complianceInstances": "Regulatory & Submissions",
       "gapAnalysis": "Gap Analysis"
     },
     "actions": {
@@ -5996,7 +6002,7 @@
     "active": "Active",
     "pending": "Pending",
     "overdue": "Overdue",
-    "loadingDeviceStatus": "Loading device status...",
+    "loadingDeviceStatus": "Loading device dashboard...",
     "errorLoadingDevice": "Error loading device",
     "deviceNotFoundSimple": "The requested device could not be found.",
     "phaseDeletedSuccess": "Phase deleted successfully",
@@ -10603,7 +10609,7 @@
     "archives": "Archives",
     "tabs": {
       "lifecyclePhases": "Lifecycle Phases",
-      "complianceInstances": "Compliance Instances",
+      "complianceInstances": "Regulatory & Submissions",
       "clinicalTrials": "Clinical Trials",
       "templates": "Templates",
       "users": "Users",
@@ -13578,7 +13584,7 @@
       "resolvedThisMonth": "resolved this month",
       "criticalPathFormula": "Count(Items on Critical Path + Overdue)",
       "criticalPathDescription": "Number of items on critical path or past due requiring immediate attention",
-      "complianceInstances": "Compliance Instances",
+      "complianceInstances": "Regulatory & Submissions",
       "totalTrackedItems": "Total tracked items",
       "completionRate": "completion rate",
       "complianceFormula": "Total Compliance Instance Count",
@@ -14055,7 +14061,7 @@
   },
   "pageHeader": {
     "executiveDashboard": "Executive Dashboard",
-    "complianceInstances": "Compliance Instances",
+    "complianceInstances": "Regulatory & Submissions",
     "xyregGenesis": "Xyreg Genesis",
     "businessCase": "Business Case",
     "commercialIntelligence": "Commercial Intelligence",
@@ -14073,7 +14079,7 @@
     "documentStudio": "Document Studio",
     "productInformation": "Product Information",
     "deviceDefinition": "Device Definition",
-    "deviceStatus": "Device Status",
+    "deviceStatus": "Device Dashboard",
     "gapAnalysis": "Gap Analysis",
     "settings": "Settings",
     "documents": "Documents",
@@ -15679,10 +15685,21 @@
     "qualityAssurancePreview": "Quality Assurance:",
     "engineeringLead": "Engineering Lead",
     "qualityManager": "Quality Manager",
-    "independentReviewer": "Independent Reviewer"
+    "independentReviewer": "Independent Reviewer",
+    "productPageTitle": "Design Review",
+    "productPageSubtitle": "ISO 13485 §7.3.5 — Formal design reviews with baselining and evidence lock",
+    "totalReviews": "Total Reviews",
+    "completedBaselines": "Completed Baselines",
+    "openFindings": "Open Findings",
+    "noReviewsYet": "No design reviews yet. Create one to get started.",
+    "baseline": "Baseline",
+    "findings": "Findings",
+    "deleteConfirm": "Delete \"{{title}}\"? This cannot be undone.",
+    "deleteFailed": "Failed to delete",
+    "deleteSuccess": "Design review deleted"
   },
   "deviceProcessEngine": {
-    "deviceStatusTab": "Device Status",
+    "deviceStatusTab": "Device Dashboard",
     "processEngineTab": "Device Process Engine",
     "title": "Device Process Engine",
     "iso13485": "(ISO 13485)",

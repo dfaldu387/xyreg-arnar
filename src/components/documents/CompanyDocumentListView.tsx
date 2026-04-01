@@ -605,7 +605,7 @@ export function CompanyDocumentListView({
               size="sm"
               onClick={() => onCreateInStudio?.(doc)}
               disabled={isDeleting || disabled}
-              title={doc.document_reference ? "Edit Draft in Studio" : "Create Draft in Studio"}
+              title={doc.document_reference ? "Edit Document" : "Create Document"}
             >
               <FileEdit className={`h-4 w-4 ${doc.document_reference?.startsWith('DS-') && doc.status?.toLowerCase() !== 'approved' ? 'text-amber-500' : 'text-primary'}`} />
             </Button>

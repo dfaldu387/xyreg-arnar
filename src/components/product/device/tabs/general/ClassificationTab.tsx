@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
@@ -15,6 +15,7 @@ import { Badge } from "@/components/ui/badge";
 import { GovernanceBookmark } from '@/components/ui/GovernanceBookmark';
 
 import { InheritanceExclusionPopover } from '@/components/shared/InheritanceExclusionPopover';
+import { resolveFieldValue, normalizeScopeValue } from '@/hooks/useAutoSyncScope';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -56,6 +57,8 @@ interface ClassificationTabProps {
   };
   autoSyncScope?: (fieldKey: string, newValue: any) => void;
   familyProductIds?: string[];
+  familyProducts?: any[];
+  onScopeChangeWithPropagation?: (fieldKey: string, oldScope: import('@/hooks/useInheritanceExclusion').ItemExclusionScope, newScope: import('@/hooks/useInheritanceExclusion').ItemExclusionScope) => Promise<void>;
 }
 
 const tooltipDefinitions = {
@@ -93,6 +96,8 @@ export function ClassificationTab({
   classificationExclusion,
   autoSyncScope,
   familyProductIds,
+  familyProducts,
+  onScopeChangeWithPropagation,
 }: ClassificationTabProps) {
   const { lang } = useTranslation();
   const [searchParams] = useSearchParams();
@@ -182,13 +187,10 @@ export function ClassificationTab({
     const { field, value } = pendingChange;
     if (field === 'primaryRegulatoryType') {
       onPrimaryRegulatoryTypeChange?.(value);
-      autoSyncScope?.('classification_primaryRegulatoryType', value);
     } else if (field === 'coreDeviceNature') {
       onCoreDeviceNatureChange?.(value);
-      autoSyncScope?.('classification_coreDeviceNature', value);
     } else if (field === 'isActive') {
       onIsActiveDeviceChange?.(value);
-      autoSyncScope?.('classification_isActiveDevice', value);
     }
     setPendingChange(null);
   };
@@ -238,7 +240,44 @@ export function ClassificationTab({
     return <GovernanceBookmark status={null} />;
   };
 
-  const renderScopeAndGov = (fieldKey: string) => (
+  // --- Value-matching helpers ---
+  const getMatchingProductIds = useCallback((fieldKey: string, currentValue: any): string[] | undefined => {
+    if (!familyProducts?.length || !productId) return undefined;
+    const currentNormalized = JSON.stringify(normalizeScopeValue(fieldKey, currentValue));
+    return familyProducts
+      .filter(p => {
+        if (p.id === productId) return true;
+        return JSON.stringify(normalizeScopeValue(fieldKey, resolveFieldValue(p, fieldKey))) === currentNormalized;
+      })
+      .map(p => p.id);
+  }, [familyProducts, productId]);
+
+  const getMatchSummary = useCallback((fieldKey: string, currentValue: any) => {
+    const matchIds = getMatchingProductIds(fieldKey, currentValue);
+    if (!matchIds || !familyProducts?.length) return undefined;
+    return `${matchIds.length}/${familyProducts.length}`;
+  }, [getMatchingProductIds, familyProducts]);
+
+  const createValueMatchScopeChange = useCallback((fieldKey: string, currentValue: any) => {
+    return (id: string, newScope: import('@/hooks/useInheritanceExclusion').ItemExclusionScope) => {
+      if (onScopeChangeWithPropagation && familyProducts?.length) {
+        const matchIds = getMatchingProductIds(fieldKey, currentValue);
+        const nonMatchingIds = matchIds
+          ? (familyProductIds || []).filter(pid => !matchIds.includes(pid))
+          : [];
+        const oldScope: import('@/hooks/useInheritanceExclusion').ItemExclusionScope = {
+          excludedProductIds: nonMatchingIds,
+          excludedCategories: [],
+          isManualGroup: true,
+        };
+        return onScopeChangeWithPropagation(id, oldScope, newScope);
+      } else if (classificationExclusion) {
+        return classificationExclusion.setExclusionScope(id, newScope);
+      }
+    };
+  }, [onScopeChangeWithPropagation, familyProducts, getMatchingProductIds, familyProductIds, classificationExclusion]);
+
+  const renderScopeAndGov = (fieldKey: string, currentValue?: any) => (
     <div className="flex items-center gap-0.5 ml-auto">
       {belongsToFamily && companyId && classificationExclusion && productId ? (
         <InheritanceExclusionPopover
@@ -246,9 +285,11 @@ export function ClassificationTab({
           currentProductId={productId}
           itemId={fieldKey}
           exclusionScope={classificationExclusion.getExclusionScope(fieldKey)}
-          onScopeChange={(id, scope) => classificationExclusion.setExclusionScope(id, scope)}
+          onScopeChange={createValueMatchScopeChange(fieldKey, currentValue)}
           defaultCurrentDeviceOnly
           familyProductIds={familyProductIds}
+          summaryText={getMatchSummary(fieldKey, currentValue)}
+          valueMatchingProductIds={getMatchingProductIds(fieldKey, currentValue)}
         />
       ) : null}
       {getGovIcon(fieldKey)}
@@ -286,12 +327,12 @@ export function ClassificationTab({
               {lang('deviceBasics.classification.primaryRegulatoryTypeLabel')}
               {renderLockBadge('primaryRegulatoryType', primaryRegulatoryType)}
             </Label>
-            {renderScopeAndGov('classification_primaryRegulatoryType')}
+            {renderScopeAndGov('classification_primaryRegulatoryType', primaryRegulatoryType)}
           </div>
           {wrapWithOverlay('classification_primaryRegulatoryType', (
             <RadioGroup
               value={primaryRegulatoryType || undefined}
-              onValueChange={(value) => handleLockedFieldChange('primaryRegulatoryType', value, (v) => { onPrimaryRegulatoryTypeChange?.(v); autoSyncScope?.('classification_primaryRegulatoryType', v); })}
+              onValueChange={(value) => handleLockedFieldChange('primaryRegulatoryType', value, (v) => { onPrimaryRegulatoryTypeChange?.(v); })}
               disabled={isLoading}
               className="mt-2"
             >
@@ -315,7 +356,7 @@ export function ClassificationTab({
         <div className="flex-1">
           <div className="flex items-center">
             <Label className="text-sm font-medium">{lang('deviceBasics.classification.systemProcedurePack')}</Label>
-            {renderScopeAndGov('classification_systemProcedurePack')}
+            {renderScopeAndGov('classification_systemProcedurePack', rawKeyTechnologyCharacteristics?.isSystemOrProcedurePack)}
           </div>
           {wrapWithOverlay('classification_systemProcedurePack', (
             <div className="flex items-center space-x-2 mt-2">
@@ -328,7 +369,6 @@ export function ClassificationTab({
                       isSystemOrProcedurePack: checked
                     });
                   }
-                  autoSyncScope?.('classification_systemProcedurePack', checked);
                 }}
                 disabled={isLoading}
               />
@@ -354,12 +394,12 @@ export function ClassificationTab({
               {lang('deviceBasics.classification.coreDeviceNatureLabel')}
               {renderLockBadge('coreDeviceNature', coreDeviceNature)}
             </Label>
-            {renderScopeAndGov('classification_coreDeviceNature')}
+            {renderScopeAndGov('classification_coreDeviceNature', coreDeviceNature)}
           </div>
           {wrapWithOverlay('classification_coreDeviceNature', (
             <RadioGroup
               value={coreDeviceNature || undefined}
-              onValueChange={(value) => handleLockedFieldChange('coreDeviceNature', value, (v) => { onCoreDeviceNatureChange?.(v); autoSyncScope?.('classification_coreDeviceNature', v); })}
+              onValueChange={(value) => handleLockedFieldChange('coreDeviceNature', value, (v) => { onCoreDeviceNatureChange?.(v); })}
               disabled={isLoading}
               className="mt-2"
             >
@@ -400,13 +440,13 @@ export function ClassificationTab({
       <div>
         <div className="flex items-center">
           <Label className="text-sm font-medium">{lang('deviceBasics.classification.anatomicalLocationLabel')}</Label>
-          {renderScopeAndGov('classification_anatomicalLocation')}
+          {renderScopeAndGov('classification_anatomicalLocation', rawKeyTechnologyCharacteristics?.anatomicalLocation)}
         </div>
         {wrapWithOverlay('classification_anatomicalLocation', (
           <>
             <Select
               value={keyTechnologyCharacteristics?.anatomicalLocation || ''}
-              onValueChange={value => { handleCharacteristicStringChange('anatomicalLocation', value); autoSyncScope?.('classification_anatomicalLocation', value); }}
+              onValueChange={value => { handleCharacteristicStringChange('anatomicalLocation', value); }}
               disabled={isLoading}
             >
               <SelectTrigger className="mt-2">
@@ -505,14 +545,14 @@ export function ClassificationTab({
             <HelpTooltip content={lang('deviceBasics.classification.activeDeviceTooltip')} />
             {renderLockBadge('isActive', isActiveDevice)}
           </Label>
-          {renderScopeAndGov('classification_isActiveDevice')}
+          {renderScopeAndGov('classification_isActiveDevice', isActiveDevice)}
         </div>
         {wrapWithOverlay('classification_isActiveDevice', (
           <RadioGroup
             value={isActiveDevice === true ? "active" : isActiveDevice === false ? "non-active" : undefined}
             onValueChange={value => {
               const boolVal = value === "active";
-              handleLockedFieldChange('isActive', boolVal, (v) => { onIsActiveDeviceChange?.(v); autoSyncScope?.('classification_isActiveDevice', v); });
+              handleLockedFieldChange('isActive', boolVal, (v) => { onIsActiveDeviceChange?.(v); });
             }}
             disabled={isLoading}
           >

@@ -13,6 +13,7 @@ export interface NotificationItem {
   document_id?: string;
   document_name?: string;
   group_id?: string;
+  data?: any;
 }
 
 export function useNotifications(companyId?: string) {

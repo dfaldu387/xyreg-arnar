@@ -6,7 +6,9 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, CheckCircle2, Clock, AlertTriangle, Filter, TestTube2, Zap, Sparkles } from "lucide-react";
+import { Plus, CheckCircle2, Clock, AlertTriangle, Filter, TestTube2, Zap, Sparkles, Trash2 } from "lucide-react";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
+import { TraceabilityLinksService } from "@/services/traceabilityLinksService";
 import { vvService } from "@/services/vvService";
 import { useTranslation } from "@/hooks/useTranslation";
 import { CreateTestCaseDialog } from "./CreateTestCaseDialog";
@@ -37,6 +39,22 @@ export function TestCasesModule({ productId, companyId, disabled = false }: Test
   const [detailTestCase, setDetailTestCase] = useState<any>(null);
   const [editTestCase, setEditTestCase] = useState<any>(null);
   const [showAITestGen, setShowAITestGen] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  const handleDeleteTestCase = async (testCaseId: string) => {
+    setDeletingId(testCaseId);
+    try {
+      await vvService.deleteTestCase(testCaseId);
+      await TraceabilityLinksService.deleteBySourceOrTarget(productId, 'test_case', testCaseId);
+      queryClient.invalidateQueries({ queryKey: ['test-cases', productId] });
+      toast.success('Test case deleted successfully');
+    } catch (error) {
+      console.error('Error deleting test case:', error);
+      toast.error('Failed to delete test case');
+    } finally {
+      setDeletingId(null);
+    }
+  };
 
   // Fetch usability hazards (HAZ-USE) for AI test case generation
   const { data: usabilityHazards = [] } = useQuery({
@@ -369,6 +387,25 @@ export function TestCasesModule({ productId, companyId, disabled = false }: Test
                       {lang('verificationValidation.testCases.editTestCase')}
                     </Button>
                   )}
+                  <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                      <Button variant="ghost" size="sm" disabled={disabled || deletingId === testCase.id} className="text-destructive hover:text-destructive ml-auto">
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>Delete test case</AlertDialogTitle>
+                        <AlertDialogDescription>
+                          Are you sure you want to delete "{testCase.name}"? This will also remove associated traceability links. This action cannot be undone.
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                        <AlertDialogAction onClick={() => handleDeleteTestCase(testCase.id)}>Delete</AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
                 </div>
               </CardContent>
             </Card>

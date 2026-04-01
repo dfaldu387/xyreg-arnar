@@ -347,6 +347,8 @@ export default function ProductDocumentsPage() {
     if (refetchProduct) {
       await refetchProduct();
     }
+    // Trigger AllActivePhasesTab to refetch usePhaseDocuments
+    setRefreshTrigger(prev => prev + 1);
   };
 
   // Enhanced sync wrapper with consistent return type

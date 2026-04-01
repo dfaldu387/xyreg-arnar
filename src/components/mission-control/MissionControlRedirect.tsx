@@ -44,6 +44,11 @@ export function MissionControlRedirect() {
     return <Navigate to="/login" replace />;
   }
 
+  // If user is a super admin, redirect to super admin portal
+  if (user.user_metadata?.role === 'super_admin') {
+    return <Navigate to="/super-admin" replace />;
+  }
+
   // If user explicitly selected "All Companies" and has multiple companies,
   // show the multi-company dashboard
   if (showAllCompanies && companyRoles.length > 0) {

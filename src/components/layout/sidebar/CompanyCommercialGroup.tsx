@@ -1,6 +1,6 @@
 import React, { useMemo, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { Calculator, ChartBar, ChevronRight, DollarSign, Map, BarChart3, FileKey, Globe, TrendingUp, LayoutGrid, Target, Shield } from 'lucide-react';
+import { Calculator, ChartBar, ChevronRight, DollarSign, Map, BarChart3, FileKey, Globe, TrendingUp, LayoutGrid, Target, Banknote } from 'lucide-react';
 import { SidebarMenuButton, SidebarMenuSub, SidebarMenuSubItem, useSidebar } from '@/components/ui/sidebar';
 import { UserRole } from '@/types/documentTypes';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
@@ -59,15 +59,27 @@ export function CompanyCommercialGroup({
       visible: true
     },
     {
+      title: "Variance Analysis",
+      path: `${baseUrl}/commercial?tab=variance-analysis`,
+      icon: BarChart3,
+      visible: true
+    },
+    {
       title: "Pricing Strategy",
       path: `${baseUrl}/commercial?tab=pricing-strategy`,
       icon: DollarSign,
       visible: true
     },
     {
-      title: "IP Management",
-      path: `${baseUrl}/ip-portfolio`,
-      icon: Shield,
+      title: "Investors",
+      path: `${baseUrl}/commercial?tab=investors`,
+      icon: FileKey,
+      visible: true
+    },
+    {
+      title: "Funding & Grants",
+      path: `${baseUrl}/commercial?tab=funding-grants`,
+      icon: Banknote,
       visible: true
     }
   ];

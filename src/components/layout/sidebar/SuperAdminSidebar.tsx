@@ -1,12 +1,18 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { Sidebar, SidebarContent, SidebarHeader, SidebarMenu, SidebarMenuButton, SidebarMenuItem } from '@/components/ui/sidebar';
-import { Users, CreditCard, Settings, Shield, FileText, History, MessageSquare, Key, Layers, Ticket, Sparkles, DollarSign } from 'lucide-react';
+import { Users, CreditCard, Settings, Shield, FileText, History, MessageSquare, Key, Layers, Ticket, Sparkles, DollarSign, Rocket } from 'lucide-react';
 
 export default function SuperAdminSidebar() {
   const location = useLocation();
 
   const navigationItems = [
+    {
+      id: 'feedback',
+      label: 'Feedback',
+      icon: MessageSquare,
+      path: '/super-admin/app/feedback',
+    },
     {
       id: 'users',
       label: 'Users',
@@ -14,22 +20,22 @@ export default function SuperAdminSidebar() {
       path: '/super-admin/app/users',
     },
     // {
-    //   id: 'billing',
-    //   label: 'Billing',
-    //   icon: CreditCard,
-    //   path: '/super-admin/app/billing',
+    //   id: 'plans',
+    //   label: 'Plans',
+    //   icon: Settings,
+    //   path: '/super-admin/app/plans',
+    // },
+    // {
+    //   id: 'plan-pricing',
+    //   label: 'Pricing Management',
+    //   icon: DollarSign,
+    //   path: '/super-admin/app/plan-pricing',
     // },
     {
-      id: 'plans',
-      label: 'Plans',
-      icon: Settings,
-      path: '/super-admin/app/plans',
-    },
-    {
-      id: 'plan-pricing',
-      label: 'Pricing Management',
-      icon: DollarSign,
-      path: '/super-admin/app/plan-pricing',
+      id: 'releases',
+      label: 'Releases',
+      icon: Rocket,
+      path: '/super-admin/app/releases',
     },
     {
       id: 'api-keys',
@@ -54,30 +60,6 @@ export default function SuperAdminSidebar() {
       label: 'Audit Log',
       icon: History,
       path: '/super-admin/app/audit-logs',
-    },
-    {
-      id: 'gap-analysis',
-      label: 'Gap Analysis',
-      icon: FileText,
-      path: '/super-admin/app/gap-analysis',
-    },
-    {
-      id: 'variant-config',
-      label: 'Variant Configuration',
-      icon: Layers,
-      path: '/super-admin/app/variant-config',
-    },
-    {
-      id: 'variant-documents',
-      label: 'Variant Documents',
-      icon: Layers,
-      path: '/super-admin/app/variant-documents',
-    },
-    {
-      id: 'feedback',
-      label: 'Feedback',
-      icon: MessageSquare,
-      path: '/super-admin/app/feedback',
     },
     {
       id: 'whx-codes',
@@ -112,7 +94,7 @@ export default function SuperAdminSidebar() {
       </SidebarHeader>
 
       <SidebarContent className="p-4">
-        <SidebarMenu className="space-y-4">
+        <SidebarMenu className="space-y-1">
           {/* Navigation Items */}
           {navigationItems.map((item) => {
             const Icon = item.icon;
@@ -123,30 +105,28 @@ export default function SuperAdminSidebar() {
                 <SidebarMenuButton 
                   asChild 
                   isActive={isActive}
-                  className={`w-full h-16 px-5 rounded-2xl transition-all duration-300 ease-in-out transform ${
+                  className={`w-full h-9 px-3 rounded-lg transition-all duration-200 ease-in-out ${
                     isActive
-                      ? 'bg-gradient-to-r from-primary to-sidebar-primary text-primary-foreground shadow-xl scale-105'
-                      : 'bg-sidebar-accent hover:bg-sidebar-accent/80 text-sidebar-foreground hover:text-sidebar-foreground border-2 border-sidebar-border hover:border-primary/30 hover:shadow-lg hover:scale-102'
+                      ? 'bg-gradient-to-r from-primary to-sidebar-primary text-primary-foreground shadow-md'
+                      : 'bg-sidebar-accent hover:bg-sidebar-accent/80 text-sidebar-foreground hover:text-sidebar-foreground border border-sidebar-border hover:border-primary/30'
                   }`}
                 >
-                  <Link to={item.path} className="flex items-center space-x-4 w-full h-full">
-                    <div className={`p-3 rounded-xl flex-shrink-0 ${
+                  <Link to={item.path} className="flex items-center space-x-2 w-full h-full">
+                    <div className={`p-1.5 rounded-md flex-shrink-0 ${
                       isActive 
-                        ? 'bg-primary-foreground/20 backdrop-blur-sm' 
+                        ? 'bg-primary-foreground/20' 
                         : 'bg-sidebar-accent group-hover:bg-primary/10'
                     }`}>
-                      <Icon className={`h-6 w-6 transition-all duration-300 ${
+                      <Icon className={`h-4 w-4 ${
                         isActive ? 'text-primary-foreground' : 'text-sidebar-foreground group-hover:text-primary'
                       }`} />
                     </div>
                     
-                    <div className="text-left flex-1">
-                      <div className={`font-bold text-base transition-all duration-300 ${
-                        isActive ? 'text-primary-foreground' : 'text-sidebar-foreground group-hover:text-sidebar-foreground'
-                      }`}>
-                        {item.label}
-                      </div>
-                    </div>
+                    <span className={`font-medium text-sm ${
+                      isActive ? 'text-primary-foreground' : 'text-sidebar-foreground'
+                    }`}>
+                      {item.label}
+                    </span>
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>

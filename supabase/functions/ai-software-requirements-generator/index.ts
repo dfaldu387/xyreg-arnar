@@ -19,7 +19,7 @@ serve(async (req) => {
   }
 
   try {
-    const { companyId, productData, systemRequirements, selectedCategories } = await req.json();
+    const { companyId, productData, systemRequirements, selectedCategories, existingItems } = await req.json();
     
     console.log('[ai-software-requirements-generator] Starting software requirements generation');
     console.log('[ai-software-requirements-generator] Request:', {
@@ -36,8 +36,12 @@ serve(async (req) => {
 
     console.log('[ai-software-requirements-generator] API key found, calling Lovable AI Gateway');
 
+    const existingItemsSection = existingItems && existingItems.length > 0
+      ? `\n\nEXISTING SOFTWARE REQUIREMENTS (DO NOT suggest these again or anything semantically equivalent):\n${existingItems.map((item: string) => `- "${item}"`).join('\n')}\n\nGenerate ONLY NEW requirements that are substantially different from the above.`
+      : '';
+
     // Build system prompt for software requirements AI role as "software lead"
-    const systemPrompt = `You are a Software Lead for medical device development. Your role is to translate system requirements into specific, actionable software requirements that implement those system capabilities.
+    const systemPrompt = `You are a Software Lead for medical device development. Your role is to translate system requirements into specific, actionable software requirements that implement those system capabilities.${existingItemsSection}
 
 CONTEXT:
 - Device: ${productData.product_name || 'Medical Device'}

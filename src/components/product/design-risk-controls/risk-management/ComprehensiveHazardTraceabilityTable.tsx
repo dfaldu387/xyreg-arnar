@@ -6,6 +6,7 @@ import { ColumnDef } from "@tanstack/react-table";
 import { Eye, EyeOff } from "lucide-react";
 import { Hazard, RiskLevel, calculateRiskLevel } from "./types";
 import { Card, CardContent } from "@/components/ui/card";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useTranslation } from "@/hooks/useTranslation";
 import { InheritanceExclusionPopover } from "@/components/shared/InheritanceExclusionPopover";
 import { ItemExclusionScope } from "@/hooks/useInheritanceExclusion";
@@ -112,10 +113,20 @@ export function ComprehensiveHazardTraceabilityTable({
       const hazard = row.original;
       if (hazard.isInheritedFromMaster) {
         const excluded = isHazardExcluded?.(hazard.id) ?? false;
+        const label = `From ${hazard.masterProductName}`;
         return (
-          <Badge variant="outline" className={`text-xs border-blue-300 bg-blue-50 text-blue-700 ${excluded ? 'opacity-50' : ''}`}>
-            From {hazard.masterProductName}
-          </Badge>
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Badge variant="outline" className={`text-xs inline-block max-w-[120px] overflow-hidden text-ellipsis whitespace-nowrap border-blue-300 bg-blue-50 text-blue-700 ${excluded ? 'opacity-50' : ''}`}>
+                  {label}
+                </Badge>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>{label}</p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
         );
       }
       return (

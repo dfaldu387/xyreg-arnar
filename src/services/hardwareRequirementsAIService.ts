@@ -27,6 +27,7 @@ export interface HardwareRequirementsAIRequest {
     description: string;
   }>;
   selectedCategories: string[];
+  existingItems?: string[];
 }
 
 export interface HardwareRequirementsAIResponse {

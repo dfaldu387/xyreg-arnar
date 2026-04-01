@@ -269,6 +269,47 @@ serve(async (req)=>{
         }
       }
 
+      // Apply module access from invitation for existing user
+      const { data: existingUserModuleAccess, error: existingModuleErr } = await supabaseAdmin
+        .from('invitation_module_access')
+        .select('module_ids')
+        .eq('invitation_id', invitation.id)
+        .maybeSingle();
+
+      if (!existingModuleErr && existingUserModuleAccess?.module_ids?.length > 0) {
+        console.log('Creating module access for existing user:', existingUserModuleAccess.module_ids.length, 'modules');
+        // Check for existing record
+        const { data: existingModuleRecord } = await supabaseAdmin
+          .from('user_company_module_access')
+          .select('id')
+          .eq('user_id', existingUserByEmail.id)
+          .eq('company_id', companyId)
+          .maybeSingle();
+
+        if (existingModuleRecord) {
+          const { error: moduleUpdateErr } = await supabaseAdmin
+            .from('user_company_module_access')
+            .update({
+              module_ids: existingUserModuleAccess.module_ids,
+              is_active: true,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', existingModuleRecord.id);
+          if (moduleUpdateErr) console.error('Error updating module access for existing user:', moduleUpdateErr);
+        } else {
+          const { error: moduleInsertErr } = await supabaseAdmin
+            .from('user_company_module_access')
+            .insert({
+              user_id: existingUserByEmail.id,
+              company_id: companyId,
+              module_ids: existingUserModuleAccess.module_ids,
+              is_active: true,
+              assigned_at: new Date().toISOString(),
+            });
+          if (moduleInsertErr) console.error('Error inserting module access for existing user:', moduleInsertErr);
+        }
+      }
+
       return createSuccessResponse({
         message: 'User already exists',
         user: {
@@ -445,6 +486,29 @@ serve(async (req)=>{
         }, { onConflict: 'user_id,company_id' });
       if (docInsertErr) {
         console.error('Error inserting document permissions for new user:', docInsertErr);
+      }
+    }
+
+    // Apply module access from invitation for new user
+    const { data: newUserModuleAccess, error: newUserModuleErr } = await supabaseAdmin
+      .from('invitation_module_access')
+      .select('module_ids')
+      .eq('invitation_id', invitation.id)
+      .maybeSingle();
+
+    if (!newUserModuleErr && newUserModuleAccess?.module_ids?.length > 0) {
+      console.log('Creating module access for new user:', newUserModuleAccess.module_ids.length, 'modules');
+      const { error: moduleInsertErr } = await supabaseAdmin
+        .from('user_company_module_access')
+        .insert({
+          user_id: authUser.user.id,
+          company_id: companyId,
+          module_ids: newUserModuleAccess.module_ids,
+          is_active: true,
+          assigned_at: new Date().toISOString(),
+        });
+      if (moduleInsertErr) {
+        console.error('Error inserting module access for new user:', moduleInsertErr);
       }
     }
 

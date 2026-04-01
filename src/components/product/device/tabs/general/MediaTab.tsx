@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Label } from "@/components/ui/label";
 import { DeviceMediaUpload } from '../../DeviceMediaUpload';
@@ -8,6 +8,7 @@ import { Device3DModel } from '@/types';
 import { InvestorVisibleBadge } from '@/components/ui/investor-visible-badge';
 import { useTranslation } from '@/hooks/useTranslation';
 import { InheritanceExclusionPopover } from '@/components/shared/InheritanceExclusionPopover';
+import { resolveFieldValue, normalizeScopeValue } from '@/hooks/useAutoSyncScope';
 import { GovernanceBookmark } from '@/components/ui/GovernanceBookmark';
 
 
@@ -40,6 +41,8 @@ interface MediaTabProps {
   };
   autoSyncScope?: (fieldKey: string, newValue: any) => void;
   familyProductIds?: string[];
+  familyProducts?: any[];
+  onScopeChangeWithPropagation?: (fieldKey: string, oldScope: import('@/hooks/useInheritanceExclusion').ItemExclusionScope, newScope: import('@/hooks/useInheritanceExclusion').ItemExclusionScope) => Promise<void>;
 }
 
 export function MediaTab({
@@ -66,6 +69,8 @@ export function MediaTab({
   classificationExclusion,
   autoSyncScope,
   familyProductIds,
+  familyProducts,
+  onScopeChangeWithPropagation,
 }: MediaTabProps) {
   const { lang } = useTranslation();
   const [searchParams] = useSearchParams();
@@ -89,7 +94,44 @@ export function MediaTab({
     return <GovernanceBookmark status={null} />;
   };
 
-  const renderScopeAndGov = (fieldKey: string) => (
+  // --- Value-matching helpers ---
+  const getMatchingProductIds = useCallback((fieldKey: string, currentValue: any): string[] | undefined => {
+    if (!familyProducts?.length || !productId) return undefined;
+    const currentNormalized = JSON.stringify(normalizeScopeValue(fieldKey, currentValue));
+    return familyProducts
+      .filter(p => {
+        if (p.id === productId) return true;
+        return JSON.stringify(normalizeScopeValue(fieldKey, resolveFieldValue(p, fieldKey))) === currentNormalized;
+      })
+      .map(p => p.id);
+  }, [familyProducts, productId]);
+
+  const getMatchSummary = useCallback((fieldKey: string, currentValue: any) => {
+    const matchIds = getMatchingProductIds(fieldKey, currentValue);
+    if (!matchIds || !familyProducts?.length) return undefined;
+    return `${matchIds.length}/${familyProducts.length}`;
+  }, [getMatchingProductIds, familyProducts]);
+
+  const createValueMatchScopeChange = useCallback((fieldKey: string, currentValue: any) => {
+    return (id: string, newScope: import('@/hooks/useInheritanceExclusion').ItemExclusionScope) => {
+      if (onScopeChangeWithPropagation && familyProducts?.length) {
+        const matchIds = getMatchingProductIds(fieldKey, currentValue);
+        const nonMatchingIds = matchIds
+          ? (familyProductIds || []).filter(pid => !matchIds.includes(pid))
+          : [];
+        const oldScope: import('@/hooks/useInheritanceExclusion').ItemExclusionScope = {
+          excludedProductIds: nonMatchingIds,
+          excludedCategories: [],
+          isManualGroup: true,
+        };
+        return onScopeChangeWithPropagation(id, oldScope, newScope);
+      } else if (classificationExclusion) {
+        return classificationExclusion.setExclusionScope(id, newScope);
+      }
+    };
+  }, [onScopeChangeWithPropagation, familyProducts, getMatchingProductIds, familyProductIds, classificationExclusion]);
+
+  const renderScopeAndGov = (fieldKey: string, currentValue?: any) => (
     <div className="flex items-center gap-0.5 ml-auto">
       {belongsToFamily && company_id && productId && classificationExclusion ? (
         <InheritanceExclusionPopover
@@ -97,9 +139,11 @@ export function MediaTab({
           currentProductId={productId}
           itemId={fieldKey}
           exclusionScope={classificationExclusion.getExclusionScope(fieldKey)}
-          onScopeChange={(id, scope) => classificationExclusion.setExclusionScope(id, scope)}
+          onScopeChange={createValueMatchScopeChange(fieldKey, currentValue)}
           defaultCurrentDeviceOnly
           familyProductIds={familyProductIds}
+          summaryText={getMatchSummary(fieldKey, currentValue)}
+          valueMatchingProductIds={getMatchingProductIds(fieldKey, currentValue)}
         />
       ) : null}
       {getGovIcon(fieldKey)}
@@ -112,7 +156,6 @@ export function MediaTab({
     if (onImagesChange) {
       const newImages = [...images, imageUrl];
       onImagesChange(newImages);
-      autoSyncScope?.('media_deviceMedia', newImages);
     }
   };
 
@@ -123,7 +166,7 @@ export function MediaTab({
         <div className="flex items-center gap-2 mb-3">
           <Label className="text-sm font-medium">{lang('deviceBasics.media.deviceMediaLabel')}</Label>
           <InvestorVisibleBadge />
-          {renderScopeAndGov('media_deviceMedia')}
+          {renderScopeAndGov('media_deviceMedia', images)}
         </div>
         {wrapWithOverlay('media_deviceMedia', (
           <>
@@ -137,7 +180,6 @@ export function MediaTab({
                 if (onImagesChange) {
                   const newImages = [...images, ...imageUrls];
                   onImagesChange(newImages);
-                  autoSyncScope?.('media_deviceMedia', newImages);
                 }
               }}
             />
@@ -147,7 +189,6 @@ export function MediaTab({
               models3D={models3D}
               onImagesChange={(newImages) => {
                 onImagesChange?.(newImages);
-                autoSyncScope?.('media_deviceMedia', newImages);
               }}
               onVideosChange={onVideosChange}
               onModels3DChange={onModels3DChange}

@@ -398,7 +398,7 @@ export function CompanyDocumentCard({
             onClick={handleInlineEdit}
             disabled={isDeleting || disabled}
             className="h-8 px-3 bg-background"
-            title={document.document_reference ? "Edit Draft in Studio" : "Create Draft in Studio"}
+            title={document.document_reference ? "Edit Document" : "Create Document"}
           >
             <FileEdit className={`h-4 w-4 ${document.document_reference?.startsWith('DS-') && document.status?.toLowerCase() !== 'approved' ? 'text-amber-500' : 'text-primary'}`} />
           </Button>

@@ -87,7 +87,7 @@ export class HardcodedTemplateService {
             type: 'table',
             content: `Document Number: SOP-001 | Version: [Version] | Title: Document Control | Effective Date: [Date]
 
-Prepared By: [Prepared By Name] | Date: [Date]
+Issued By: [Issued By Name] | Date: [Date]
 Reviewed By: [Reviewed By Name] | Date: [Date]  
 Approved By: [Approved By Name] | Date: [Date]`,
             isAIGenerated: false,
@@ -401,7 +401,7 @@ LIST-001-B: Master Document List (MDL)`,
             type: 'table',
             content: `Document Number: SOP-005 | Version: [Version] | Title: Training | Effective Date: [Date]
 
-Prepared By: [Name, Title] | Date: [Date]
+Issued By: [Name, Title] | Date: [Date]
 Reviewed By: [Name, Title] | Date: [Date]  
 Approved By: [Name, Title (e.g., Head of Quality)] | Date: [Date]`,
             isAIGenerated: false,
@@ -641,7 +641,7 @@ FORM-005-B: Training Roster`,
             type: 'table',
             content: `Document Number: SOP-004 | Version: [Version] | Title: Change Control | Effective Date: [Date]
 
-Prepared By: [Name, Title] | Date: [Date]
+Issued By: [Name, Title] | Date: [Date]
 Reviewed By: [Name, Title] | Date: [Date]  
 Approved By: [Name, Title (e.g., Head of Quality)] | Date: [Date]`,
             isAIGenerated: false,

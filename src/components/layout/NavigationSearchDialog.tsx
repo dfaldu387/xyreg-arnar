@@ -169,12 +169,19 @@ export function NavigationSearchDialog({ open, onOpenChange }: NavigationSearchD
   }, [user?.id, open]);
 
   // Flatten all devices from all clients, filtered by user's device access restrictions
+  // Family members (same basic_udi_di or parent_product_id) of allowed devices are also included
   const devices = useMemo(() => {
     return clients.flatMap(client => {
       const restrictedIds = userProductRestrictions[client.id];
-      const products = restrictedIds
-        ? client.productList.filter(product => restrictedIds.includes(product.id))
-        : client.productList;
+      if (!restrictedIds) return client.productList.map(product => ({
+        id: product.id,
+        name: product.name,
+        companyId: client.id,
+        companyName: client.name,
+      }));
+
+      const allowedSet = new Set(restrictedIds);
+      const products = client.productList.filter((product: any) => allowedSet.has(product.id));
       return products.map(product => ({
         id: product.id,
         name: product.name,

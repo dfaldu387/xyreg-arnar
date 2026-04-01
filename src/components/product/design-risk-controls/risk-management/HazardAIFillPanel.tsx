@@ -1,10 +1,12 @@
 import React, { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Sparkles, Check, X, Loader2, ChevronDown, ChevronUp } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import { AIContextSourcesPanel } from "@/components/product/ai-assistant/AIContextSourcesPanel";
 
 export interface HazardFillSuggestion {
   description: string;
@@ -122,6 +124,9 @@ export function HazardAIFillPanel({
   const [acceptedFields, setAcceptedFields] = useState<Set<string>>(new Set());
   const [rejectedFields, setRejectedFields] = useState<Set<string>>(new Set());
   const [isExpanded, setIsExpanded] = useState(true);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [outputLanguage, setOutputLanguage] = useState('en');
+  const [additionalPrompt, setAdditionalPrompt] = useState('');
 
   const fetchSuggestions = async () => {
     setIsLoading(true);
@@ -205,33 +210,66 @@ export function HazardAIFillPanel({
 
   if (!suggestion) {
     return (
-      <div className="flex items-center gap-2">
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={fetchSuggestions}
-          disabled={isLoading}
-          className="border-amber-300 text-amber-700 hover:bg-amber-50 hover:text-amber-800"
-        >
-          {isLoading ? (
-            <>
-              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-              Analyzing requirement...
-            </>
-          ) : (
-            <>
-              <Sparkles className="h-4 w-4 mr-2" />
-              AI Fill Hazard
-            </>
+      <>
+        <div className="flex items-center gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setConfirmOpen(true)}
+            disabled={isLoading}
+            className="border-amber-300 text-amber-700 hover:bg-amber-50 hover:text-amber-800"
+          >
+            {isLoading ? (
+              <>
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                Analyzing requirement...
+              </>
+            ) : (
+              <>
+                <Sparkles className="h-4 w-4 mr-2" />
+                AI Fill Hazard
+              </>
+            )}
+          </Button>
+          {!isLoading && (
+            <span className="text-xs text-muted-foreground">
+              Analyze the linked requirement and suggest all fields
+            </span>
           )}
-        </Button>
-        {!isLoading && (
-          <span className="text-xs text-muted-foreground">
-            Analyze the linked requirement and suggest all fields
-          </span>
-        )}
-      </div>
+        </div>
+
+        <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+          <DialogContent className="max-w-lg">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Sparkles className="h-5 w-5 text-amber-500" />
+                AI Fill Hazard
+              </DialogTitle>
+              <p className="text-sm text-muted-foreground">
+                Review the context sources that will be used for AI generation.
+              </p>
+            </DialogHeader>
+            <AIContextSourcesPanel
+              productId={productId}
+              additionalSources={[
+                `Requirement: ${requirementDescription?.substring(0, 60) || requirementId}`,
+                ...(requirementCategory ? [`Category: ${requirementCategory}`] : []),
+              ]}
+              mode="select"
+              onLanguageChange={setOutputLanguage}
+              onPromptChange={setAdditionalPrompt}
+            />
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setConfirmOpen(false)}>Cancel</Button>
+              <Button onClick={() => { setConfirmOpen(false); fetchSuggestions(); }}>
+                <Sparkles className="h-4 w-4 mr-2" />
+                Generate
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </>
     );
   }
 

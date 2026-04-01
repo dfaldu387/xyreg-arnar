@@ -144,9 +144,8 @@ export function DocumentTabs({
   const { data: pendingSyncDocs = [], refetch: refetchPendingCount } = useQuery({
     queryKey: ['pending-sync-count', productId, companyId],
     enabled: !!productId && !!companyId && variantChecked && !isVariantDevice,
-    staleTime: Infinity,
+    staleTime: 0,
     refetchOnWindowFocus: false,
-    refetchOnReconnect: false,
     refetchOnMount: true,
     queryFn: async () => {
       // Build a comprehensive phase ID → name map (mirrors safeDocumentSyncService logic)
@@ -471,13 +470,12 @@ export function DocumentTabs({
     });
   }, [lifecyclePhaseDocuments, phases]);
 
-  // Use company chosen phases (activePhaseNames) as the primary source for filtering
-  // This ensures all phases chosen by the company are available for filtering
+  // Only show phases that actually have documents for this product
+  // This prevents users from filtering by phases with 0 documents
   const combinedAvailablePhases = useMemo(() => {
-    // Use active phases (company_chosen_phases) as primary source
-    // This shows all phases that the company has chosen to use
-    if (activePhaseNames && activePhaseNames.length > 0) {
-      return activePhaseNames;
+    // Primary: phases from actual document data (only phases with documents)
+    if (filteredAvailablePhases && filteredAvailablePhases.length > 0) {
+      return filteredAvailablePhases;
     }
 
     // Fallback to product lifecycle phases
@@ -485,8 +483,8 @@ export function DocumentTabs({
       return productPhaseNames;
     }
 
-    // Final fallback to filtered phases
-    return filteredAvailablePhases || [];
+    // Final fallback to active company phases
+    return activePhaseNames || [];
   }, [productPhaseNames, filteredAvailablePhases, activePhaseNames]);
 
   if (!productId || !companyId) {
@@ -829,6 +827,9 @@ export function DocumentTabs({
                       <FileText className="h-4 w-4 mt-0.5 text-muted-foreground shrink-0" />
                       <div className="min-w-0 flex-1">
                         <p className="text-sm font-medium leading-tight truncate">{doc.name}</p>
+                        {doc.phaseName && (
+                          <p className="text-xs text-muted-foreground truncate mt-0.5">{doc.phaseName}</p>
+                        )}
                       </div>
                     </div>
                   ))}

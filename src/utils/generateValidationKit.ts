@@ -194,7 +194,7 @@ function createApprovalTable(): Table {
     columnWidths: colWidths,
     rows: [
       new TableRow({ children: ["Role", "Name", "Signature", "Date"].map((t, i) => headerCell(t, colWidths[i])) }),
-      ...["Prepared By", "Reviewed By", "Approved By"].map(role =>
+      ...["Issued By", "Reviewed By", "Approved By"].map(role =>
         new TableRow({ children: [bodyCell(role, colWidths[0]), bodyCell("", colWidths[1]), bodyCell("", colWidths[2]), bodyCell("", colWidths[3])] })
       ),
     ],

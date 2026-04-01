@@ -84,6 +84,16 @@ export const WIDGET_REGISTRY: WidgetDefinition[] = [
     defaultEnabled: false,
   },
   {
+    id: 'review-action-items',
+    labelKey: 'missionControl.widgets.reviewActionItems',
+    descriptionKey: 'missionControl.widgets.reviewActionItemsDesc',
+    label: 'Review Action Items',
+    description: 'Documents assigned to you for review or authoring',
+    icon: 'FileCheck',
+    column: 'right',
+    defaultEnabled: true,
+  },
+  {
     id: 'feedback-tracker',
     labelKey: 'missionControl.widgets.feedbackTracker',
     descriptionKey: 'missionControl.widgets.feedbackTrackerDesc',

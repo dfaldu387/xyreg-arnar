@@ -145,10 +145,10 @@ export function SOPDocumentHeader({ documentControl, companyName, className = ''
       {/* Approval section */}
       <div className="p-4 border-t border-gray-300">
         <div className="grid grid-cols-3 gap-4">
-          {/* Prepared By */}
+          {/* Issued By */}
           <div className="text-center">
             <div className="border border-gray-300 bg-gray-50 p-2 font-semibold text-sm">
-              Prepared By
+              Issued By
             </div>
             <div className="border border-gray-300 border-t-0 p-4 h-24 flex flex-col justify-between">
               <div className="text-xs">

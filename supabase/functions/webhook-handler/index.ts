@@ -13,7 +13,13 @@ const logStep = (step: string, details?: any) => {
 };
 
 serve(async (req) => {
+  const requestTimestamp = new Date().toISOString();
+  console.log(`[WEBHOOK-HANDLER] ====== INCOMING REQUEST at ${requestTimestamp} ======`);
+  console.log(`[WEBHOOK-HANDLER] Method: ${req.method}, URL: ${req.url}`);
+  console.log(`[WEBHOOK-HANDLER] Headers: stripe-signature=${req.headers.get("stripe-signature") ? "PRESENT" : "MISSING"}, content-type=${req.headers.get("content-type")}`);
+
   if (req.method === "OPTIONS") {
+    console.log(`[WEBHOOK-HANDLER] OPTIONS preflight - returning 200`);
     return new Response(null, { headers: corsHeaders });
   }
 
@@ -23,8 +29,15 @@ serve(async (req) => {
     const stripeKey = Deno.env.get("STRIPE_SECRET_KEY");
     const webhookSecret = Deno.env.get("STRIPE_WEBHOOK_SECRET");
 
+    logStep("Environment check", {
+      hasStripeKey: !!stripeKey,
+      hasWebhookSecret: !!webhookSecret,
+      stripeKeyPrefix: stripeKey ? stripeKey.substring(0, 7) + "..." : "MISSING",
+      webhookSecretPrefix: webhookSecret ? webhookSecret.substring(0, 10) + "..." : "MISSING",
+    });
+
     if (!stripeKey || !webhookSecret) {
-      throw new Error("Missing Stripe configuration");
+      throw new Error(`Missing Stripe configuration - STRIPE_SECRET_KEY: ${!!stripeKey}, STRIPE_WEBHOOK_SECRET: ${!!webhookSecret}`);
     }
 
     const stripe = new Stripe(stripeKey, { apiVersion: "2024-11-20.acacia" });
@@ -35,7 +48,17 @@ serve(async (req) => {
     }
 
     const body = await req.text();
-    const event = await stripe.webhooks.constructEventAsync(body, signature, webhookSecret);
+    logStep("Request body received", { bodyLength: body.length, bodyPreview: body.substring(0, 200) });
+
+    let event;
+    try {
+      event = await stripe.webhooks.constructEventAsync(body, signature, webhookSecret);
+      logStep("Signature verification SUCCESS", { eventId: event.id, eventType: event.type });
+    } catch (sigError) {
+      const sigErrMsg = sigError instanceof Error ? sigError.message : String(sigError);
+      logStep("Signature verification FAILED", { error: sigErrMsg });
+      throw sigError;
+    }
 
     logStep("Event type", { type: event.type });
 
@@ -195,12 +218,64 @@ serve(async (req) => {
         const subscription = event.data.object as Stripe.Subscription;
         const customerId = subscription.customer as string;
 
+        logStep("Processing subscription event", {
+          eventType: event.type,
+          subscriptionId: subscription.id,
+          customerId,
+          status: subscription.status,
+          periodEnd: subscription.current_period_end
+            ? new Date(subscription.current_period_end * 1000).toISOString()
+            : null,
+          metadata: subscription.metadata,
+        });
+
         // Find user by Stripe customer ID
-        const { data: existingSub } = await supabaseClient
+        let existingSub: { user_id: string } | null = null;
+        const { data: subByCustomer } = await supabaseClient
           .from('user_subscriptions')
           .select('user_id')
           .eq('stripe_customer_id', customerId)
           .single();
+        existingSub = subByCustomer;
+
+        // Fallback: find user by email from Stripe customer
+        if (!existingSub) {
+          logStep("User not found by customer_id, trying email fallback", { customerId });
+          const stripeKeyForLookup = Deno.env.get("STRIPE_SECRET_KEY");
+          if (stripeKeyForLookup) {
+            const stripeLookup = new Stripe(stripeKeyForLookup, { apiVersion: "2024-11-20.acacia" });
+            const customer = await stripeLookup.customers.retrieve(customerId);
+            if (customer && !customer.deleted && customer.email) {
+              const { data: userByEmail } = await supabaseClient
+                .from('user_profiles')
+                .select('id')
+                .eq('email', customer.email)
+                .single();
+
+              if (userByEmail) {
+                existingSub = { user_id: userByEmail.id };
+                logStep("User found by email", { email: customer.email, userId: userByEmail.id });
+
+                // Also create/update user_subscriptions so future lookups work
+                await supabaseClient
+                  .from('user_subscriptions')
+                  .upsert({
+                    user_id: userByEmail.id,
+                    stripe_customer_id: customerId,
+                    stripe_subscription_id: subscription.id,
+                    product_id: subscription.items.data[0]?.price?.product as string || '',
+                    price_id: subscription.items.data[0]?.price?.id || '',
+                    status: subscription.status,
+                    current_period_end: subscription.current_period_end
+                      ? new Date(subscription.current_period_end * 1000).toISOString()
+                      : null,
+                  }, { onConflict: 'user_id' });
+
+                logStep("Created user_subscriptions record for user", { userId: userByEmail.id });
+              }
+            }
+          }
+        }
 
         if (existingSub) {
           const updateData: any = {
@@ -231,10 +306,38 @@ serve(async (req) => {
           logStep("Subscription updated", { userId: existingSub.user_id });
 
           // ── Sync expires_at in new_pricing_company_plans ──
-          // When Stripe renews, update the company plan's expires_at with the new period end
-          const companyId = subscription.metadata?.company_id || subscription.metadata?.companyId;
-          if (companyId && subscription.current_period_end) {
-            const newExpiresAt = new Date(subscription.current_period_end * 1000).toISOString();
+          // Determine the correct expiry date: current_period_end, or trial_end for trials
+          let periodEndTimestamp = subscription.current_period_end || subscription.trial_end;
+
+          // If still null, fetch the full subscription from Stripe API
+          if (!periodEndTimestamp) {
+            logStep("No period end in event, fetching full subscription from Stripe");
+            const stripeKeyForFetch = Deno.env.get("STRIPE_SECRET_KEY");
+            if (stripeKeyForFetch) {
+              const stripeFetch = new Stripe(stripeKeyForFetch, { apiVersion: "2024-11-20.acacia" });
+              const fullSub = await stripeFetch.subscriptions.retrieve(subscription.id);
+              periodEndTimestamp = fullSub.current_period_end || fullSub.trial_end;
+              logStep("Fetched full subscription", {
+                currentPeriodEnd: fullSub.current_period_end,
+                trialEnd: fullSub.trial_end,
+              });
+            }
+          }
+
+          // Find company_id from metadata or user lookup
+          let companyId = subscription.metadata?.company_id || subscription.metadata?.companyId;
+          if (!companyId) {
+            const { data: userCompany } = await supabaseClient
+              .from('user_company_access')
+              .select('company_id')
+              .eq('user_id', existingSub.user_id)
+              .eq('is_primary', true)
+              .single();
+            companyId = userCompany?.company_id;
+          }
+
+          if (companyId && periodEndTimestamp) {
+            const newExpiresAt = new Date(periodEndTimestamp * 1000).toISOString();
             const newStatus = subscription.cancel_at_period_end ? 'cancelled' :
                              (subscription.status === 'active' ? 'active' :
                               subscription.status === 'trialing' ? 'trial' : subscription.status);
@@ -258,35 +361,8 @@ serve(async (req) => {
                 cancelAtPeriodEnd: subscription.cancel_at_period_end,
               });
             }
-          } else if (!companyId) {
-            // Fallback: try to find company_id from user's company access
-            const { data: userCompany } = await supabaseClient
-              .from('user_company_access')
-              .select('company_id')
-              .eq('user_id', existingSub.user_id)
-              .eq('is_primary', true)
-              .single();
-
-            if (userCompany?.company_id && subscription.current_period_end) {
-              const newExpiresAt = new Date(subscription.current_period_end * 1000).toISOString();
-              const newStatus = subscription.cancel_at_period_end ? 'cancelled' :
-                               (subscription.status === 'active' ? 'active' :
-                                subscription.status === 'trialing' ? 'trial' : subscription.status);
-
-              await supabaseClient
-                .from('new_pricing_company_plans')
-                .update({
-                  expires_at: newExpiresAt,
-                  status: newStatus,
-                  updated_at: new Date().toISOString(),
-                })
-                .eq('company_id', userCompany.company_id);
-
-              logStep("Synced expires_at via user lookup", {
-                companyId: userCompany.company_id,
-                expiresAt: newExpiresAt,
-              });
-            }
+          } else {
+            logStep("Could not sync expires_at", { companyId, hasPeriodEnd: !!periodEndTimestamp });
           }
         }
         break;
@@ -347,40 +423,85 @@ serve(async (req) => {
           ? invoice.subscription
           : invoice.subscription?.id;
 
-        logStep("Payment succeeded", { invoiceId: invoice.id, subscriptionId: invoiceSubscriptionId });
+        logStep("Payment succeeded", { invoiceId: invoice.id, subscriptionId: invoiceSubscriptionId, amountPaid: invoice.amount_paid });
 
-        // When Stripe charges a renewal, update expires_at in new_pricing_company_plans
+        // Find the user by Stripe customer ID
+        const invCustomerId = typeof invoice.customer === 'string' ? invoice.customer : invoice.customer?.id;
+        const { data: invUserSub } = await supabaseClient
+          .from('user_subscriptions')
+          .select('user_id')
+          .eq('stripe_customer_id', invCustomerId)
+          .single();
+
+        // If user not found by customer ID, try finding by email
+        let invUserId = invUserSub?.user_id;
+        if (!invUserId && invoice.customer_email) {
+          const { data: userByEmail } = await supabaseClient
+            .from('user_profiles')
+            .select('id')
+            .eq('email', invoice.customer_email)
+            .single();
+          invUserId = userByEmail?.id;
+          logStep("User found by email fallback", { email: invoice.customer_email, userId: invUserId });
+        }
+
+        // Find company_id for this user
+        let invCompanyId: string | undefined;
+        if (invUserId) {
+          const { data: uc } = await supabaseClient
+            .from('user_company_access')
+            .select('company_id')
+            .eq('user_id', invUserId)
+            .eq('is_primary', true)
+            .single();
+          invCompanyId = uc?.company_id;
+        }
+
+        // ── Store invoice in stripe_invoices table ──
+        if (invUserId) {
+          const invoiceRecord = {
+            user_id: invUserId,
+            company_id: invCompanyId || null,
+            invoice_id: invoice.id,
+            subscription_id: invoiceSubscriptionId || null,
+            customer_id: invCustomerId,
+            amount_paid: invoice.amount_paid || 0,
+            currency: invoice.currency || 'eur',
+            status: 'paid',
+            invoice_url: invoice.invoice_pdf || null,
+            hosted_invoice_url: invoice.hosted_invoice_url || null,
+            paid_at: new Date().toISOString(),
+            created_at: new Date((invoice.created || 0) * 1000).toISOString(),
+          };
+
+          const { error: invoiceInsertError } = await supabaseClient
+            .from('stripe_invoices')
+            .upsert(invoiceRecord, { onConflict: 'invoice_id' });
+
+          if (invoiceInsertError) {
+            logStep("Error storing invoice", { error: invoiceInsertError });
+          } else {
+            logStep("Invoice stored successfully", { invoiceId: invoice.id, userId: invUserId, companyId: invCompanyId });
+          }
+        } else {
+          logStep("Could not find user for invoice", { customerId: invCustomerId, email: invoice.customer_email });
+        }
+
+        // ── Update expires_at in new_pricing_company_plans on renewal ──
         if (invoiceSubscriptionId) {
           const stripeKey = Deno.env.get("STRIPE_SECRET_KEY");
           if (stripeKey) {
             const stripeClient = new Stripe(stripeKey, { apiVersion: "2024-11-20.acacia" });
             const fullSub = await stripeClient.subscriptions.retrieve(invoiceSubscriptionId);
 
-            // Find the user
-            const customerId = typeof invoice.customer === 'string' ? invoice.customer : invoice.customer?.id;
-            const { data: userSub } = await supabaseClient
-              .from('user_subscriptions')
-              .select('user_id')
-              .eq('stripe_customer_id', customerId)
-              .single();
-
-            if (userSub && fullSub.current_period_end) {
+            if (fullSub.current_period_end) {
               const newExpiresAt = new Date(fullSub.current_period_end * 1000).toISOString();
 
-              // Find company_id from metadata or user lookup
-              let targetCompanyId = fullSub.metadata?.company_id || fullSub.metadata?.companyId;
-              if (!targetCompanyId) {
-                const { data: uc } = await supabaseClient
-                  .from('user_company_access')
-                  .select('company_id')
-                  .eq('user_id', userSub.user_id)
-                  .eq('is_primary', true)
-                  .single();
-                targetCompanyId = uc?.company_id;
-              }
+              // Find company_id from subscription metadata or fallback to user lookup
+              let targetCompanyId = fullSub.metadata?.company_id || fullSub.metadata?.companyId || invCompanyId;
 
               if (targetCompanyId) {
-                await supabaseClient
+                const { error: pricingUpdateError } = await supabaseClient
                   .from('new_pricing_company_plans')
                   .update({
                     expires_at: newExpiresAt,
@@ -389,10 +510,16 @@ serve(async (req) => {
                   })
                   .eq('company_id', targetCompanyId);
 
-                logStep("Renewed expires_at on payment success", {
-                  companyId: targetCompanyId,
-                  newExpiresAt,
-                });
+                if (pricingUpdateError) {
+                  logStep("Error updating expires_at", { error: pricingUpdateError });
+                } else {
+                  logStep("Renewed expires_at on payment success", {
+                    companyId: targetCompanyId,
+                    newExpiresAt,
+                  });
+                }
+              } else {
+                logStep("No company_id found to update expires_at", { userId: invUserId });
               }
             }
           }
@@ -410,13 +537,15 @@ serve(async (req) => {
         logStep("Unhandled event type", { type: event.type });
     }
 
+    logStep("====== WEBHOOK PROCESSED SUCCESSFULLY ======", { eventType: event.type, eventId: event.id });
     return new Response(JSON.stringify({ received: true }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
       status: 200,
     });
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
-    logStep("ERROR", { message: errorMessage });
+    const errorStack = error instanceof Error ? error.stack : undefined;
+    logStep("====== WEBHOOK ERROR ======", { message: errorMessage, stack: errorStack });
     return new Response(JSON.stringify({ error: errorMessage }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
       status: 400,

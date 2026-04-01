@@ -105,16 +105,16 @@ export function SidebarContextualMenu({
                           <div className="text-muted-foreground">
                             <LayoutDashboard className="h-5 w-5" />
                           </div>
-                          {state !== "collapsed" && <span>Device Status</span>}
+                          {state !== "collapsed" && <span>Device Dashboard</span>}
                         </Link>
                       </SidebarMenuButton>
                     </TooltipTrigger>
-                    {isoTooltips["Device Status"] && (
+                    {isoTooltips["Device Dashboard"] && (
                       <TooltipContent side="right" sideOffset={12} className="max-w-xs p-3">
                         <div className="space-y-1.5">
-                          <p className="font-semibold text-sm">Device Status</p>
-                          <p className="text-xs text-muted-foreground">{isoTooltips["Device Status"].role}</p>
-                          {isoTooltips["Device Status"].reference && <p className="text-xs font-medium text-primary/80">{isoTooltips["Device Status"].reference}</p>}
+                          <p className="font-semibold text-sm">Device Dashboard</p>
+                          <p className="text-xs text-muted-foreground">{isoTooltips["Device Dashboard"].role}</p>
+                          {isoTooltips["Device Dashboard"].reference && <p className="text-xs font-medium text-primary/80">{isoTooltips["Device Dashboard"].reference}</p>}
                         </div>
                       </TooltipContent>
                     )}
@@ -559,6 +559,18 @@ export function SidebarContextualMenu({
                     Timeline view of products, phases, documents, activities, audits, and gap analysis
                   </p>
                 )}
+              </SidebarMenuItem>
+
+              {/* Operations Group */}
+              <SidebarMenuItem>
+                <div>
+                  <OperationsGroup userRole={userRole} currentCompany={currentCompany} location={location} />
+                  {state !== "collapsed" && (
+                    <p className="text-xs text-muted-foreground px-3 mt-1 mb-2">
+                      Suppliers, infrastructure, and calibration management
+                    </p>
+                  )}
+                </div>
               </SidebarMenuItem>
 
               {/* Quality & Governance Group (NC, CAPA, CC, DR) */}

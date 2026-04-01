@@ -17,7 +17,7 @@ const getResetPasswordEmailHtml = (resetLink: string): string => {
       <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;width:100%;background-color:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 4px 6px -1px rgba(0,0,0,0.1);">
         <!-- Header -->
         <tr>
-          <td align="center" style="background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);padding:40px 30px;">
+          <td align="center" style="background-color:#667eea;padding:40px 30px;">
             <h1 style="color:#ffffff;font-size:28px;font-weight:600;margin:0;line-height:1.2;">Reset Your Password</h1>
           </td>
         </tr>
@@ -39,7 +39,7 @@ const getResetPasswordEmailHtml = (resetLink: string): string => {
             <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:32px 0;">
               <tr>
                 <td align="center">
-                  <a href="${resetLink}" target="_blank" style="background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);border-radius:8px;color:#ffffff;font-size:16px;font-weight:600;text-decoration:none;text-align:center;display:inline-block;padding:16px 32px;border:none;cursor:pointer;">Reset Password</a>
+                  <a href="${resetLink}" target="_blank" style="background-color:#667eea;border-radius:8px;color:#ffffff;font-size:16px;font-weight:600;text-decoration:none;text-align:center;display:inline-block;padding:16px 32px;border:none;cursor:pointer;">Reset Password</a>
                 </td>
               </tr>
             </table>
@@ -84,9 +84,17 @@ const handler = async (req: Request): Promise<Response> => {
   }
 
   try {
-    const { email, redirectUrl } = await req.json();
+    const body = await req.json();
+    const { email, redirectUrl, appUrl } = body;
+
+    console.log("=== RESET PASSWORD EDGE FUNCTION START ===");
+    console.log("Received body:", JSON.stringify(body));
+    console.log("Email:", email);
+    console.log("redirectUrl:", redirectUrl);
+    console.log("appUrl:", appUrl);
 
     if (!email) {
+      console.log("ERROR: No email provided");
       return new Response(
         JSON.stringify({ success: false, error: "Email is required" }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 }
@@ -96,32 +104,73 @@ const handler = async (req: Request): Promise<Response> => {
     // Create Supabase admin client to generate recovery link
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const supabase = createClient(supabaseUrl, supabaseServiceKey, {
-      auth: { autoRefreshToken: false, persistSession: false },
-    });
+    console.log("Supabase URL:", supabaseUrl);
+    console.log("Service key exists:", !!supabaseServiceKey);
+
+    console.log("STEP 1: Creating Supabase client...");
+    let supabaseClient;
+    try {
+      supabaseClient = createClient(supabaseUrl, supabaseServiceKey, {
+        auth: { autoRefreshToken: false, persistSession: false },
+      });
+      console.log("STEP 1 DONE: Supabase client created");
+    } catch (e) {
+      console.error("STEP 1 FAILED: createClient error:", String(e));
+      throw e;
+    }
+
+    // Use dynamic appUrl from frontend (like invitation flow) or fall back to defaults
+    const baseAppUrl = appUrl || 'https://app.xyreg.com';
+    const finalRedirectUrl = redirectUrl || `${baseAppUrl}/reset-password?source=email`;
+    console.log("STEP 2: baseAppUrl:", baseAppUrl, "finalRedirectUrl:", finalRedirectUrl);
 
     // Generate recovery link using Supabase Admin API
-    const { data: linkData, error: linkError } = await supabase.auth.admin.generateLink({
-      type: "recovery",
-      email: email,
-      options: {
-        redirectTo: redirectUrl || `${supabaseUrl.replace('.supabase.co', '')}/reset-password?source=email`,
-      },
-    });
+    console.log("STEP 3: Calling generateLink...");
+    let linkData, linkError;
+    try {
+      const result = await supabaseClient.auth.admin.generateLink({
+        type: "recovery",
+        email: email,
+        options: {
+          redirectTo: finalRedirectUrl,
+        },
+      });
+      linkData = result.data;
+      linkError = result.error;
+      console.log("STEP 3 DONE: generateLink completed");
+    } catch (e) {
+      console.error("STEP 3 FAILED: generateLink threw:", String(e));
+      throw e;
+    }
 
     if (linkError) {
-      console.error("Error generating recovery link:", linkError);
-      // Return success even if user doesn't exist (prevents email enumeration)
+      console.error("STEP 3 ERROR: generateLink returned error:", JSON.stringify(linkError));
       return new Response(
         JSON.stringify({ success: true, message: "If an account exists, a reset email has been sent." }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    const resetLink = linkData?.properties?.action_link;
+    let resetLink = linkData?.properties?.action_link;
+    console.log("STEP 4: original resetLink:", resetLink);
+    console.log("STEP 4: hashed_token:", linkData?.properties?.hashed_token);
+
+    // Supabase generateLink ignores redirectTo if the URL isn't in the allowlist,
+    // falling back to the Site URL. Fix this by replacing redirect_to in the link
+    // with our desired dynamic URL.
+    if (resetLink && finalRedirectUrl) {
+      try {
+        const linkUrl = new URL(resetLink);
+        linkUrl.searchParams.set('redirect_to', finalRedirectUrl);
+        resetLink = linkUrl.toString();
+        console.log("STEP 4: fixed resetLink:", resetLink);
+      } catch (e) {
+        console.error("STEP 4: failed to fix redirect_to:", String(e));
+      }
+    }
 
     if (!resetLink) {
-      console.error("No action link generated");
+      console.error("STEP 4 ERROR: No action link in response. Full data:", JSON.stringify(linkData));
       return new Response(
         JSON.stringify({ success: true, message: "If an account exists, a reset email has been sent." }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -129,14 +178,22 @@ const handler = async (req: Request): Promise<Response> => {
     }
 
     // Send email via Resend API
-    const emailResponse = await resend.emails.send({
-      from: "Xyreg <noreply@xyreg.com>",
-      to: [email],
-      subject: "Reset Your Password - Xyreg",
-      html: getResetPasswordEmailHtml(resetLink),
-    });
+    console.log("STEP 5: Sending email via Resend to:", email);
+    let emailResponse;
+    try {
+      emailResponse = await resend.emails.send({
+        from: "Xyreg <noreply@xyreg.com>",
+        to: [email],
+        subject: "Reset Your Password - Xyreg",
+        html: getResetPasswordEmailHtml(resetLink),
+      });
+      console.log("STEP 5 DONE: Resend response:", JSON.stringify(emailResponse));
+    } catch (e) {
+      console.error("STEP 5 FAILED: Resend threw:", String(e));
+      throw e;
+    }
 
-    console.log("Reset password email sent successfully:", emailResponse);
+    console.log("=== RESET PASSWORD EDGE FUNCTION COMPLETED SUCCESSFULLY ===");
 
     return new Response(
       JSON.stringify({ success: true, message: "Password reset email sent." }),

@@ -14,10 +14,14 @@ import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useReviewerGroups } from '@/hooks/useReviewerGroups';
 import { useDocumentReviewAssignments } from '@/hooks/useDocumentReviewAssignments';
+import { useAuth } from '@/context/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { Send, Users, Calendar } from 'lucide-react';
 import { LoadingSpinner } from '@/components/ui/loading-spinner';
+import { AppNotificationService } from '@/services/appNotificationService';
+
+const appNotificationService = new AppNotificationService();
 
 interface SendToReviewGroupDialogProps {
   open: boolean;
@@ -25,6 +29,7 @@ interface SendToReviewGroupDialogProps {
   documentId: string;
   documentName: string;
   companyId: string;
+  productId?: string;
   existingGroupIds?: string[];
   onSent?: () => void;
 }
@@ -35,9 +40,11 @@ export function SendToReviewGroupDialog({
   documentId,
   documentName,
   companyId,
+  productId,
   existingGroupIds = [],
   onSent,
 }: SendToReviewGroupDialogProps) {
+  const { user } = useAuth();
   const { reviewerGroups, isLoading: groupsLoading } = useReviewerGroups(companyId);
   const { createAssignment } = useDocumentReviewAssignments(documentId);
   const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>([]);
@@ -82,7 +89,76 @@ export function SendToReviewGroupDialog({
         await createAssignment(companyId, cleanDocumentId, groupId, dueDate || undefined);
       }
 
-      // 3. Try to send email notifications (best-effort)
+      // 3. Send in-app notifications to all members of selected groups
+      try {
+        const actorName = user?.user_metadata?.first_name && user?.user_metadata?.last_name
+          ? `${user.user_metadata.first_name} ${user.user_metadata.last_name}`
+          : user?.email || 'Someone';
+
+        // Fetch company name for the review page URL
+        let companyNameForUrl = '';
+        const { data: companyData } = await supabase
+          .from('companies')
+          .select('name')
+          .eq('id', companyId)
+          .single();
+        if (companyData?.name) {
+          companyNameForUrl = encodeURIComponent(companyData.name);
+        }
+
+        for (const groupId of selectedGroupIds) {
+          const group = reviewerGroups.find((g) => g.id === groupId);
+          if (!group) continue;
+
+          // Fetch active members of this reviewer group
+          const { data: members } = await supabase
+            .from('reviewer_group_members_new')
+            .select('user_id')
+            .eq('group_id', groupId)
+            .eq('is_active', true);
+
+          if (!members?.length) continue;
+
+          // Filter out the current user (don't notify yourself)
+          const recipientIds = members
+            .map((m) => m.user_id)
+            .filter((uid) => uid !== user?.id);
+
+          if (recipientIds.length === 0) continue;
+
+          // Bulk create notifications for all group members
+          const notifications = recipientIds.map((userId) => ({
+            user_id: userId,
+            actor_id: user?.id,
+            actor_name: actorName,
+            company_id: companyId,
+            product_id: productId,
+            category: 'review' as const,
+            action: 'review_assigned',
+            title: `Review requested: ${documentName}`,
+            message: `${actorName} assigned you to review "${documentName}" via ${group.name}`,
+            priority: 'normal' as const,
+            entity_type: 'document',
+            entity_id: cleanDocumentId,
+            entity_name: documentName,
+            action_url: companyNameForUrl
+              ? `/app/company/${companyNameForUrl}/review`
+              : undefined,
+            metadata: {
+              reviewer_group_id: groupId,
+              reviewer_group_name: group.name,
+              due_date: dueDate || null,
+            },
+          }));
+
+          await appNotificationService.createBulkNotifications(notifications);
+        }
+      } catch (notifErr) {
+        // Notifications are best-effort — don't block the main flow
+        console.error('Failed to send in-app notifications:', notifErr);
+      }
+
+      // 4. Try to send email notifications (best-effort)
       try {
         for (const groupId of selectedGroupIds) {
           const group = reviewerGroups.find((g) => g.id === groupId);
@@ -119,7 +195,7 @@ export function SendToReviewGroupDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-md z-[9999]">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Send className="h-5 w-5 text-primary" />

@@ -109,7 +109,8 @@ export function CompanyUserPermissions({ user, onRemove, companyId }: CompanyUse
   const [selectedProductIds, setSelectedProductIds] = useState<string[]>([]);
   const [selectedProductNames, setSelectedProductNames] = useState<Array<{ id: string; name: string }>>([]);
   const [isProductDialogOpen, setIsProductDialogOpen] = useState(false);
-  const [companyProducts, setCompanyProducts] = useState<Array<{ id: string; name: string; status?: string }>>([]);
+  const [companyProducts, setCompanyProducts] = useState<Array<{ id: string; name: string; status?: string; basic_udi_di?: string; parent_product_id?: string; is_master_device?: boolean }>>([]);
+  const [udiAliases, setUdiAliases] = useState<Map<string, string>>(new Map());
   const [isLoadingProducts, setIsLoadingProducts] = useState(false);
   
   // Temporary state for product dialog (only committed on Save)
@@ -125,6 +126,7 @@ export function CompanyUserPermissions({ user, onRemove, companyId }: CompanyUse
 
   // Document Permissions state
   const [selectedDocumentIds, setSelectedDocumentIds] = useState<string[]>([]);
+  const [hasDocumentRestriction, setHasDocumentRestriction] = useState(false);
 
   const [editData, setEditData] = useState({
     name: user.name,
@@ -355,7 +357,12 @@ export function CompanyUserPermissions({ user, onRemove, companyId }: CompanyUse
           .eq('user_id', user.id)
           .eq('company_id', companyId)
           .maybeSingle();
-        setSelectedDocumentIds(docPerms?.document_ids || []);
+        const ids = docPerms?.document_ids || [];
+        setSelectedDocumentIds(ids);
+        // If a record exists with specific document IDs, user has restriction
+        if (docPerms && ids.length > 0) {
+          setHasDocumentRestriction(true);
+        }
       } catch (error) {
         console.error('Error loading document permissions:', error);
       }
@@ -373,15 +380,24 @@ export function CompanyUserPermissions({ user, onRemove, companyId }: CompanyUse
       const loadProducts = async () => {
         setIsLoadingProducts(true);
         try {
-          const { data, error } = await supabase
-            .from('products')
-            .select('id, name, status')
-            .eq('company_id', companyId)
-            .eq('is_archived', false)
-            .order('name');
+          const [{ data, error }, { data: aliasData }] = await Promise.all([
+            supabase
+              .from('products')
+              .select('id, name, status, basic_udi_di, parent_product_id, is_master_device')
+              .eq('company_id', companyId)
+              .eq('is_archived', false)
+              .order('name'),
+            supabase
+              .from('basic_udi_aliases')
+              .select('basic_udi_di, alias')
+              .eq('company_id', companyId)
+          ]);
 
           if (error) throw error;
           setCompanyProducts(data || []);
+          const aliasMap = new Map<string, string>();
+          (aliasData || []).forEach((a: any) => aliasMap.set(a.basic_udi_di, a.alias));
+          setUdiAliases(aliasMap);
         } catch (error) {
           console.error('Error loading Device:', error);
           toast.error('Failed to load Device');
@@ -406,7 +422,6 @@ export function CompanyUserPermissions({ user, onRemove, companyId }: CompanyUse
         }, { onConflict: 'user_id,company_id' });
 
       if (error) throw error;
-      toast.success(`Document permissions updated - ${newDocIds.length} document${newDocIds.length !== 1 ? 's' : ''} selected`);
     } catch (error) {
       console.error('Error saving document permissions:', error);
       toast.error('Failed to save document permissions');
@@ -850,153 +865,125 @@ export function CompanyUserPermissions({ user, onRemove, companyId }: CompanyUse
               </div>
             )}
 
-            {/* Device Access Section */}
+            {/* Permission & Access Section */}
+            <Separator />
+            <h4 className="text-sm font-semibold">Permission & Access</h4>
+
             {user.is_owner || displayData.access_level === 'admin' ? (
-              <div className="flex items-center justify-between">
-                <Label>Device Access:</Label>
-                <span className="text-sm text-muted-foreground">All Device</span>
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <Label>Company Modules:</Label>
+                  <span className="text-sm text-muted-foreground">All Modules</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <Label>Devices:</Label>
+                  <span className="text-sm text-muted-foreground">All Device</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <Label>Documents:</Label>
+                  <span className="text-sm text-muted-foreground">All Documents</span>
+                </div>
               </div>
             ) : (
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <Label>Device Access:</Label>
-                <div className="flex items-center space-x-2">
-                  <span className="text-sm text-muted-foreground">
-                    {hasProductRestriction ? 'Restricted' : 'No Device'}
-                  </span>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setIsProductDialogOpen(true)}
-                    disabled={isUpdating}
-                  >
-                    Select Device
-                  </Button>
-                </div>
-              </div>
-              {hasProductRestriction && selectedProductIds.length > 0 && (
-                <div className="space-y-2">
-                  <div className="text-xs text-muted-foreground">
-                    {selectedProductIds.length} Device{selectedProductIds.length !== 1 ? 's' : ''} assigned:
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {selectedProductNames.length > 0 ? (
-                      selectedProductNames.map((product) => (
-                        <Badge key={product.id} variant="secondary" className="text-xs">
-                          {product.name}
-                        </Badge>
-                      ))
-                    ) : (
-                      <span className="text-xs text-muted-foreground">Loading Device names...</span>
-                    )}
-                  </div>
-                </div>
+            <div className="grid grid-cols-[1fr_auto_auto] items-center gap-x-3 gap-y-3">
+              {/* Company Modules */}
+              <Label>Company Modules:</Label>
+              <Switch
+                checked={hasModuleRestriction}
+                onCheckedChange={async (checked) => {
+                  if (!checked) {
+                    try {
+                      const success = await UserCompanyModuleAccessService.deactivateModuleAccess(user.id, companyId);
+                      if (success) {
+                        setHasModuleRestriction(false);
+                        setSelectedModuleIds([]);
+                        toast.success('Company access updated - user can now access all dashboard modules');
+                      } else {
+                        toast.error('Failed to update company access');
+                      }
+                    } catch (error) {
+                      console.error('Error updating company access:', error);
+                      toast.error('Failed to update company access');
+                    }
+                  } else {
+                    setHasModuleRestriction(true);
+                    if (selectedModuleIds.length === 0) {
+                      setTempSelectedModuleIds([...selectedModuleIds]);
+                      setIsModuleDialogOpen(true);
+                    }
+                  }
+                }}
+                disabled={isUpdating}
+              />
+              <span className="text-sm text-muted-foreground">
+                {hasModuleRestriction ? 'Restricted' : 'All Modules'}
+              </span>
+              {hasModuleRestriction && selectedModuleIds.length > 0 && (
+                <p
+                  className="col-span-3 text-xs text-primary -mt-2 cursor-pointer hover:underline"
+                  onClick={() => { setTempSelectedModuleIds([...selectedModuleIds]); setIsModuleDialogOpen(true); }}
+                >
+                  {selectedModuleIds.length} module{selectedModuleIds.length !== 1 ? 's' : ''} selected
+                </p>
               )}
-            </div>
-            )}
 
-            {/* Document Permissions Section */}
-            {user.is_owner || displayData.access_level === 'admin' ? (
-              <div className="flex items-center justify-between">
-                <Label>Document Permissions:</Label>
-                <span className="text-sm text-muted-foreground">All Documents</span>
-              </div>
-            ) : (
-            <DocumentPermissionSelector
-              companyId={companyId}
-              selectedProductIds={selectedProductIds}
-              selectedDocumentIds={selectedDocumentIds}
-              onChange={handleDocumentPermissionsChange}
-            />
-            )}
-
-            {/* Company Access Section */}
-            {user.is_owner ? (
-              <div className="flex items-center justify-between">
-                <Label>Company Access:</Label>
-                <span className="text-sm text-muted-foreground">All Modules</span>
-              </div>
-            ) : (
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <Label>Company Access:</Label>
-                <div className="flex items-center space-x-2">
-                  <Switch
-                    checked={hasModuleRestriction}
+              {/* Devices */}
+              <Label>Devices:</Label>
+              <Switch
+                    checked={hasProductRestriction}
                     onCheckedChange={async (checked) => {
                       if (!checked) {
-                        // When switch is off, user can access all modules
-                        // Remove restriction by deactivating the module access entry
                         try {
-                          const success = await UserCompanyModuleAccessService.deactivateModuleAccess(user.id, companyId);
-
-                          if (success) {
-                            setHasModuleRestriction(false);
-                            setSelectedModuleIds([]);
-                            toast.success('Company access updated - user can now access all dashboard modules');
-                          } else {
-                            toast.error('Failed to update company access');
+                          const existing = await UserProductMatrixService.getUserMatrix(user.id, companyId);
+                          if (existing) {
+                            const { error: updateError } = await supabase
+                              .from('user_product_matrix')
+                              .update({ is_active: false, updated_at: new Date().toISOString() })
+                              .eq('id', existing.id);
+                            if (updateError) throw updateError;
                           }
+                          setHasProductRestriction(false);
+                          setSelectedProductIds([]);
+                          setSelectedProductNames([]);
+                          toast.success('Device access updated - user can now access all devices');
                         } catch (error) {
-                          console.error('Error updating company access:', error);
-                          toast.error('Failed to update company access');
+                          console.error('Error updating device access:', error);
+                          toast.error('Failed to update device access');
                         }
                       } else {
-                        // When switch is on, enable restriction
-                        // If no modules are selected yet, open dialog to select modules
-                        setHasModuleRestriction(true);
-                        if (selectedModuleIds.length === 0) {
-                          // Initialize temp state with current selection
-                          setTempSelectedModuleIds([...selectedModuleIds]);
-                          setIsModuleDialogOpen(true);
-                        }
+                        setHasProductRestriction(true);
+                        setIsProductDialogOpen(true);
                       }
                     }}
                     disabled={isUpdating}
                   />
-                  <span className="text-sm text-muted-foreground">
-                    {hasModuleRestriction ? 'Restricted' : 'All Modules'}
-                  </span>
-                  {hasModuleRestriction && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => {
-                        // Initialize temp state with current selection
-                        setTempSelectedModuleIds([...selectedModuleIds]);
-                        setIsModuleDialogOpen(true);
-                      }}
-                      disabled={isUpdating}
-                    >
-                      Select Modules
-                    </Button>
-                  )}
-                </div>
-              </div>
-              {hasModuleRestriction && selectedModuleIds.length > 0 && (
-                <div className="space-y-2">
-                  <div className="text-xs text-muted-foreground">
-                    {selectedModuleIds.length} module{selectedModuleIds.length !== 1 ? 's' : ''} assigned:
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {selectedModuleIds.map((moduleId) => (
-                      <Badge key={moduleId} variant="secondary" className="text-xs">
-                        {MODULE_DISPLAY_NAMES[moduleId] || moduleId}
-                      </Badge>
-                    ))}
-                  </div>
-                </div>
+              <span className="text-sm text-muted-foreground">
+                {hasProductRestriction ? 'Restricted' : 'All Device'}
+              </span>
+              {hasProductRestriction && selectedProductIds.length > 0 && (
+                <p
+                  className="col-span-3 text-xs text-primary -mt-2 cursor-pointer hover:underline"
+                  onClick={() => setIsProductDialogOpen(true)}
+                >
+                  {selectedProductIds.length} device{selectedProductIds.length !== 1 ? 's' : ''} selected
+                </p>
               )}
+
+              {/* Documents */}
+              <DocumentPermissionSelector
+                companyId={companyId}
+                selectedProductIds={selectedProductIds}
+                selectedDocumentIds={selectedDocumentIds}
+                onChange={handleDocumentPermissionsChange}
+                label="Documents"
+                inline
+                initialRestricted={hasDocumentRestriction}
+              />
             </div>
             )}
 
-            <div className="space-y-2">
-              <div className="text-xs text-muted-foreground">
-                User Type: <span className="font-medium">{displayData.is_internal ? 'Internal User' : 'External User'}</span>
-              </div>
-              <div className="text-xs text-muted-foreground">
-                Added: {new Date(user.created_at).toLocaleDateString()}
-              </div>
+            <div className="text-xs text-muted-foreground">
+              Added: {new Date(user.created_at).toLocaleDateString()}
             </div>
           </CardContent>
 
@@ -1044,39 +1031,113 @@ export function CompanyUserPermissions({ user, onRemove, companyId }: CompanyUse
                           No Device found for this company
                         </p>
                       ) : (
-                        companyProducts.map((product) => (
-                          <div
-                            key={product.id}
-                            className="flex items-center space-x-3 p-2 rounded-lg hover:bg-muted/50"
-                          >
-                            <Checkbox
-                              id={product.id}
-                              checked={tempSelectedProductIds.includes(product.id)}
-                              onCheckedChange={(checked) => {
-                                if (checked) {
-                                  setTempSelectedProductIds(prev => [...prev, product.id]);
-                                } else {
-                                  setTempSelectedProductIds(prev => prev.filter(id => id !== product.id));
-                                }
-                              }}
-                            />
-                            <div className="flex-1 min-w-0">
-                              <label
-                                htmlFor={product.id}
-                                className="text-sm font-medium cursor-pointer"
-                              >
-                                {product.name}
-                              </label>
-                              {product.status && (
-                                <div className="mt-1">
-                                  <Badge variant="outline" className="text-xs">
-                                    {product.status}
+                        (() => {
+                          // Build family groups: root + all descendants as members
+                          const getAllMembers = (rootId: string): typeof companyProducts => {
+                            const result: typeof companyProducts = [];
+                            const addChildren = (parentId: string) => {
+                              companyProducts
+                                .filter(p => p.parent_product_id === parentId)
+                                .sort((a, b) => a.name.localeCompare(b.name))
+                                .forEach(child => { result.push(child); addChildren(child.id); });
+                            };
+                            addChildren(rootId);
+                            return result;
+                          };
+                          const roots = companyProducts
+                            .filter(p => !p.parent_product_id)
+                            .sort((a, b) => a.name.localeCompare(b.name));
+                          const grouped = roots.map(root => ({
+                            root,
+                            members: [root, ...getAllMembers(root.id)], // root itself is a member
+                            hasChildren: companyProducts.some(p => p.parent_product_id === root.id),
+                          }));
+                          // Orphans
+                          const allGroupedIds = new Set(grouped.flatMap(g => g.members.map(m => m.id)));
+                          companyProducts.forEach(p => {
+                            if (!allGroupedIds.has(p.id)) {
+                              grouped.push({ root: p, members: [p], hasChildren: false });
+                            }
+                          });
+                          return grouped;
+                        })().map(({ root, members, hasChildren }) => {
+                          const memberIds = members.map(m => m.id);
+                          const allSelected = memberIds.every(id => tempSelectedProductIds.includes(id));
+                          const someSelected = memberIds.some(id => tempSelectedProductIds.includes(id));
+                          const toggleAll = () => {
+                            if (allSelected) {
+                              setTempSelectedProductIds(prev => prev.filter(id => !memberIds.includes(id)));
+                            } else {
+                              setTempSelectedProductIds(prev => Array.from(new Set([...prev, ...memberIds])));
+                            }
+                          };
+
+                          // Standalone device (no children) — show as single row
+                          if (!hasChildren) {
+                            return (
+                              <div key={root.id} className="flex items-center space-x-3 p-2 rounded-lg hover:bg-muted/50">
+                                <Checkbox
+                                  id={root.id}
+                                  checked={tempSelectedProductIds.includes(root.id)}
+                                  onCheckedChange={(checked) => {
+                                    if (checked) {
+                                      setTempSelectedProductIds(prev => [...prev, root.id]);
+                                    } else {
+                                      setTempSelectedProductIds(prev => prev.filter(id => id !== root.id));
+                                    }
+                                  }}
+                                />
+                                <label htmlFor={root.id} className="text-sm font-medium cursor-pointer">
+                                  {root.name}
+                                </label>
+                              </div>
+                            );
+                          }
+
+                          // Family group — master header + all members
+                          // Use UDI alias as display name if available (check both basic_udi_di and product id)
+                          const groupDisplayName = (root.basic_udi_di && udiAliases.get(root.basic_udi_di)) || udiAliases.get(root.id) || root.name;
+                          return (
+                            <div key={root.id}>
+                              {/* Master group header */}
+                              <div className="flex items-center space-x-3 p-2 rounded-lg hover:bg-muted/50">
+                                <Checkbox
+                                  id={`group-${root.id}`}
+                                  checked={someSelected}
+                                  onCheckedChange={toggleAll}
+                                />
+                                <div className="flex items-center gap-2">
+                                  <label htmlFor={`group-${root.id}`} className="text-sm font-semibold cursor-pointer">
+                                    {groupDisplayName}
+                                  </label>
+                                  <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-muted-foreground">
+                                    {members.length} devices
                                   </Badge>
                                 </div>
-                              )}
+                              </div>
+                              {/* Members (including root itself) */}
+                              {members.map(member => (
+                                <div key={member.id} className="flex items-center space-x-3 p-2 rounded-lg hover:bg-muted/50 ml-6">
+                                  <Checkbox
+                                    id={member.id}
+                                    checked={tempSelectedProductIds.includes(member.id)}
+                                    onCheckedChange={(checked) => {
+                                      if (checked) {
+                                        // Select this member only (no siblings, no descendants)
+                                        setTempSelectedProductIds(prev => Array.from(new Set([...prev, member.id])));
+                                      } else {
+                                        setTempSelectedProductIds(prev => prev.filter(id => id !== member.id));
+                                      }
+                                    }}
+                                  />
+                                  <label htmlFor={member.id} className="text-sm cursor-pointer">
+                                    {member.name}
+                                  </label>
+                                </div>
+                              ))}
                             </div>
-                          </div>
-                        ))
+                          );
+                        })
                       )}
                     </div>
                   </ScrollArea>
@@ -1089,10 +1150,6 @@ export function CompanyUserPermissions({ user, onRemove, companyId }: CompanyUse
                       onClick={() => {
                         // Reset temporary state and close dialog
                         setTempSelectedProductIds([...selectedProductIds]);
-                        // If no products were previously selected, turn off the restriction switch
-                        if (selectedProductIds.length === 0) {
-                          setHasProductRestriction(false);
-                        }
                         setIsProductDialogOpen(false);
                       }}
                     >
@@ -1104,75 +1161,74 @@ export function CompanyUserPermissions({ user, onRemove, companyId }: CompanyUse
                           const currentUser = await supabase.auth.getUser();
                           const userId = currentUser.data.user?.id;
 
+                          const previousProductIds = [...selectedProductIds];
+
                           // Update actual state with temporary selections
                           setSelectedProductIds([...tempSelectedProductIds]);
 
-                          // If no products selected, deactivate any existing matrix entry
-                          if (tempSelectedProductIds.length === 0) {
-                            const existing = await UserProductMatrixService.getUserMatrix(user.id, companyId);
-                            if (existing) {
-                              const { error: updateError } = await supabase
-                                .from('user_product_matrix')
-                                .update({
-                                  is_active: false,
-                                  updated_at: new Date().toISOString()
-                                })
-                                .eq('id', existing.id);
+                          // Check if record exists (active or inactive)
+                          const { data: existingRecords, error: checkError } = await supabase
+                            .from('user_product_matrix')
+                            .select('*')
+                            .eq('user_id', user.id)
+                            .eq('company_id', companyId)
+                            .maybeSingle();
 
-                              if (updateError) throw updateError;
-                            }
-                            setHasProductRestriction(false);
-                            setSelectedProductNames([]);
-                            toast.success('Device access removed - user has no device access');
-                          } else {
-                            // Check if record exists (active or inactive)
-                            const { data: existingRecords, error: checkError } = await supabase
+                          if (checkError && checkError.code !== 'PGRST116') throw checkError;
+
+                          const existing = existingRecords || null;
+
+                          const matrixData = {
+                            user_id: user.id,
+                            company_id: companyId,
+                            product_ids: tempSelectedProductIds,
+                            user_type: displayData.access_level === 'admin' ? 'admin' : displayData.access_level === 'editor' ? 'editor' : 'viewer',
+                            access_level: displayData.access_level === 'admin' ? 'full' : displayData.access_level === 'editor' ? 'write' : 'read',
+                            is_active: true,
+                            assigned_by: userId || existing?.assigned_by || null,
+                            assigned_at: existing?.assigned_at || new Date().toISOString(),
+                            updated_at: new Date().toISOString()
+                          };
+
+                          if (existing) {
+                            const { error: updateError } = await supabase
                               .from('user_product_matrix')
-                              .select('*')
-                              .eq('user_id', user.id)
-                              .eq('company_id', companyId)
-                              .maybeSingle();
-
-                            if (checkError && checkError.code !== 'PGRST116') throw checkError;
-
-                            const existing = existingRecords || null;
-
-                            const matrixData = {
-                              user_id: user.id,
-                              company_id: companyId,
-                              product_ids: tempSelectedProductIds,
-                              user_type: displayData.access_level === 'admin' ? 'admin' : displayData.access_level === 'editor' ? 'editor' : 'viewer',
-                              access_level: displayData.access_level === 'admin' ? 'full' : displayData.access_level === 'editor' ? 'write' : 'read',
-                              is_active: true,
-                              assigned_by: userId || existing?.assigned_by || null,
-                              assigned_at: existing?.assigned_at || new Date().toISOString(),
-                              updated_at: new Date().toISOString()
-                            };
-
-                            if (existing) {
-                              // Update existing (reactivate if it was inactive)
-                              const { error: updateError } = await supabase
-                                .from('user_product_matrix')
-                                .update(matrixData)
-                                .eq('id', existing.id);
-
-                              if (updateError) throw updateError;
-                            } else {
-                              // Create new
-                              const { error: insertError } = await supabase
-                                .from('user_product_matrix')
-                                .insert(matrixData);
-
-                              if (insertError) throw insertError;
-                            }
-
-                            // Update product names from the dialog's companyProducts
-                            const selectedProducts = companyProducts.filter(p => tempSelectedProductIds.includes(p.id));
-                            setSelectedProductNames(selectedProducts.map(p => ({ id: p.id, name: p.name })));
-
-                            setHasProductRestriction(true);
-                            toast.success(`Device access updated - ${tempSelectedProductIds.length}Device${tempSelectedProductIds.length !== 1 ? 's' : ''} selected`);
+                              .update(matrixData)
+                              .eq('id', existing.id);
+                            if (updateError) throw updateError;
+                          } else {
+                            const { error: insertError } = await supabase
+                              .from('user_product_matrix')
+                              .insert(matrixData);
+                            if (insertError) throw insertError;
                           }
+
+                          // Update product names from the dialog's companyProducts
+                          const selectedProducts = companyProducts.filter(p => tempSelectedProductIds.includes(p.id));
+                          setSelectedProductNames(selectedProducts.map(p => ({ id: p.id, name: p.name })));
+
+                          // Auto-grant document access for newly assigned devices
+                          const newlyAddedDeviceIds = tempSelectedProductIds.filter(id => !previousProductIds.includes(id));
+                          if (newlyAddedDeviceIds.length > 0) {
+                            try {
+                              const { data: newDocs } = await (supabase as any)
+                                .from('phase_assigned_document_template')
+                                .select('id')
+                                .eq('company_id', companyId)
+                                .in('product_id', newlyAddedDeviceIds);
+
+                              if (newDocs && newDocs.length > 0) {
+                                const newDocIds = newDocs.map((d: any) => d.id);
+                                const mergedDocIds = Array.from(new Set([...selectedDocumentIds, ...newDocIds]));
+                                await handleDocumentPermissionsChange(mergedDocIds);
+                              }
+                            } catch (docError) {
+                              console.error('Error auto-granting document access:', docError);
+                            }
+                          }
+
+                          setHasProductRestriction(true);
+                          toast.success(`Device access updated - ${tempSelectedProductIds.length} device${tempSelectedProductIds.length !== 1 ? 's' : ''} selected`);
                           setIsProductDialogOpen(false);
                         } catch (error) {
                           console.error('Error saving Device access:', error);
@@ -1194,7 +1250,7 @@ export function CompanyUserPermissions({ user, onRemove, companyId }: CompanyUse
               <DialogHeader>
                 <DialogTitle>Select Dashboard Modules</DialogTitle>
                 <DialogDescription>
-                  Choose which dashboard modules {displayData.name} can access. When no modules are selected, user can access all modules.
+                  Choose which dashboard modules <span className="font-bold">{displayData.name}</span> can access. When no modules are selected, user can access all modules.
                 </DialogDescription>
               </DialogHeader>
 

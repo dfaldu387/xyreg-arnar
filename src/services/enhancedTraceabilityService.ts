@@ -52,8 +52,13 @@ export class TraceabilityService {
     const sourceItems: TraceabilityItem[] = [];
     const targetItems: TraceabilityItem[] = [];
 
+    // Normalize plural table-name types to singular identifiers used by the matrix
+    const normalizeType = (t: string) => t === 'test_cases' ? 'test_case' : t;
+
     // Build matrix from explicit traceability_links table - add BOTH directions
     links.forEach(link => {
+      link.source_type = normalizeType(link.source_type);
+      link.target_type = normalizeType(link.target_type);
       // Forward direction: source → target
       if (!matrix[link.source_id]) {
         matrix[link.source_id] = {};

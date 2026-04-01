@@ -216,3 +216,6 @@ verify_jwt = false
 
 [functions.slack-knowledge-sync]
 verify_jwt = false
+
+[functions.ai-usability-evaluation-importer]
+verify_jwt = false

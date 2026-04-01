@@ -14,6 +14,30 @@ export type Database = {
   }
   public: {
     Tables: {
+      action_item_dismissals: {
+        Row: {
+          action_item_id: string
+          company_id: string
+          dismissed_at: string
+          id: string
+          user_id: string
+        }
+        Insert: {
+          action_item_id: string
+          company_id: string
+          dismissed_at?: string
+          id?: string
+          user_id: string
+        }
+        Update: {
+          action_item_id?: string
+          company_id?: string
+          dismissed_at?: string
+          id?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       activities: {
         Row: {
           admin_approved: boolean | null
@@ -262,6 +286,75 @@ export type Database = {
             referencedColumns: ["company_id"]
           },
         ]
+      }
+      app_notifications: {
+        Row: {
+          action: string
+          action_url: string | null
+          actor_id: string | null
+          actor_name: string | null
+          category: string
+          company_id: string
+          created_at: string
+          entity_id: string | null
+          entity_name: string | null
+          entity_type: string | null
+          id: string
+          is_archived: boolean
+          is_read: boolean
+          message: string | null
+          metadata: Json | null
+          priority: string
+          product_id: string | null
+          read_at: string | null
+          title: string
+          user_id: string
+        }
+        Insert: {
+          action: string
+          action_url?: string | null
+          actor_id?: string | null
+          actor_name?: string | null
+          category?: string
+          company_id: string
+          created_at?: string
+          entity_id?: string | null
+          entity_name?: string | null
+          entity_type?: string | null
+          id?: string
+          is_archived?: boolean
+          is_read?: boolean
+          message?: string | null
+          metadata?: Json | null
+          priority?: string
+          product_id?: string | null
+          read_at?: string | null
+          title: string
+          user_id: string
+        }
+        Update: {
+          action?: string
+          action_url?: string | null
+          actor_id?: string | null
+          actor_name?: string | null
+          category?: string
+          company_id?: string
+          created_at?: string
+          entity_id?: string | null
+          entity_name?: string | null
+          entity_type?: string | null
+          id?: string
+          is_archived?: boolean
+          is_read?: boolean
+          message?: string | null
+          metadata?: Json | null
+          priority?: string
+          product_id?: string | null
+          read_at?: string | null
+          title?: string
+          user_id?: string
+        }
+        Relationships: []
       }
       architecture_decisions: {
         Row: {
@@ -4328,6 +4421,79 @@ export type Database = {
           },
         ]
       }
+      company_funding_applications: {
+        Row: {
+          checklist_responses: Json | null
+          company_id: string
+          created_at: string | null
+          created_by: string | null
+          eligibility_score: number | null
+          id: string
+          notes: string | null
+          programme_id: string
+          requested_amount: number | null
+          status: string
+          submission_deadline: string | null
+          target_call: string | null
+          updated_at: string | null
+          workspace_items: Json | null
+        }
+        Insert: {
+          checklist_responses?: Json | null
+          company_id: string
+          created_at?: string | null
+          created_by?: string | null
+          eligibility_score?: number | null
+          id?: string
+          notes?: string | null
+          programme_id: string
+          requested_amount?: number | null
+          status?: string
+          submission_deadline?: string | null
+          target_call?: string | null
+          updated_at?: string | null
+          workspace_items?: Json | null
+        }
+        Update: {
+          checklist_responses?: Json | null
+          company_id?: string
+          created_at?: string | null
+          created_by?: string | null
+          eligibility_score?: number | null
+          id?: string
+          notes?: string | null
+          programme_id?: string
+          requested_amount?: number | null
+          status?: string
+          submission_deadline?: string | null
+          target_call?: string | null
+          updated_at?: string | null
+          workspace_items?: Json | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "company_funding_applications_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "company_funding_applications_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "company_dashboard_summary"
+            referencedColumns: ["company_id"]
+          },
+          {
+            foreignKeyName: "company_funding_applications_programme_id_fkey"
+            columns: ["programme_id"]
+            isOneToOne: false
+            referencedRelation: "funding_programmes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       company_gap_templates: {
         Row: {
           company_id: string
@@ -4990,6 +5156,47 @@ export type Database = {
           },
         ]
       }
+      company_release_adoptions: {
+        Row: {
+          adopted_at: string
+          adopted_by: string | null
+          company_id: string
+          created_at: string
+          id: string
+          release_id: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          adopted_at?: string
+          adopted_by?: string | null
+          company_id: string
+          created_at?: string
+          id?: string
+          release_id: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          adopted_at?: string
+          adopted_by?: string | null
+          company_id?: string
+          created_at?: string
+          id?: string
+          release_id?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "company_release_adoptions_release_id_fkey"
+            columns: ["release_id"]
+            isOneToOne: false
+            referencedRelation: "xyreg_releases"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       company_roles: {
         Row: {
           color: string | null
@@ -5470,11 +5677,29 @@ export type Database = {
           id: string
           invalidated_by_core: boolean
           invalidated_core_service: string | null
+          iq_approver_id: string | null
+          iq_approver_meaning: string | null
+          iq_approver_signed_at: string | null
+          iq_initiator_id: string | null
+          iq_initiator_meaning: string | null
+          iq_initiator_signed_at: string | null
           iq_rationale: Json | null
           module_group: string
+          oq_approver_id: string | null
+          oq_approver_meaning: string | null
+          oq_approver_signed_at: string | null
+          oq_initiator_id: string | null
+          oq_initiator_meaning: string | null
+          oq_initiator_signed_at: string | null
           oq_rationale: Json | null
           overall_rationale: string | null
           overall_verdict: string | null
+          pq_approver_id: string | null
+          pq_approver_meaning: string | null
+          pq_approver_signed_at: string | null
+          pq_initiator_id: string | null
+          pq_initiator_meaning: string | null
+          pq_initiator_signed_at: string | null
           pq_rationale: Json | null
           release_id: string
           updated_at: string
@@ -5488,11 +5713,29 @@ export type Database = {
           id?: string
           invalidated_by_core?: boolean
           invalidated_core_service?: string | null
+          iq_approver_id?: string | null
+          iq_approver_meaning?: string | null
+          iq_approver_signed_at?: string | null
+          iq_initiator_id?: string | null
+          iq_initiator_meaning?: string | null
+          iq_initiator_signed_at?: string | null
           iq_rationale?: Json | null
           module_group: string
+          oq_approver_id?: string | null
+          oq_approver_meaning?: string | null
+          oq_approver_signed_at?: string | null
+          oq_initiator_id?: string | null
+          oq_initiator_meaning?: string | null
+          oq_initiator_signed_at?: string | null
           oq_rationale?: Json | null
           overall_rationale?: string | null
           overall_verdict?: string | null
+          pq_approver_id?: string | null
+          pq_approver_meaning?: string | null
+          pq_approver_signed_at?: string | null
+          pq_initiator_id?: string | null
+          pq_initiator_meaning?: string | null
+          pq_initiator_signed_at?: string | null
           pq_rationale?: Json | null
           release_id: string
           updated_at?: string
@@ -5506,11 +5749,29 @@ export type Database = {
           id?: string
           invalidated_by_core?: boolean
           invalidated_core_service?: string | null
+          iq_approver_id?: string | null
+          iq_approver_meaning?: string | null
+          iq_approver_signed_at?: string | null
+          iq_initiator_id?: string | null
+          iq_initiator_meaning?: string | null
+          iq_initiator_signed_at?: string | null
           iq_rationale?: Json | null
           module_group?: string
+          oq_approver_id?: string | null
+          oq_approver_meaning?: string | null
+          oq_approver_signed_at?: string | null
+          oq_initiator_id?: string | null
+          oq_initiator_meaning?: string | null
+          oq_initiator_signed_at?: string | null
           oq_rationale?: Json | null
           overall_rationale?: string | null
           overall_verdict?: string | null
+          pq_approver_id?: string | null
+          pq_approver_meaning?: string | null
+          pq_approver_signed_at?: string | null
+          pq_initiator_id?: string | null
+          pq_initiator_meaning?: string | null
+          pq_initiator_signed_at?: string | null
           pq_rationale?: Json | null
           release_id?: string
           updated_at?: string
@@ -8243,36 +8504,42 @@ export type Database = {
         Row: {
           auth_method: string
           document_hash: string
+          document_id: string | null
+          full_legal_name: string | null
           id: string
           ip_address: string | null
           meaning: string
-          request_id: string
+          request_id: string | null
           signed_at: string | null
-          signer_id: string
+          signer_id: string | null
           user_agent: string | null
           user_id: string
         }
         Insert: {
           auth_method?: string
           document_hash: string
+          document_id?: string | null
+          full_legal_name?: string | null
           id?: string
           ip_address?: string | null
           meaning: string
-          request_id: string
+          request_id?: string | null
           signed_at?: string | null
-          signer_id: string
+          signer_id?: string | null
           user_agent?: string | null
           user_id: string
         }
         Update: {
           auth_method?: string
           document_hash?: string
+          document_id?: string | null
+          full_legal_name?: string | null
           id?: string
           ip_address?: string | null
           meaning?: string
-          request_id?: string
+          request_id?: string | null
           signed_at?: string | null
-          signer_id?: string
+          signer_id?: string | null
           user_agent?: string | null
           user_id?: string
         }
@@ -9594,6 +9861,7 @@ export type Database = {
           resolved_by: string | null
           screen_resolution: string | null
           screenshot_url: string | null
+          screenshot_urls: string[] | null
           status: string
           title: string
           type: string
@@ -9615,6 +9883,7 @@ export type Database = {
           resolved_by?: string | null
           screen_resolution?: string | null
           screenshot_url?: string | null
+          screenshot_urls?: string[] | null
           status?: string
           title: string
           type: string
@@ -9636,6 +9905,7 @@ export type Database = {
           resolved_by?: string | null
           screen_resolution?: string | null
           screenshot_url?: string | null
+          screenshot_urls?: string[] | null
           status?: string
           title?: string
           type?: string
@@ -9775,6 +10045,63 @@ export type Database = {
             referencedColumns: ["company_id"]
           },
         ]
+      }
+      funding_programmes: {
+        Row: {
+          checklist_items: Json | null
+          created_at: string | null
+          deadline_info: string | null
+          description: string | null
+          eligibility_criteria: Json | null
+          funding_body: string | null
+          id: string
+          is_active: boolean | null
+          is_builtin: boolean | null
+          name: string
+          programme_code: string | null
+          region: string
+          trl_range: string | null
+          typical_budget_range: string | null
+          updated_at: string | null
+          url: string | null
+        }
+        Insert: {
+          checklist_items?: Json | null
+          created_at?: string | null
+          deadline_info?: string | null
+          description?: string | null
+          eligibility_criteria?: Json | null
+          funding_body?: string | null
+          id?: string
+          is_active?: boolean | null
+          is_builtin?: boolean | null
+          name: string
+          programme_code?: string | null
+          region?: string
+          trl_range?: string | null
+          typical_budget_range?: string | null
+          updated_at?: string | null
+          url?: string | null
+        }
+        Update: {
+          checklist_items?: Json | null
+          created_at?: string | null
+          deadline_info?: string | null
+          description?: string | null
+          eligibility_criteria?: Json | null
+          funding_body?: string | null
+          id?: string
+          is_active?: boolean | null
+          is_builtin?: boolean | null
+          name?: string
+          programme_code?: string | null
+          region?: string
+          trl_range?: string | null
+          typical_budget_range?: string | null
+          updated_at?: string | null
+          url?: string | null
+        }
+        Relationships: []
       }
       gap_activity_links: {
         Row: {
@@ -11363,6 +11690,52 @@ export type Database = {
             foreignKeyName: "invitation_document_access_invitation_id_fkey"
             columns: ["invitation_id"]
             isOneToOne: true
+            referencedRelation: "user_invitations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      invitation_module_access: {
+        Row: {
+          company_id: string
+          created_at: string
+          id: string
+          invitation_id: string
+          module_ids: string[]
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          id?: string
+          invitation_id: string
+          module_ids?: string[]
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          id?: string
+          invitation_id?: string
+          module_ids?: string[]
+        }
+        Relationships: [
+          {
+            foreignKeyName: "invitation_module_access_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "invitation_module_access_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "company_dashboard_summary"
+            referencedColumns: ["company_id"]
+          },
+          {
+            foreignKeyName: "invitation_module_access_invitation_id_fkey"
+            columns: ["invitation_id"]
+            isOneToOne: false
             referencedRelation: "user_invitations"
             referencedColumns: ["id"]
           },
@@ -17436,6 +17809,66 @@ export type Database = {
             foreignKeyName: "product_manufacturing_product_id_fkey"
             columns: ["product_id"]
             isOneToOne: true
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      product_market_approvals: {
+        Row: {
+          approval_date: string | null
+          certificate_file_name: string | null
+          certificate_file_path: string | null
+          certificate_number: string | null
+          company_id: string
+          created_at: string | null
+          id: string
+          market_code: string
+          notes: string | null
+          product_id: string
+          status: string
+          updated_at: string | null
+        }
+        Insert: {
+          approval_date?: string | null
+          certificate_file_name?: string | null
+          certificate_file_path?: string | null
+          certificate_number?: string | null
+          company_id: string
+          created_at?: string | null
+          id?: string
+          market_code: string
+          notes?: string | null
+          product_id: string
+          status?: string
+          updated_at?: string | null
+        }
+        Update: {
+          approval_date?: string | null
+          certificate_file_name?: string | null
+          certificate_file_path?: string | null
+          certificate_number?: string | null
+          company_id?: string
+          created_at?: string | null
+          id?: string
+          market_code?: string
+          notes?: string | null
+          product_id?: string
+          status?: string
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "product_market_approvals_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "portfolio_revenue_analytics"
+            referencedColumns: ["product_id"]
+          },
+          {
+            foreignKeyName: "product_market_approvals_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
             referencedRelation: "products"
             referencedColumns: ["id"]
           },
@@ -23826,6 +24259,45 @@ export type Database = {
           },
         ]
       }
+      technical_file_document_links: {
+        Row: {
+          created_at: string | null
+          document_id: string
+          id: string
+          product_id: string
+          section_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          document_id: string
+          id?: string
+          product_id: string
+          section_id: string
+        }
+        Update: {
+          created_at?: string | null
+          document_id?: string
+          id?: string
+          product_id?: string
+          section_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "technical_file_document_links_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "portfolio_revenue_analytics"
+            referencedColumns: ["product_id"]
+          },
+          {
+            foreignKeyName: "technical_file_document_links_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       template_responses: {
         Row: {
           activity_id: string
@@ -24570,6 +25042,162 @@ export type Database = {
             columns: ["product_id"]
             isOneToOne: true
             referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      usability_studies: {
+        Row: {
+          acceptance_criteria: string | null
+          accompanying_docs: string | null
+          company_id: string
+          conductors: string | null
+          created_at: string | null
+          created_by: string | null
+          id: string
+          interview_questions: string | null
+          method: string | null
+          methods_used: Json | null
+          name: string
+          negative_learnings: string | null
+          objective: string | null
+          observations: Json | null
+          other_equipment: string | null
+          overall_conclusion: string | null
+          participants_structured: Json | null
+          participants_text: string | null
+          positive_learnings: string | null
+          product_id: string
+          prototype_id: string | null
+          recommendations: string | null
+          software_version: string | null
+          sort_order: number | null
+          status: string
+          study_dates: string | null
+          study_subtype: string | null
+          study_type: string
+          tasks_structured: Json | null
+          tasks_text: string | null
+          test_conditions: string | null
+          test_location: string | null
+          training_description: string | null
+          training_to_test_interval: string | null
+          uef_id: string | null
+          ui_under_evaluation: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          acceptance_criteria?: string | null
+          accompanying_docs?: string | null
+          company_id: string
+          conductors?: string | null
+          created_at?: string | null
+          created_by?: string | null
+          id?: string
+          interview_questions?: string | null
+          method?: string | null
+          methods_used?: Json | null
+          name?: string
+          negative_learnings?: string | null
+          objective?: string | null
+          observations?: Json | null
+          other_equipment?: string | null
+          overall_conclusion?: string | null
+          participants_structured?: Json | null
+          participants_text?: string | null
+          positive_learnings?: string | null
+          product_id: string
+          prototype_id?: string | null
+          recommendations?: string | null
+          software_version?: string | null
+          sort_order?: number | null
+          status?: string
+          study_dates?: string | null
+          study_subtype?: string | null
+          study_type: string
+          tasks_structured?: Json | null
+          tasks_text?: string | null
+          test_conditions?: string | null
+          test_location?: string | null
+          training_description?: string | null
+          training_to_test_interval?: string | null
+          uef_id?: string | null
+          ui_under_evaluation?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          acceptance_criteria?: string | null
+          accompanying_docs?: string | null
+          company_id?: string
+          conductors?: string | null
+          created_at?: string | null
+          created_by?: string | null
+          id?: string
+          interview_questions?: string | null
+          method?: string | null
+          methods_used?: Json | null
+          name?: string
+          negative_learnings?: string | null
+          objective?: string | null
+          observations?: Json | null
+          other_equipment?: string | null
+          overall_conclusion?: string | null
+          participants_structured?: Json | null
+          participants_text?: string | null
+          positive_learnings?: string | null
+          product_id?: string
+          prototype_id?: string | null
+          recommendations?: string | null
+          software_version?: string | null
+          sort_order?: number | null
+          status?: string
+          study_dates?: string | null
+          study_subtype?: string | null
+          study_type?: string
+          tasks_structured?: Json | null
+          tasks_text?: string | null
+          test_conditions?: string | null
+          test_location?: string | null
+          training_description?: string | null
+          training_to_test_interval?: string | null
+          uef_id?: string | null
+          ui_under_evaluation?: string | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "usability_studies_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "usability_studies_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "company_dashboard_summary"
+            referencedColumns: ["company_id"]
+          },
+          {
+            foreignKeyName: "usability_studies_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "portfolio_revenue_analytics"
+            referencedColumns: ["product_id"]
+          },
+          {
+            foreignKeyName: "usability_studies_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "usability_studies_uef_id_fkey"
+            columns: ["uef_id"]
+            isOneToOne: false
+            referencedRelation: "usability_engineering_files"
             referencedColumns: ["id"]
           },
         ]
@@ -25578,6 +26206,39 @@ export type Database = {
           id?: string
           is_active?: boolean | null
           max_uses?: number | null
+        }
+        Relationships: []
+      }
+      xyreg_releases: {
+        Row: {
+          changelog: string | null
+          created_at: string | null
+          id: string
+          impacted_module_groups: string[] | null
+          published_at: string | null
+          release_date: string
+          status: string
+          version: string
+        }
+        Insert: {
+          changelog?: string | null
+          created_at?: string | null
+          id?: string
+          impacted_module_groups?: string[] | null
+          published_at?: string | null
+          release_date: string
+          status?: string
+          version: string
+        }
+        Update: {
+          changelog?: string | null
+          created_at?: string | null
+          id?: string
+          impacted_module_groups?: string[] | null
+          published_at?: string | null
+          release_date?: string
+          status?: string
+          version?: string
         }
         Relationships: []
       }
@@ -26647,6 +27308,10 @@ export type Database = {
         Returns: boolean
       }
       increment_code_usage: { Args: { code_value: string }; Returns: boolean }
+      increment_thread_unread: {
+        Args: { _sender_user_id: string; _thread_id: string }
+        Returns: undefined
+      }
       increment_unread_count: {
         Args: { p_exclude_user_id: string; p_thread_id: string }
         Returns: undefined

@@ -27,6 +27,7 @@ export interface SoftwareRequirementsAIRequest {
     description: string;
   }>;
   selectedCategories: string[];
+  existingItems?: string[];
 }
 
 export interface SoftwareRequirementsAIResponse {

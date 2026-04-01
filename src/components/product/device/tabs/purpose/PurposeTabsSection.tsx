@@ -424,6 +424,8 @@ export function PurposeTabsSection({
                 masterDeviceId={variantInheritance?.masterDevice?.id}
                 autoSyncScope={autoSyncScope}
                 familyProductIds={familyProductIds}
+                familyProducts={purposeFamilyProducts}
+                onScopeChangeWithPropagation={handleScopeChangeWithPropagation}
               />
           </TabsContent>
 
@@ -456,8 +458,9 @@ export function PurposeTabsSection({
                 isVariant={variantInheritance?.isVariant}
                 masterDeviceName={variantInheritance?.masterDevice?.name}
                 masterDeviceId={variantInheritance?.masterDevice?.id}
-                autoSyncScope={autoSyncScope}
                 familyProductIds={familyProductIds}
+                familyProducts={purposeFamilyProducts}
+                onScopeChangeWithPropagation={handleScopeChangeWithPropagation}
               />
           </TabsContent>
 
@@ -500,6 +503,8 @@ export function PurposeTabsSection({
                 masterDeviceId={variantInheritance?.masterDevice?.id}
                 autoSyncScope={autoSyncScope}
                 familyProductIds={familyProductIds}
+                familyProducts={purposeFamilyProducts}
+                onScopeChangeWithPropagation={handleScopeChangeWithPropagation}
               />
             <AdditionalInformationTab
               userInstructions={userInstructions}
@@ -529,6 +534,8 @@ export function PurposeTabsSection({
               masterDeviceId={variantInheritance?.masterDevice?.id}
               autoSyncScope={autoSyncScope}
               familyProductIds={familyProductIds}
+              familyProducts={purposeFamilyProducts}
+              onScopeChangeWithPropagation={handleScopeChangeWithPropagation}
             />
           </TabsContent>
         </Tabs>

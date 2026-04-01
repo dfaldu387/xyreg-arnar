@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Drawer, IconButton, Box, Typography, CircularProgress, Tooltip } from '@mui/material';
+import React, { useState, useEffect, useCallback } from 'react';
+import { IconButton, Box, Typography, CircularProgress, Tooltip } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
-import DragIndicatorIcon from '@mui/icons-material/DragIndicator';
+import { ResizableDrawer } from '@/components/ui/resizable-drawer';
 import { LiveEditor } from '@/components/document-composer/LiveEditor';
 import { DocumentTemplate } from '@/types/documentComposer';
 import { DocumentTemplatePersistenceService } from '@/services/documentTemplatePersistenceService';
@@ -10,7 +10,9 @@ import { useCompanyRole } from '@/context/CompanyRoleContext';
 import { useAuth } from '@/context/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { DocumentEditor } from "@onlyoffice/document-editor-react";
-import { FileEdit, ArrowLeft, Loader2, AlertCircle } from 'lucide-react';
+import { FileEdit, ArrowLeft, Loader2, AlertCircle, Send } from 'lucide-react';
+import { DocumentEditorSidebar } from '@/components/document-composer/DocumentEditorSidebar';
+import { SendToReviewGroupDialog } from '@/components/documents/SendToReviewGroupDialog';
 
 // OnlyOffice constants
 const SUPABASE_URL = "https://wzzkbmmgxxrfhhxggrcl.supabase.co";
@@ -78,6 +80,26 @@ export function DocumentDraftDrawer({
   const { user } = useAuth();
   const activeRole = activeCompanyRole?.role;
   const canEdit = activeRole !== 'viewer';
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [showSendForReview, setShowSendForReview] = useState(false);
+  const [existingReviewerGroupIds, setExistingReviewerGroupIds] = useState<string[]>([]);
+
+  // Fetch existing reviewer group assignments
+  useEffect(() => {
+    if (!open || !documentId) {
+      setExistingReviewerGroupIds([]);
+      return;
+    }
+    const cleanId = documentId.replace(/^template-/, '');
+    supabase
+      .from('phase_assigned_document_template')
+      .select('reviewer_group_ids')
+      .eq('id', cleanId)
+      .maybeSingle()
+      .then(({ data }) => {
+        setExistingReviewerGroupIds((data?.reviewer_group_ids as string[]) || []);
+      });
+  }, [open, documentId]);
 
   // Reset advanced editor state when drawer closes
   useEffect(() => {
@@ -87,36 +109,6 @@ export function DocumentDraftDrawer({
       setEditorKey(null);
     }
   }, [open]);
-
-  // Resizable drawer state
-  const [drawerWidth, setDrawerWidth] = useState(() => window.innerWidth * 0.75);
-  const isResizing = useRef(false);
-
-  const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    isResizing.current = true;
-    document.body.style.cursor = 'col-resize';
-    document.body.style.userSelect = 'none';
-
-    const handleMouseMove = (e: MouseEvent) => {
-      if (!isResizing.current) return;
-      const newWidth = window.innerWidth - e.clientX;
-      const minWidth = 400;
-      const maxWidth = window.innerWidth * 0.95;
-      setDrawerWidth(Math.min(maxWidth, Math.max(minWidth, newWidth)));
-    };
-
-    const handleMouseUp = () => {
-      isResizing.current = false;
-      document.body.style.cursor = '';
-      document.body.style.userSelect = '';
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
-    };
-
-    document.addEventListener('mousemove', handleMouseMove);
-    document.addEventListener('mouseup', handleMouseUp);
-  }, []);
 
   const resolvedDocUrl = editorMounted && filePath ? getDocumentUrl(filePath) : "";
 
@@ -149,6 +141,8 @@ export function DocumentDraftDrawer({
     ? documentId.replace('template-', '')
     : documentId;
 
+  const resolvedCompanyId = companyId || activeCompanyRole?.companyId;
+
   // Initialize template when drawer opens - check for existing draft first
   useEffect(() => {
     if (!open) {
@@ -157,7 +151,6 @@ export function DocumentDraftDrawer({
       return;
     }
 
-    const resolvedCompanyId = companyId || activeCompanyRole?.companyId;
     if (!resolvedCompanyId || !normalizedDocId) return;
 
     const loadOrCreateTemplate = async () => {
@@ -284,7 +277,7 @@ export function DocumentDraftDrawer({
     };
 
     loadOrCreateTemplate();
-  }, [open, normalizedDocId, documentName, documentType, productId, companyId, activeCompanyRole?.companyId]);
+  }, [open, normalizedDocId, documentName, documentType, productId, resolvedCompanyId]);
 
   const handleContentUpdate = useCallback((contentId: string, newContent: string) => {
     setTemplate(prev => {
@@ -341,68 +334,12 @@ export function DocumentDraftDrawer({
   }, [onOpenChange, onDocumentSaved]);
 
   return (
-    <Drawer
-      anchor="right"
+    <>
+    <ResizableDrawer
       open={open}
       onClose={() => onOpenChange(false)}
-      ModalProps={{
-        disableAutoFocus: true,
-        disableEnforceFocus: true,
-      }}
-      PaperProps={{
-        sx: { width: { xs: '100%', md: `${drawerWidth}px` }, maxWidth: '100vw', overflow: 'visible' },
-      }}
+      defaultWidthPercent={80}
     >
-      {/* Resize handle — full-height line with grip icon */}
-      <Box
-        onMouseDown={handleMouseDown}
-        sx={{
-          display: { xs: 'none', md: 'flex' },
-          position: 'absolute',
-          left: -6,
-          top: 0,
-          bottom: 0,
-          width: 12,
-          cursor: 'col-resize',
-          zIndex: 1,
-          alignItems: 'center',
-          justifyContent: 'center'
-        }}
-      >
-        {/* Vertical line — always visible, top to bottom */}
-        <Box
-          className="resize-line"
-          sx={{
-            position: 'absolute',
-            left: '50%',
-            top: 0,
-            bottom: 0,
-            width: '2px',
-            transform: 'translateX(-50%)',
-            bgcolor: 'grey.300',
-          }}
-        />
-        {/* Grip icon */}
-        <Box
-          className="resize-grip"
-          sx={{
-            position: 'relative',
-            zIndex: 2,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            width: 20,
-            height: 32,
-            borderRadius: '4px',
-            bgcolor: 'grey.200',
-            border: '1px solid',
-            borderColor: 'grey.300',
-          }}
-        >
-          <DragIndicatorIcon sx={{ fontSize: 16, color: 'grey.600' }} />
-        </Box>
-      </Box>
-
       {/* Header */}
       <Box
         sx={{
@@ -459,6 +396,28 @@ export function DocumentDraftDrawer({
               Advanced Editor
             </Box>
           )}
+          {companyId && (
+            <Box
+              onClick={() => setShowSendForReview(true)}
+              sx={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 0.5,
+                color: '#1976d2',
+                border: '1px solid #1976d2',
+                borderRadius: '6px',
+                px: 1,
+                py: 0.5,
+                cursor: 'pointer',
+                fontSize: '0.8125rem',
+                fontWeight: 500,
+                '&:hover': { backgroundColor: 'rgba(25, 118, 210, 0.08)' }
+              }}
+            >
+              <Send style={{ width: 16, height: 16 }} />
+              Send for Review
+            </Box>
+          )}
           <IconButton onClick={() => onOpenChange(false)} size="small">
             <CloseIcon />
           </IconButton>
@@ -466,13 +425,36 @@ export function DocumentDraftDrawer({
       </Box>
 
       {/* Body */}
-      <Box sx={{ flex: 1, overflow: 'hidden', height: 'calc(100vh - 64px)', display: 'flex', flexDirection: 'column' }}>
+      <Box sx={{ flex: 1, overflow: 'hidden', height: 'calc(100vh - 64px)', display: 'flex', flexDirection: 'row' }}>
+        {/* Sidebar + toggle (hidden in advanced editor mode) */}
+        {!showAdvancedEditor && (
+          <DocumentEditorSidebar
+            collapsed={sidebarCollapsed}
+            onToggleCollapse={() => setSidebarCollapsed(prev => !prev)}
+            ciDocumentId={normalizedDocId || null}
+            ciCompanyId={resolvedCompanyId}
+            productId={productId}
+            controlPanelProps={{
+              productContext: template?.productContext,
+              documentType: template?.type,
+              isLocked: true,
+              initialScope: productId ? 'product' : 'company',
+              initialProductId: productId || undefined,
+              template: template || undefined,
+              disabled: !canEdit,
+              onDocumentControlChange: handleDocumentControlChange,
+            }}
+          />
+        )}
+
+        {/* Editor area */}
+        <Box sx={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', minWidth: 0 }}>
         {/* Advanced Editor — hidden via CSS instead of unmounting to avoid DOM errors */}
         {editorMounted && resolvedDocUrl && editorKey && (
           <Box sx={{ flex: 1, position: 'relative', overflow: 'hidden', display: showAdvancedEditor ? 'flex' : 'none' }}>
             <DocumentEditor
               id="onlyoffice-editor-inline"
-              documentServerUrl={import.meta.env.VITE_ONLYOFFICE_SERVER_URL}
+              documentServerUrl={import.meta.env.VITE_ONLYOFFICE_SERVER_URL || "/api/onlyoffice/"}
               config={{
                 document: {
                   fileType: getFileType(fileName || filePath || documentName),
@@ -531,7 +513,39 @@ export function DocumentDraftDrawer({
             />
           ) : null}
         </Box>
+        </Box>
       </Box>
-    </Drawer>
+    </ResizableDrawer>
+
+    {/* Custom overlay — must exceed MUI Modal (z-1300) and Drawer paper */}
+    {showSendForReview && (
+      <div
+        onClick={() => setShowSendForReview(false)}
+        style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          margin: 0,
+          width: '100vw',
+          height: '100vh',
+          backgroundColor: 'rgba(0, 0, 0, 0.6)',
+          zIndex: 9998,
+        }}
+      />
+    )}
+    {companyId && (
+      <SendToReviewGroupDialog
+        open={showSendForReview}
+        onOpenChange={setShowSendForReview}
+        documentId={documentId}
+        documentName={documentName}
+        companyId={companyId}
+        existingGroupIds={existingReviewerGroupIds}
+        onSent={() => {
+          onDocumentSaved?.();
+        }}
+      />
+    )}
+    </>
   );
 }

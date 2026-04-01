@@ -2,12 +2,14 @@ import { useState, useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Loader2, Sparkles, Save, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 import { useTranslation } from '@/hooks/useTranslation';
 import { GenesisStepNotice } from './GenesisStepNotice';
 import { deriveBusinessModelCanvas, type DerivedCanvas } from '@/services/deriveBusinessModelCanvas';
+import { AIContextSourcesPanel } from '@/components/product/ai-assistant/AIContextSourcesPanel';
 
 interface BusinessCanvasProps {
   productId: string;
@@ -111,6 +113,9 @@ export function BusinessCanvas({ productId, disabled = false, isInGenesisFlow = 
   const [isSaving, setIsSaving] = useState(false);
   const [canvasData, setCanvasData] = useState<CanvasData>({});
   const [isEditing, setIsEditing] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [outputLanguage, setOutputLanguage] = useState('en');
+  const [additionalPrompt, setAdditionalPrompt] = useState('');
 
   useEffect(() => {
     const loadCanvas = async () => {
@@ -135,10 +140,11 @@ export function BusinessCanvas({ productId, disabled = false, isInGenesisFlow = 
 
   const generateCanvas = async () => {
     if (disabled) return;
+    setConfirmOpen(false);
     setIsGenerating(true);
     try {
       const { data, error } = await supabase.functions.invoke('generate-business-canvas', {
-        body: { productId }
+        body: { productId, outputLanguage, additionalPrompt }
       });
 
       if (error) throw error;
@@ -295,7 +301,7 @@ export function BusinessCanvas({ productId, disabled = false, isInGenesisFlow = 
             )}
           </Button>
           <Button
-            onClick={generateCanvas}
+            onClick={() => setConfirmOpen(true)}
             disabled={isGenerating || disabled}
             variant="default"
           >
@@ -374,6 +380,35 @@ export function BusinessCanvas({ productId, disabled = false, isInGenesisFlow = 
           {lang('commercial.productBusinessCanvas.aiGeneratedOn').replace('{{date}}', new Date(canvasData.generated_at).toLocaleString())}
         </div>
       )}
+
+      {/* AI Generation Confirmation Dialog */}
+      <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Sparkles className="h-5 w-5 text-primary" />
+              {lang('commercial.productBusinessCanvas.generateWithAI')}
+            </DialogTitle>
+            <p className="text-sm text-muted-foreground">
+              Review the context sources that will be used for AI generation.
+            </p>
+          </DialogHeader>
+          <AIContextSourcesPanel
+            productId={productId}
+            additionalSources={['Blueprint Notes', 'Market Data', 'NPV Analysis']}
+            mode="select"
+            onLanguageChange={setOutputLanguage}
+            onPromptChange={setAdditionalPrompt}
+          />
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmOpen(false)}>Cancel</Button>
+            <Button onClick={generateCanvas}>
+              <Sparkles className="h-4 w-4 mr-2" />
+              Generate
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

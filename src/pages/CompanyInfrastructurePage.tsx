@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { useParams } from 'react-router-dom';
 import { Building, Server, Wrench, ClipboardList, AlertTriangle, CheckCircle2, Clock, FolderOpen, Search, Plus, Shield, Pencil, Info } from 'lucide-react';
 import { XyregValidationPanel } from '@/components/infrastructure/XyregValidationPanel';
+
 import { AddAssetDialog } from '@/components/infrastructure/AddAssetDialog';
 import { EditAssetDialog } from '@/components/infrastructure/EditAssetDialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -234,6 +235,7 @@ export default function CompanyInfrastructurePage() {
         title={lang('infrastructure.title')}
         subtitle={lang('infrastructure.subtitle')}
       />
+
 
       {/* Status Summary */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">

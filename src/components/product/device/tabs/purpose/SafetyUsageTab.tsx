@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef, useEffect } from 'react';
+import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
@@ -14,7 +14,8 @@ import { toast } from 'sonner';
 import { useTranslation } from '@/hooks/useTranslation';
 import { ContextWarningToast, getMissingFieldsWithNavigation, getContextSources } from '../../ai-assistant/ContextWarningToast';
 import { InheritanceExclusionPopover } from '@/components/shared/InheritanceExclusionPopover';
-
+import { resolveFieldValue, normalizeScopeValue } from '@/hooks/useAutoSyncScope';
+import type { ItemExclusionScope } from '@/hooks/useInheritanceExclusion';
 
 import { Json } from '@/integrations/supabase/types';
 import { StorageSterilityHandlingSection } from '../../sections/StorageSterilityHandlingSection';
@@ -87,6 +88,8 @@ interface SafetyUsageTabProps {
   onStorageSterilityHandlingChange?: (data: StorageSterilityHandlingData) => void;
   autoSyncScope?: (fieldKey: string, newValue: any) => void;
   familyProductIds?: string[];
+  familyProducts?: any[];
+  onScopeChangeWithPropagation?: (fieldKey: string, oldScope: ItemExclusionScope, newScope: ItemExclusionScope) => Promise<void>;
 }
 
 export function SafetyUsageTab({
@@ -123,6 +126,8 @@ export function SafetyUsageTab({
   onStorageSterilityHandlingChange,
   autoSyncScope,
   familyProductIds,
+  familyProducts,
+  onScopeChangeWithPropagation,
 }: SafetyUsageTabProps) {
   const { lang } = useTranslation();
   const [localData, setLocalData] = useState<IntendedPurposeData>(() => ({
@@ -161,6 +166,32 @@ export function SafetyUsageTab({
   };
   const { showDialog: govDialog, activeFieldLabel: govFieldLabel, guardEdit: govGuardEdit, confirmEdit: govConfirm, setShowDialog: setGovDialog } = useMultiFieldGovernanceGuard(productId, governanceFields);
 
+  // Value-matching helpers for scope popovers
+  const getMatchingProductIds = useCallback((fieldKey: string, currentValue: any): string[] | undefined => {
+    if (!familyProducts?.length || !productId) return undefined;
+    const currentNormalized = JSON.stringify(normalizeScopeValue(fieldKey, currentValue));
+    return familyProducts
+      .filter(p => {
+        if (p.id === productId) return true;
+        return JSON.stringify(normalizeScopeValue(fieldKey, resolveFieldValue(p, fieldKey))) === currentNormalized;
+      })
+      .map(p => p.id);
+  }, [familyProducts, productId]);
+
+  const createValueMatchScopeChange = useCallback((fieldKey: string, currentValue: any) => {
+    return (id: string, newScope: ItemExclusionScope) => {
+      if (onScopeChangeWithPropagation && familyProducts?.length) {
+        const matchIds = getMatchingProductIds(fieldKey, currentValue);
+        const nonMatchingIds = matchIds
+          ? (familyProductIds || []).filter(pid => !matchIds.includes(pid))
+          : [];
+        const oldScope: ItemExclusionScope = { excludedProductIds: nonMatchingIds, excludedCategories: [], isManualGroup: true };
+        return onScopeChangeWithPropagation(id, oldScope, newScope);
+      } else if (fieldExclusion) {
+        return fieldExclusion.setExclusionScope(id, newScope);
+      }
+    };
+  }, [onScopeChangeWithPropagation, familyProducts, getMatchingProductIds, familyProductIds, fieldExclusion]);
 
   useEffect(() => {
     if (!isInternalUpdateRef.current) {
@@ -197,10 +228,6 @@ export function SafetyUsageTab({
     setLocalData(updatedData);
     onIntendedPurposeDataChange(updatedData);
 
-    // Propagate value to other devices in the scope group
-    const scopeKey = fieldToScopeKey[field];
-    if (scopeKey) autoSyncScope?.(scopeKey, value);
-
     const timeoutId = setTimeout(() => {
       setSavingStates(prev => {
         const newSet = new Set(prev);
@@ -211,7 +238,7 @@ export function SafetyUsageTab({
     }, 1000);
 
     timeoutRefs.current.set(field, timeoutId);
-  }, [localData, onIntendedPurposeDataChange, autoSyncScope]);
+  }, [localData, onIntendedPurposeDataChange]);
 
   const getSaveStatusIcon = (field: string) => {
     const isSaving = savingStates.has(field);
@@ -244,7 +271,6 @@ export function SafetyUsageTab({
     }
     const updated = [...contraindications, trimmedValue];
     onContraindicationsChange(updated);
-    autoSyncScope?.('contraindications', updated);
     setNewContraindication('');
   };
 
@@ -253,7 +279,6 @@ export function SafetyUsageTab({
     const updated = [...contraindications];
     updated.splice(index, 1);
     onContraindicationsChange(updated);
-    autoSyncScope?.('contraindications', updated);
   };
 
   // Warnings handlers
@@ -417,9 +442,10 @@ export function SafetyUsageTab({
                 currentProductId={productId}
                 itemId={scopeKey}
                 exclusionScope={fieldExclusion.getExclusionScope(scopeKey)}
-                onScopeChange={(id, scope) => fieldExclusion.setExclusionScope(id, scope)}
+                onScopeChange={createValueMatchScopeChange(scopeKey, items)}
                 defaultCurrentDeviceOnly
                 familyProductIds={familyProductIds}
+                valueMatchingProductIds={getMatchingProductIds(scopeKey, items)}
               />
             ) : null}
             {getSaveStatusIcon(fieldKey)}
@@ -625,9 +651,10 @@ export function SafetyUsageTab({
                   currentProductId={productId}
                   itemId="disposalInstructions"
                   exclusionScope={fieldExclusion.getExclusionScope('disposalInstructions')}
-                  onScopeChange={(id, scope) => fieldExclusion.setExclusionScope(id, scope)}
+                  onScopeChange={createValueMatchScopeChange('disposalInstructions', localData.disposal_instructions || '')}
                   defaultCurrentDeviceOnly
                   familyProductIds={familyProductIds}
+                  valueMatchingProductIds={getMatchingProductIds('disposalInstructions', localData.disposal_instructions || '')}
                 />
               ) : null}
               {getSaveStatusIcon('disposalInstructions')}

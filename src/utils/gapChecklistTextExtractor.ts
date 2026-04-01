@@ -2,7 +2,7 @@ import { supabase } from '@/integrations/supabase/client';
 
 /**
  * Extract text from uploaded documents (PDF, DOCX, XLSX, TXT)
- * Reuses existing extraction patterns from the project.
+ * Uses PDF.js for high-fidelity page-by-page text extraction from PDFs.
  */
 export async function extractTextFromChecklistFile(file: File): Promise<string> {
   const { type, name } = file;
@@ -35,19 +35,88 @@ export async function extractTextFromChecklistFile(file: File): Promise<string> 
     return result.value;
   }
 
-  // PDF — use the existing edge function for server-side extraction
+  // PDF — use PDF.js for client-side page-by-page text extraction
   if (type === 'application/pdf' || name.endsWith('.pdf')) {
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('action', 'extract_text');
-
-    const { data, error } = await supabase.functions.invoke('ai-document-analyzer', {
-      body: formData,
-    });
-
-    if (error) throw new Error(`PDF extraction failed: ${error.message}`);
-    return data?.extracted_text || '';
+    return await extractPdfTextWithPdfJs(file);
   }
 
   throw new Error(`Unsupported file type: ${type || name}`);
+}
+
+/**
+ * Extract text from PDF using PDF.js (pdfjs-dist) page by page.
+ * Falls back to the edge function if PDF.js extraction yields low-quality text.
+ */
+async function extractPdfTextWithPdfJs(file: File): Promise<string> {
+  try {
+    const pdfjsLib = await import('pdfjs-dist');
+    
+    // Set worker source
+    const version = pdfjsLib.version;
+    pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${version}/build/pdf.worker.mjs`;
+
+    const buffer = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(buffer) }).promise;
+
+    const pageTexts: string[] = [];
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i);
+      const content = await page.getTextContent();
+      const pageText = content.items
+        .map((item: any) => item.str)
+        .join(' ');
+      if (pageText.trim()) {
+        pageTexts.push(pageText);
+      }
+    }
+
+    const fullText = pageTexts.join('\n\n');
+
+    // Check if extracted text is meaningful (not just metadata)
+    if (isLowQualityText(fullText)) {
+      console.warn('PDF.js extracted low-quality text, falling back to edge function');
+      return await extractPdfViaEdgeFunction(file);
+    }
+
+    return fullText;
+  } catch (err) {
+    console.warn('PDF.js extraction failed, falling back to edge function:', err);
+    return await extractPdfViaEdgeFunction(file);
+  }
+}
+
+/**
+ * Detect if extracted text is mostly metadata/gibberish rather than real content.
+ */
+function isLowQualityText(text: string): boolean {
+  if (!text || text.trim().length < 100) return true;
+  
+  // Check for metadata-heavy patterns
+  const metadataPatterns = ['BitsPerComponent', 'CDEFGHIJSTUVWXYZcdefghijstuvwxyz', 'ViewerPreferences', 'ModDate(D:'];
+  const metadataHits = metadataPatterns.filter(p => text.includes(p)).length;
+  if (metadataHits >= 2) return true;
+
+  // If average word length is too high (gibberish), flag it
+  const words = text.split(/\s+/).filter(w => w.length > 0);
+  if (words.length < 20) return true;
+  const avgLen = words.reduce((s, w) => s + w.length, 0) / words.length;
+  if (avgLen > 20) return true;
+
+  return false;
+}
+
+/**
+ * Fallback: use the existing edge function for server-side PDF extraction.
+ */
+async function extractPdfViaEdgeFunction(file: File): Promise<string> {
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('action', 'extract_text');
+
+  const { data, error } = await supabase.functions.invoke('ai-document-analyzer', {
+    body: formData,
+  });
+
+  if (error) throw new Error(`PDF extraction failed: ${error.message}`);
+  return data?.extracted_text || '';
 }

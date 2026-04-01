@@ -28,27 +28,29 @@ export interface UpdateUserCompanyModuleAccessInput {
 // Company Dashboard Module IDs
 export const COMPANY_MODULES = {
   DASHBOARD: 'company-dashboard',
+  COMMERCIAL: 'commercial',
   DEVICE_PORTFOLIO: 'company-products',
   MILESTONES: 'company-milestones',
-  COMPLIANCE_INSTANCES: 'compliance-instances',
   OPERATIONS: 'operations',
-  COMMERCIAL: 'commercial',
+  HUMAN_RESOURCES: 'human-resources',
+  QUALITY_GOVERNANCE: 'quality-governance',
   POST_MARKET_SURVEILLANCE: 'company-pms',
-  COMMUNICATIONS: 'communications',
   AUDIT_LOG: 'audit-log',
+  COMPLIANCE_INSTANCES: 'compliance-instances',
 } as const;
 
 // Module display names
 export const MODULE_DISPLAY_NAMES: Record<string, string> = {
   [COMPANY_MODULES.DASHBOARD]: 'Dashboard',
-  [COMPANY_MODULES.DEVICE_PORTFOLIO]: 'Device Portfolio',
-  [COMPANY_MODULES.MILESTONES]: 'Milestones',
-  [COMPANY_MODULES.COMPLIANCE_INSTANCES]: 'Compliance Instances',
+  [COMPANY_MODULES.COMMERCIAL]: 'Commercial Intelligence',
+  [COMPANY_MODULES.DEVICE_PORTFOLIO]: 'Portfolio Management',
+  [COMPANY_MODULES.MILESTONES]: 'Enterprise Roadmap',
   [COMPANY_MODULES.OPERATIONS]: 'Operations',
-  [COMPANY_MODULES.COMMERCIAL]: 'Commercial',
+  [COMPANY_MODULES.HUMAN_RESOURCES]: 'Human Resources',
+  [COMPANY_MODULES.QUALITY_GOVERNANCE]: 'Quality Governance',
   [COMPANY_MODULES.POST_MARKET_SURVEILLANCE]: 'Post-Market Surveillance',
-  [COMPANY_MODULES.COMMUNICATIONS]: 'Communication',
   [COMPANY_MODULES.AUDIT_LOG]: 'Audit Log',
+  [COMPANY_MODULES.COMPLIANCE_INSTANCES]: 'Enterprise Compliance',
 };
 
 // All available modules as an array

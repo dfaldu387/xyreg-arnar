@@ -22,7 +22,7 @@ export function SidebarDocumentControl({
   if (!documentControl) return null;
 
   const roleFields = [
-    { key: 'preparedBy', label: 'Prepared By', value: documentControl.preparedBy?.name },
+    { key: 'preparedBy', label: 'Issued By', value: documentControl.preparedBy?.name },
     { key: 'reviewedBy', label: 'Reviewed By', value: documentControl.reviewedBy?.name },
     { key: 'approvedBy', label: 'Approved By', value: documentControl.approvedBy?.name },
   ];

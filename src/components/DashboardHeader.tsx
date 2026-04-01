@@ -8,6 +8,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { useState } from "react";
 import { AddClientDialog } from "@/components/AddClientDialog";
 import { useTranslation } from "@/hooks/useTranslation";
+import { useEffectiveUserRole } from "@/hooks/useEffectiveUserRole";
 
 interface DashboardHeaderProps {
   refreshClients?: () => void;
@@ -30,6 +31,8 @@ export function DashboardHeader({
 }: DashboardHeaderProps) {
   const navigate = useNavigate();
   const { lang } = useTranslation();
+  const { effectiveRole } = useEffectiveUserRole();
+  const canAddClient = effectiveRole === 'admin' || effectiveRole === 'super_admin' || effectiveRole === 'consultant';
 
   const handleSearchChange = (value: string) => {
     if (disabled) return;
@@ -59,7 +62,7 @@ export function DashboardHeader({
               <Bell className="h-4 w-4" />
               <Badge className="absolute -top-1 -right-1 h-5 w-5 p-0 flex items-center justify-center">3</Badge>
             </Button> */}
-            <AddClientDialog onClientAdded={refreshClients} disabled={disabled} />
+            {canAddClient && <AddClientDialog onClientAdded={refreshClients} disabled={disabled} />}
           </div>
         </div>
 

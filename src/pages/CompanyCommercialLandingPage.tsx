@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { ConsistentPageHeader } from '@/components/layout/ConsistentPageHeader';
 import { HelpTooltip } from '@/components/product/device/sections/HelpTooltip';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Globe, BarChart3, Brain, Calculator, DollarSign, Map, FileKey } from 'lucide-react';
+import { Globe, BarChart3, Brain, Calculator, DollarSign, Banknote } from 'lucide-react';
 
 export default function CompanyCommercialLandingPage() {
   const { companyName } = useParams<{ companyName: string }>();
@@ -49,6 +49,27 @@ export default function CompanyCommercialLandingPage() {
 
   const commercialTabs = [
     {
+      id: "strategic-blueprint",
+      label: "Strategic Blueprint",
+      icon: Brain,
+      description: "High-level strategic roadmap aligning product development with business objectives",
+      color: "from-rose-500 to-red-600"
+    },
+    {
+      id: "business-canvas",
+      label: "Business Canvas",
+      icon: Globe,
+      description: "Business Model Canvas for structured value proposition and go-to-market analysis",
+      color: "from-violet-500 to-purple-600"
+    },
+    {
+      id: "feasibility-studies",
+      label: "Viability Studies",
+      icon: Calculator,
+      description: "Define budgets and revenue projections for product bundles",
+      color: "from-cyan-500 to-teal-600"
+    },
+    {
       id: "market-analysis",
       label: "Market Analysis",
       icon: BarChart3,
@@ -70,20 +91,6 @@ export default function CompanyCommercialLandingPage() {
       color: "from-purple-500 to-pink-600"
     },
     {
-      id: "feasibility-studies",
-      label: "Viability Studies",
-      icon: Calculator,
-      description: "Define budgets and revenue projections for product bundles",
-      color: "from-cyan-500 to-teal-600"
-    },
-    {
-      id: "venture-blueprint",
-      label: "Venture Blueprint",
-      icon: Map,
-      description: "Strategic venture planning and roadmap development",
-      color: "from-teal-500 to-cyan-600"
-    },
-    {
       id: "reimbursement-strategy",
       label: "Global Reimbursement Strategy",
       icon: Globe,
@@ -96,6 +103,13 @@ export default function CompanyCommercialLandingPage() {
       icon: Globe,
       description: "Country-specific market entry strategies, registration pathways, and regulatory requirements by geography",
       color: "from-indigo-500 to-blue-600"
+    },
+    {
+      id: "funding-grants",
+      label: "Funding & Grants Navigator",
+      icon: Banknote,
+      description: "Assess eligibility, track applications, and manage documentation for EU, US, and national funding programmes",
+      color: "from-emerald-500 to-teal-600"
     }
   ];
 

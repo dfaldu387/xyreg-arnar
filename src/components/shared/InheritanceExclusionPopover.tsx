@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useCallback, useEffect } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useIsFetching } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useCompanyDeviceCategories } from "@/hooks/useCompanyDeviceCategories";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -39,6 +39,9 @@ interface InheritanceExclusionPopoverProps {
   defaultCurrentDeviceOnly?: boolean;
   /** When set, only show these product IDs in the popover (family members only) */
   familyProductIds?: string[];
+  /** When set, checkboxes are auto-checked for these product IDs (devices with matching values).
+   *  Checking a new device and clicking Apply will copy the current device's value to it. */
+  valueMatchingProductIds?: string[];
 }
 
 export function InheritanceExclusionPopover({
@@ -53,6 +56,7 @@ export function InheritanceExclusionPopover({
   parentExcludedProductIds,
   defaultCurrentDeviceOnly = false,
   familyProductIds,
+  valueMatchingProductIds,
 }: InheritanceExclusionPopoverProps) {
   const [categoryFilter, setCategoryFilter] = useState<string>("");
   const [searchQuery, setSearchQuery] = useState<string>("");
@@ -64,24 +68,12 @@ export function InheritanceExclusionPopover({
   const [pendingNewDeviceNames, setPendingNewDeviceNames] = useState<string[]>([]);
   const [pendingNewCategoryNames, setPendingNewCategoryNames] = useState<string[]>([]);
 
+  // Detect when family-products data is being refetched (value recalculation after Apply)
+  const familyProductsFetching = useIsFetching({ queryKey: ['family-products-scope-sync'] });
+  const isRecalculating = !!valueMatchingProductIds && familyProductsFetching > 0;
+
   // Draft state — local copy that only gets committed on Apply
   const [draftScope, setDraftScope] = useState<ItemExclusionScope>(exclusionScope);
-
-  // Reset draft when popover opens or external scope changes while closed
-  useEffect(() => {
-    if (!isOpen) {
-      setDraftScope(exclusionScope);
-    }
-  }, [exclusionScope, isOpen]);
-
-  const handleOpenChange = (open: boolean) => {
-    if (open) {
-      setDraftScope(exclusionScope);
-      setCategoryFilter("");
-      setSearchQuery("");
-    }
-    setIsOpen(open);
-  };
 
   // Fetch all products
   const { data: allProducts = [] } = useQuery({
@@ -108,6 +100,37 @@ export function InheritanceExclusionPopover({
 
   const { categories, loading: categoriesLoading } = useCompanyDeviceCategories(companyId);
 
+  // When value matching is provided, derive excluded IDs from non-matching products
+  const valueMatchExcludedIds = useMemo(() => {
+    if (!valueMatchingProductIds) return undefined;
+    const matchSet = new Set(valueMatchingProductIds);
+    return products.filter(p => !matchSet.has(p.id)).map(p => p.id);
+  }, [valueMatchingProductIds, products]);
+
+  // Compute the effective initial scope: value-matching overrides exclusion scope
+  const effectiveInitialScope = useMemo((): ItemExclusionScope => {
+    if (valueMatchExcludedIds) {
+      return { excludedProductIds: valueMatchExcludedIds, excludedCategories: [] };
+    }
+    return exclusionScope;
+  }, [valueMatchExcludedIds, exclusionScope]);
+
+  // Reset draft when popover opens or external scope changes while closed
+  useEffect(() => {
+    if (!isOpen) {
+      setDraftScope(effectiveInitialScope);
+    }
+  }, [effectiveInitialScope, isOpen]);
+
+  const handleOpenChange = (open: boolean) => {
+    if (open) {
+      setDraftScope(effectiveInitialScope);
+      setCategoryFilter("");
+      setSearchQuery("");
+    }
+    setIsOpen(open);
+  };
+
   // When no scope is set (initial state) and defaultCurrentDeviceOnly is true,
   // treat all other products as excluded (only current device included).
   // Otherwise, default to all devices included.
@@ -127,13 +150,15 @@ export function InheritanceExclusionPopover({
   }, [draftScope.excludedProductIds, defaultExcludedIds, productIdSet]);
   const draftExcludedCats = draftScope.excludedCategories || [];
 
-  // Use committed scope for badge — filter to only IDs in current product list
-  // (excludedProductIds may contain stale IDs from products outside the family)
+  // Use committed scope for badge — when value matching is active, use it as source of truth
   const committedExcludedIds = useMemo(() => {
+    if (valueMatchExcludedIds) {
+      return valueMatchExcludedIds.filter(id => productIdSet.has(id));
+    }
     const raw = exclusionScope.excludedProductIds ?? defaultExcludedIds ?? [];
     return raw.filter(id => productIdSet.has(id));
-  }, [exclusionScope.excludedProductIds, defaultExcludedIds, productIdSet]);
-  const committedExcludedCats = exclusionScope.excludedCategories || [];
+  }, [valueMatchExcludedIds, exclusionScope.excludedProductIds, defaultExcludedIds, productIdSet]);
+  const committedExcludedCats = valueMatchExcludedIds ? [] : (exclusionScope.excludedCategories || []);
 
   const getCategoryProductIds = useMemo(() => {
     return (catName: string) => {
@@ -197,6 +222,10 @@ export function InheritanceExclusionPopover({
   }, [committedExcludedCats, draftExcludedCats]);
 
   const hasNewInclusions = newlyIncludedProducts.length > 0 || newlyIncludedCategories.length > 0;
+
+  // At least one device must be selected
+  const draftIncludedCount = products.length - draftExcludedIds.length;
+  const noneSelected = draftIncludedCount < 1;
 
   // Names of newly included devices for the warning message
   const newlyIncludedProductNames = useMemo(() => {
@@ -262,18 +291,28 @@ export function InheritanceExclusionPopover({
   // --- Apply: commit draft to parent + DB ---
 
   const doApply = useCallback(async (scopeOverride?: ItemExclusionScope) => {
+    // Close popover immediately so badge spinner is visible during processing
+    const source = scopeOverride || draftScope;
+    const scopeToApply: ItemExclusionScope = { ...source, isManualGroup: true };
+
+    const wasExcluded = committedExcludedIds.includes(currentProductId);
+    const nowIncluded = !(scopeToApply.excludedProductIds || []).includes(currentProductId);
+    const currentDeviceAdded = wasExcluded && nowIncluded;
+
+    setIsOpen(false);
+    setPendingApplyScope(null);
     setIsLoading(true);
+
     try {
-      // Use the override (from warning confirmation) or the current draft
-      const source = scopeOverride || draftScope;
-      const scopeToApply: ItemExclusionScope = { ...source, isManualGroup: true };
       await onScopeChange(itemId, scopeToApply);
-      setIsOpen(false);
-      setPendingApplyScope(null);
+
+      if (currentDeviceAdded) {
+        window.location.reload();
+      }
     } finally {
       setIsLoading(false);
     }
-  }, [onScopeChange, itemId, draftScope]);
+  }, [onScopeChange, itemId, draftScope, currentProductId, products]);
 
   const handleApply = useCallback(() => {
     if (hasNewInclusions) {
@@ -303,8 +342,15 @@ export function InheritanceExclusionPopover({
   return (
     <Popover open={isOpen} onOpenChange={handleOpenChange}>
       <PopoverTrigger asChild onClick={(e) => e.stopPropagation()}>
-        <Badge variant="outline" className={`text-xs ${badgeClass}`}>
-          {label}
+        <Badge variant="outline" className={`text-xs ${isLoading ? 'cursor-wait border-blue-300 bg-blue-50 text-blue-700' : badgeClass}`}>
+          {isLoading ? (
+            <Loader2 className="h-3 w-3 animate-spin" />
+          ) : isRecalculating ? (
+            <span className="flex items-center gap-1">
+              <Loader2 className="h-3 w-3 animate-spin" />
+              {label}
+            </span>
+          ) : label}
         </Badge>
       </PopoverTrigger>
       <PopoverContent
@@ -377,6 +423,14 @@ export function InheritanceExclusionPopover({
           </>
         ) : null}
 
+        {/* Recalculating indicator after Apply */}
+        {isRecalculating && (
+          <div className="flex items-center gap-2 py-1.5 px-2 rounded-md bg-blue-50 border border-blue-200">
+            <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-600" />
+            <span className="text-xs text-blue-700">Updating device values...</span>
+          </div>
+        )}
+
         {/* Device checkboxes */}
         <div className="space-y-1">
           <Label className="text-xs text-muted-foreground">Devices</Label>
@@ -422,11 +476,16 @@ export function InheritanceExclusionPopover({
           </div>
         </div>
 
+        {/* Validation: at least one device must be selected */}
+        {noneSelected && (
+          <p className="text-xs text-destructive">At least one device must be selected.</p>
+        )}
+
         {/* Apply button */}
         <Button
           size="sm"
           className="w-full h-7 text-xs"
-          disabled={!hasPendingChanges || isLoading}
+          disabled={!hasPendingChanges || isLoading || noneSelected}
           onClick={handleApply}
         >
           {isLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : null}
@@ -436,7 +495,7 @@ export function InheritanceExclusionPopover({
 
       {/* Overwrite warning when newly including devices/categories */}
       <AlertDialog open={showOverwriteWarning} onOpenChange={setShowOverwriteWarning}>
-        <AlertDialogContent>
+        <AlertDialogContent onClick={(e) => e.stopPropagation()}>
           <AlertDialogHeader>
             <AlertDialogTitle className="flex items-center gap-2">
               <AlertTriangle className="h-5 w-5 text-amber-500" />
@@ -475,8 +534,8 @@ export function InheritanceExclusionPopover({
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => { setPendingApplyScope(null); setPendingNewDeviceNames([]); setPendingNewCategoryNames([]); }}>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={() => doApply(pendingApplyScope || undefined)}>
+            <AlertDialogCancel onClick={(e) => { e.stopPropagation(); setPendingApplyScope(null); setPendingNewDeviceNames([]); setPendingNewCategoryNames([]); }}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={(e) => { e.stopPropagation(); doApply(pendingApplyScope || undefined); }}>
               Continue
             </AlertDialogAction>
           </AlertDialogFooter>

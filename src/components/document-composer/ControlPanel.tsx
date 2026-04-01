@@ -20,8 +20,9 @@ import { DocFileUpload } from './DocFileUpload';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '../ui/dialog';
 import { useTranslation } from '@/hooks/useTranslation';
 import { SidebarDocumentControl } from './SidebarDocumentControl';
+import { VVPlanSidebarCard } from './VVPlanSidebarCard';
 
-interface ControlPanelProps {
+export interface ControlPanelProps {
   productContext?: ProductContext;
   documentType?: string;
   className?: string;
@@ -379,6 +380,11 @@ export function ControlPanel({
               </div>
             </CardContent>
           </Card>
+        )}
+
+        {/* V&V Plan Details Card - shown when editing a V&V Plan */}
+        {template?.metadata?.source === 'vv-plan' && (
+          <VVPlanSidebarCard metadata={template.metadata} />
         )}
 
         {/* Reference Documents */}

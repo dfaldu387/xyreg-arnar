@@ -61,10 +61,10 @@ serve(async (req) => {
   try {
     console.log('[ai-requirement-specs-generator] Starting requirement specifications generation');
     
-    const requestBody: RequirementSpecsSuggestionRequest = await req.json();
+    const requestBody = await req.json();
     console.log('[ai-requirement-specs-generator] Request body:', JSON.stringify(requestBody));
 
-    const { companyId, productData, userNeeds } = requestBody;
+    const { companyId, productData, userNeeds, existingItems } = requestBody;
 
     if (!companyId || !productData || !userNeeds?.length) {
       return new Response(JSON.stringify({
@@ -132,8 +132,12 @@ serve(async (req) => {
     const apiKey = decryptApiKey(apiKeyData.encrypted_key);
     console.log('[ai-requirement-specs-generator] API key found, length:', apiKey.length, 'starts with:', apiKey.substring(0, 6));
 
+    const existingItemsSection = existingItems && existingItems.length > 0
+      ? `\n\nEXISTING REQUIREMENTS (DO NOT suggest these again or anything semantically equivalent):\n${existingItems.map((item: string) => `- "${item}"`).join('\n')}\n\nGenerate ONLY NEW requirements that are substantially different from the above.`
+      : '';
+
     // Simplified prompt similar to user needs
-    const prompt = `You are a medical device expert tasked with generating requirement specifications for a medical device. Based on the product and user needs provided, generate specific, testable requirements.
+    const prompt = `You are a medical device expert tasked with generating requirement specifications for a medical device. Based on the product and user needs provided, generate specific, testable requirements.${existingItemsSection}
 
 Product Information:
 - Product Name: ${productData.product_name || 'Not specified'}

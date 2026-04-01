@@ -22,7 +22,7 @@ export function ReturnToGenesisButton() {
   const { currentCompany } = useSidebarData();
 
   const isInApp = location.pathname.startsWith('/app');
-  const isGenesisPlan = !isSubscriptionLoading && (!planName || planName.toLowerCase() === 'genesis');
+  const isGenesisPlan = !isSubscriptionLoading && planName && planName.toLowerCase() === 'genesis';
 
   // Extract productId from URL path (/app/product/:productId/...)
   const productIdFromUrl = location.pathname.match(/\/app\/product\/([^/]+)/)?.[1] || null;

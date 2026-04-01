@@ -674,6 +674,11 @@ export function DocumentListView({
       cell: ({ row }) => {
         const doc = row.original;
         const isProcessing = processingDocuments.has(doc.id);
+        const docExcluded = isDocExcluded?.(doc.id) ?? false;
+        const isShared = !!(doc as any)._isSharedFromDevice;
+        const isNotInteractable = docExcluded || isShared;
+
+        if (isNotInteractable) return null;
 
         return (
           <div className="flex items-center justify-end gap-1 max-w-[180px]">
@@ -684,7 +689,7 @@ export function DocumentListView({
                 size="sm"
                 onClick={() => onCreateInStudio(doc)}
                 disabled={isProcessing || disabled}
-                title="Create Document in Document Studio"
+                title={doc.document_reference?.startsWith('DS-') ? "Edit Document" : "Create Document"}
               >
                 <FileEdit className="h-4 w-4 text-primary" />
               </Button>
@@ -934,6 +939,7 @@ export function DocumentListView({
         documentId={sendReviewDoc.id}
         documentName={sendReviewDoc.name}
         companyId={companyId}
+        productId={productId}
         existingGroupIds={[]}
       />
     )}

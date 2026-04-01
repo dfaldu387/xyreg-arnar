@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
@@ -7,7 +7,7 @@ import { Loader2, GraduationCap, Lock, AlertTriangle } from "lucide-react";
 import { SoftwareClassificationSection } from '../../sections/SoftwareClassificationSection';
 import { InheritanceExclusionPopover } from '@/components/shared/InheritanceExclusionPopover';
 import { GovernanceBookmark } from '@/components/ui/GovernanceBookmark';
-
+import { resolveFieldValue, normalizeScopeValue } from '@/hooks/useAutoSyncScope';
 
 import { HelpTooltip } from '../../sections/HelpTooltip';
 import { DeviceCharacteristics } from '@/types/client.d';
@@ -61,6 +61,8 @@ interface TechnicalSpecsTabProps {
   };
   autoSyncScope?: (fieldKey: string, newValue: any) => void;
   familyProductIds?: string[];
+  familyProducts?: any[];
+  onScopeChangeWithPropagation?: (fieldKey: string, oldScope: import('@/hooks/useInheritanceExclusion').ItemExclusionScope, newScope: import('@/hooks/useInheritanceExclusion').ItemExclusionScope) => Promise<void>;
   // IVD-specific (conditional)
   primaryRegulatoryType?: string;
   specimenType?: string;
@@ -124,6 +126,14 @@ function extractSectionValue(sectionKey: string, ktc: any): any {
       return { energyTransferDirection: ktc.energyTransferDirection ?? null, energyTransferType: ktc.energyTransferType ?? null };
     case 'technical_connectivity':
       return { hasBluetooth: ktc.hasBluetooth ?? false, hasWifi: ktc.hasWifi ?? false, hasCellular: ktc.hasCellular ?? false, hasNFC: ktc.hasNFC ?? false, hasUSB: ktc.hasUSB ?? false };
+    case 'technical_aiMl':
+      return { hasImageAnalysis: ktc.hasImageAnalysis ?? false, hasPredictiveAnalytics: ktc.hasPredictiveAnalytics ?? false, hasNaturalLanguageProcessing: ktc.hasNaturalLanguageProcessing ?? false };
+    case 'technical_environmentalConditions':
+      return { transportTempRange: ktc.transportTempRange ?? null, transportHumidity: ktc.transportHumidity ?? null, transportPressure: ktc.transportPressure ?? null, operatingTempRange: ktc.operatingTempRange ?? null, operatingHumidity: ktc.operatingHumidity ?? null, operatingPressure: ktc.operatingPressure ?? null };
+    case 'technical_electricalCharacteristics':
+      return { ratedVoltage: ktc.ratedVoltage ?? null, ratedFrequency: ktc.ratedFrequency ?? null, ratedCurrentPower: ktc.ratedCurrentPower ?? null, protectionClass: ktc.protectionClass ?? null };
+    case 'technical_physicalClassification':
+      return { appliedPartType: ktc.appliedPartType ?? null, ipWaterRating: ktc.ipWaterRating ?? null, portability: ktc.portability ?? null, modeOfOperation: ktc.modeOfOperation ?? null };
     default:
       return null;
   }
@@ -159,6 +169,8 @@ export function TechnicalSpecsTab({
   intendedUse,
   autoSyncScope,
   familyProductIds,
+  familyProducts,
+  onScopeChangeWithPropagation,
 }: TechnicalSpecsTabProps) {
   const { lang } = useTranslation();
   const [savingField, setSavingField] = useState<string | null>(null);
@@ -208,7 +220,7 @@ export function TechnicalSpecsTab({
     // Determine which section-level scope key this field belongs to
     const sectionKey = getSectionKeyForField(field);
     if (sectionKey) {
-      autoSyncScope?.(sectionKey, extractSectionValue(sectionKey, updated));
+      // Value propagation now handled via popover Apply
     }
     setTimeout(() => setSavingField(null), 500);
   };
@@ -223,8 +235,7 @@ export function TechnicalSpecsTab({
     if (onKeyTechnologyCharacteristicsChange) {
       onKeyTechnologyCharacteristicsChange(updatedCharacteristics);
     }
-    // Auto-sync the system architecture scope (batch is used by SoftwareClassificationSection)
-    autoSyncScope?.('technical_systemArchitecture', extractSectionValue('technical_systemArchitecture', updatedCharacteristics));
+    // Value propagation now handled via popover Apply
   };
 
   const handleSterilityChange = (field: string, value: boolean) => {
@@ -260,7 +271,7 @@ export function TechnicalSpecsTab({
     if (onKeyTechnologyCharacteristicsChange) {
       onKeyTechnologyCharacteristicsChange(updatedCharacteristics);
     }
-    autoSyncScope?.('technical_sterility', extractSectionValue('technical_sterility', updatedCharacteristics));
+    // Value propagation now handled via popover Apply
   };
 
   const handleOverrideConfirm = () => {
@@ -276,7 +287,6 @@ export function TechnicalSpecsTab({
   const handleTrlChange = (value: string) => {
     const numValue = value === 'none' ? null : parseInt(value, 10);
     onTrlLevelChange?.(numValue);
-    autoSyncScope?.('technical_trlLevel', numValue);
   };
 
   // TRL is complete when a level (3-8) is selected
@@ -318,7 +328,44 @@ export function TechnicalSpecsTab({
     return <GovernanceBookmark status={null} />;
   };
 
-  const renderScopeAndGov = (fieldKey: string) => (
+  // --- Value-matching helpers ---
+  const getMatchingProductIds = useCallback((fieldKey: string, currentValue: any): string[] | undefined => {
+    if (!familyProducts?.length || !productId) return undefined;
+    const currentNormalized = JSON.stringify(normalizeScopeValue(fieldKey, currentValue));
+    return familyProducts
+      .filter(p => {
+        if (p.id === productId) return true;
+        return JSON.stringify(normalizeScopeValue(fieldKey, resolveFieldValue(p, fieldKey))) === currentNormalized;
+      })
+      .map(p => p.id);
+  }, [familyProducts, productId]);
+
+  const getMatchSummary = useCallback((fieldKey: string, currentValue: any) => {
+    const matchIds = getMatchingProductIds(fieldKey, currentValue);
+    if (!matchIds || !familyProducts?.length) return undefined;
+    return `${matchIds.length}/${familyProducts.length}`;
+  }, [getMatchingProductIds, familyProducts]);
+
+  const createValueMatchScopeChange = useCallback((fieldKey: string, currentValue: any) => {
+    return (id: string, newScope: import('@/hooks/useInheritanceExclusion').ItemExclusionScope) => {
+      if (onScopeChangeWithPropagation && familyProducts?.length) {
+        const matchIds = getMatchingProductIds(fieldKey, currentValue);
+        const nonMatchingIds = matchIds
+          ? (familyProductIds || []).filter(pid => !matchIds.includes(pid))
+          : [];
+        const oldScope: import('@/hooks/useInheritanceExclusion').ItemExclusionScope = {
+          excludedProductIds: nonMatchingIds,
+          excludedCategories: [],
+          isManualGroup: true,
+        };
+        return onScopeChangeWithPropagation(id, oldScope, newScope);
+      } else if (classificationExclusion) {
+        return classificationExclusion.setExclusionScope(id, newScope);
+      }
+    };
+  }, [onScopeChangeWithPropagation, familyProducts, getMatchingProductIds, familyProductIds, classificationExclusion]);
+
+  const renderScopeAndGov = (fieldKey: string, currentValue?: any) => (
     <div className="flex items-center gap-0.5 ml-auto">
       {belongsToFamily && companyId && productId && classificationExclusion ? (
         <InheritanceExclusionPopover
@@ -326,9 +373,11 @@ export function TechnicalSpecsTab({
           currentProductId={productId}
           itemId={fieldKey}
           exclusionScope={classificationExclusion.getExclusionScope(fieldKey)}
-          onScopeChange={(id, scope) => classificationExclusion.setExclusionScope(id, scope)}
+          onScopeChange={createValueMatchScopeChange(fieldKey, currentValue)}
           defaultCurrentDeviceOnly
           familyProductIds={familyProductIds}
+          summaryText={getMatchSummary(fieldKey, currentValue)}
+          valueMatchingProductIds={getMatchingProductIds(fieldKey, currentValue)}
         />
       ) : null}
       {getGovIcon(fieldKey)}
@@ -367,7 +416,7 @@ export function TechnicalSpecsTab({
           <GraduationCap className={`h-5 w-5 ${showTrlBorder ? (isTrlComplete ? 'text-emerald-600' : 'text-amber-600') : 'text-muted-foreground'}`} />
           <Label className="text-sm font-medium">{lang('deviceBasics.technical.trlLabel')}</Label>
           <HelpTooltip content={lang('deviceBasics.technical.trlTooltip')} />
-          {renderScopeAndGov('technical_trlLevel')}
+          {renderScopeAndGov('technical_trlLevel', trlLevel)}
         </div>
         {wrapWithOverlay('technical_trlLevel', (
           <>
@@ -404,7 +453,7 @@ export function TechnicalSpecsTab({
       <div>
         <div className="flex items-center gap-1 mb-3">
           <Label className="text-sm font-medium">System Architecture</Label>
-          {renderScopeAndGov('technical_systemArchitecture')}
+          {renderScopeAndGov('technical_systemArchitecture', extractSectionValue('technical_systemArchitecture', keyTechnologyCharacteristics))}
         </div>
         {wrapWithOverlay('technical_systemArchitecture', (
           <SoftwareClassificationSection
@@ -422,7 +471,7 @@ export function TechnicalSpecsTab({
       <div>
         <div className="flex items-center gap-1 mb-3">
           <Label className="text-sm font-medium">{lang('deviceBasics.technical.keyTechCharLabel')}</Label>
-          {renderScopeAndGov('technical_keyTechCharacteristics')}
+          {renderScopeAndGov('technical_keyTechCharacteristics', extractSectionValue('technical_keyTechCharacteristics', keyTechnologyCharacteristics))}
         </div>
         {wrapWithOverlay('technical_keyTechCharacteristics', (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -536,7 +585,7 @@ export function TechnicalSpecsTab({
       <div>
         <div className="flex items-center gap-1 mb-3">
           <Label className="text-sm font-medium">{lang('deviceBasics.technical.sterilityLabel')}</Label>
-          {renderScopeAndGov('technical_sterility')}
+          {renderScopeAndGov('technical_sterility', extractSectionValue('technical_sterility', keyTechnologyCharacteristics))}
         </div>
         {wrapWithOverlay('technical_sterility', (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -590,7 +639,7 @@ export function TechnicalSpecsTab({
       <div>
         <div className="flex items-center gap-1 mb-3">
           <Label className="text-sm font-medium">{lang('deviceBasics.technical.powerSourceLabel')}</Label>
-          {renderScopeAndGov('technical_powerSource')}
+          {renderScopeAndGov('technical_powerSource', extractSectionValue('technical_powerSource', keyTechnologyCharacteristics))}
         </div>
         {wrapWithOverlay('technical_powerSource', (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -655,7 +704,7 @@ export function TechnicalSpecsTab({
         <div className="flex items-center gap-1 mb-3">
           <Label className="text-sm font-medium">Energy Transfer</Label>
           <HelpTooltip content="Whether the device transfers energy to or from the patient, as defined per IEC 60601-1." />
-          {renderScopeAndGov('technical_energyTransfer')}
+          {renderScopeAndGov('technical_energyTransfer', extractSectionValue('technical_energyTransfer', keyTechnologyCharacteristics))}
         </div>
         {wrapWithOverlay('technical_energyTransfer', (
           <div className="space-y-3">
@@ -712,7 +761,7 @@ export function TechnicalSpecsTab({
       <div>
         <div className="flex items-center gap-1 mb-3">
           <Label className="text-sm font-medium">{lang('deviceBasics.technical.connectivityLabel')}</Label>
-          {renderScopeAndGov('technical_connectivity')}
+          {renderScopeAndGov('technical_connectivity', extractSectionValue('technical_connectivity', keyTechnologyCharacteristics))}
         </div>
         {wrapWithOverlay('technical_connectivity', (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -789,7 +838,7 @@ export function TechnicalSpecsTab({
       <div>
         <div className="flex items-center gap-1 mb-3">
           <Label className="text-sm font-medium">{lang('deviceBasics.technical.aiMlLabel')}</Label>
-          {renderScopeAndGov('technical_aiMl')}
+          {renderScopeAndGov('technical_aiMl', extractSectionValue('technical_aiMl', keyTechnologyCharacteristics))}
         </div>
         {wrapWithOverlay('technical_aiMl', (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -841,7 +890,7 @@ export function TechnicalSpecsTab({
         <div className="flex items-center gap-1 mb-3">
           <Label className="text-sm font-medium">Environmental Conditions</Label>
           <HelpTooltip content="Transport/storage and operating environmental conditions per IEC 60601-1 §4.10. These values are the Single Source of Truth for the IEC 60601-1 checklist." />
-          {renderScopeAndGov('technical_environmentalConditions')}
+          {renderScopeAndGov('technical_environmentalConditions', extractSectionValue('technical_environmentalConditions', keyTechnologyCharacteristics))}
         </div>
         {wrapWithOverlay('technical_environmentalConditions', (
           <div className="space-y-4">
@@ -924,7 +973,7 @@ export function TechnicalSpecsTab({
         <div className="flex items-center gap-1 mb-3">
           <Label className="text-sm font-medium">Electrical Characteristics</Label>
           <HelpTooltip content="Rated supply voltage, frequency, power and protection class per IEC 60601-1 §4.11 and §6.1." />
-          {renderScopeAndGov('technical_electricalCharacteristics')}
+          {renderScopeAndGov('technical_electricalCharacteristics', extractSectionValue('technical_electricalCharacteristics', keyTechnologyCharacteristics))}
         </div>
         {wrapWithOverlay('technical_electricalCharacteristics', (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -985,7 +1034,7 @@ export function TechnicalSpecsTab({
         <div className="flex items-center gap-1 mb-3">
           <Label className="text-sm font-medium">Physical Classification</Label>
           <HelpTooltip content="Applied part type, IP water rating, portability and mode of operation per IEC 60601-1 §6.2–6.6." />
-          {renderScopeAndGov('technical_physicalClassification')}
+          {renderScopeAndGov('technical_physicalClassification', extractSectionValue('technical_physicalClassification', keyTechnologyCharacteristics))}
         </div>
         {wrapWithOverlay('technical_physicalClassification', (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">

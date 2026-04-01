@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -27,6 +27,7 @@ import { useBaselineLockError, isBaselineLockError } from "@/hooks/useBaselineLo
 import { BaselineLockDialog } from "@/components/change-control/BaselineLockDialog";
 import { useVariantInheritance } from "@/hooks/useVariantInheritance";
 import { useInheritanceExclusion } from "@/hooks/useInheritanceExclusion";
+import { mirrorScopeToFamilyProducts } from "@/hooks/useAutoSyncScope";
 
 interface RiskManagementModuleProps {
   productId: string;
@@ -50,10 +51,12 @@ export function RiskManagementModule({ productId, companyId, disabled = false, i
   // Variant inheritance
   const { isVariant, masterDevice, masterProductData } = useVariantInheritance(productId);
   const {
+    scopes: hazardExclusionScopes,
     getExclusionScope,
     setExclusionScope,
     isFullyExcluded: isHazardExcluded,
     getExclusionSummary,
+    loaded: exclusionsLoaded,
   } = useInheritanceExclusion(productId, true, 'hazard_exclusion_scopes');
 
   // Fetch product details for Excel export filename
@@ -80,6 +83,22 @@ export function RiskManagementModule({ productId, companyId, disabled = false, i
     [familyProducts]
   );
 
+  // Handle hazard scope change: save scope on current product, mirror to family
+  const parentProductId = masterDevice?.id || null;
+  const handleHazardScopeChange = useCallback(async (
+    hazardId: string,
+    newScope: import("@/hooks/useInheritanceExclusion").ItemExclusionScope
+  ) => {
+    const scopeWithFlag = { ...newScope, isManualGroup: true };
+    await setExclusionScope(hazardId, scopeWithFlag);
+    if (!companyId || !productId) return;
+    await mirrorScopeToFamilyProducts(hazardId, scopeWithFlag, 'hazard_exclusion_scopes', productId, companyId, parentProductId);
+  }, [setExclusionScope, companyId, productId, parentProductId]);
+
+  // Shared hazards from other family devices that have scope including this device
+  const [sharedHazards, setSharedHazards] = useState<Hazard[]>([]);
+  const sharedHazardsLoadedRef = useRef(false);
+
   const {
     data: localHazards = [],
     isLoading,
@@ -90,6 +109,72 @@ export function RiskManagementModule({ productId, companyId, disabled = false, i
     staleTime: 0,
     refetchOnMount: 'always',
   });
+
+  // Fetch shared hazards from family devices that include this device in scope
+  useEffect(() => {
+    if (!productId || !companyId || !exclusionsLoaded || isLoading) {
+      if (!sharedHazardsLoadedRef.current) setSharedHazards([]);
+      return;
+    }
+
+    const loadSharedHazards = async () => {
+      // Find hazard IDs where current product is NOT excluded and scope was manually set
+      const eligibleHazardIds: string[] = [];
+      for (const [hazardId, scope] of Object.entries(hazardExclusionScopes)) {
+        if (!scope.isManualGroup) continue;
+        const excluded = scope.excludedProductIds || [];
+        if (!excluded.includes(productId)) {
+          eligibleHazardIds.push(hazardId);
+        }
+      }
+
+      if (eligibleHazardIds.length === 0) {
+        setSharedHazards([]);
+        return;
+      }
+
+      // Filter out hazards already owned by this product
+      const ownHazardIds = new Set(localHazards.map(h => h.id));
+      const missingHazardIds = eligibleHazardIds.filter(id => !ownHazardIds.has(id));
+
+      if (missingHazardIds.length === 0) {
+        setSharedHazards([]);
+        return;
+      }
+
+      // Fetch these hazards from the DB
+      const { data: fetchedHazards } = await supabase
+        .from('hazards')
+        .select('*')
+        .in('id', missingHazardIds);
+
+      if (!fetchedHazards || fetchedHazards.length === 0) {
+        setSharedHazards([]);
+        return;
+      }
+
+      // Get source product names
+      const sourceProductIds = [...new Set(fetchedHazards.map(h => h.product_id).filter(Boolean))];
+      const productNameMap = new Map<string, string>();
+      if (sourceProductIds.length > 0) {
+        const { data: products } = await supabase
+          .from('products')
+          .select('id, name')
+          .in('id', sourceProductIds);
+        (products || []).forEach((p: any) => productNameMap.set(p.id, p.name));
+      }
+
+      setSharedHazards(fetchedHazards.map((h: any) => ({
+        ...h,
+        _isSharedFromDevice: true,
+        _sourceProductId: h.product_id,
+        _sourceProductName: productNameMap.get(h.product_id) || 'Unknown Device',
+      })) as Hazard[]);
+      sharedHazardsLoadedRef.current = true;
+    };
+
+    loadSharedHazards();
+  }, [productId, companyId, exclusionsLoaded, isLoading, hazardExclusionScopes]);
 
   // Fetch master hazards if this is a variant
   const masterDeviceId = masterDevice?.id;
@@ -103,16 +188,20 @@ export function RiskManagementModule({ productId, companyId, disabled = false, i
     refetchOnMount: 'always',
   });
 
-  // Merge local + inherited hazards
+  // Merge local + inherited + shared hazards
   const hazards = useMemo(() => {
-    if (!isVariant || !masterHazards.length) return localHazards;
-    const inheritedHazards = masterHazards.map(h => ({
-      ...h,
-      isInheritedFromMaster: true,
-      masterProductName: masterDevice?.name || 'Master',
-    }));
-    return [...inheritedHazards, ...localHazards];
-  }, [localHazards, masterHazards, isVariant, masterDevice?.name]);
+    const inherited = (isVariant && masterHazards.length)
+      ? masterHazards.map(h => ({
+          ...h,
+          isInheritedFromMaster: true,
+          masterProductName: masterDevice?.name || 'Master',
+        }))
+      : [];
+    // Deduplicate shared hazards (exclude any already in local or inherited)
+    const existingIds = new Set([...localHazards.map(h => h.id), ...inherited.map(h => h.id)]);
+    const uniqueShared = sharedHazards.filter(h => !existingIds.has(h.id));
+    return [...inherited, ...localHazards, ...uniqueShared];
+  }, [localHazards, masterHazards, isVariant, masterDevice?.name, sharedHazards]);
 
   // Handle highlightHazard URL param — open the hazard for editing
   useEffect(() => {
@@ -449,7 +538,7 @@ export function RiskManagementModule({ productId, companyId, disabled = false, i
           belongsToFamily={belongsToFamily}
           isHazardExcluded={(hazardId) => isHazardExcluded(hazardId, productId)}
           getExclusionScope={getExclusionScope}
-          onSetExclusionScope={setExclusionScope}
+          onSetExclusionScope={handleHazardScopeChange}
           getExclusionSummary={getExclusionSummary}
           companyId={companyId}
           currentProductId={productId}

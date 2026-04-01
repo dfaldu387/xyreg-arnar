@@ -13,6 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 import { useNavigate } from 'react-router-dom';
+import { toast } from 'sonner';
 import { useConfirm } from '@/components/ui/confirm-dialog';
 import type { BomItem } from '@/types/bom';
 import {
@@ -100,7 +101,7 @@ export function DeviceComponentsSection({
 
   // DB hooks
   const { data: flatComponents, isLoading: dbLoading, tree } = useDeviceComponentTree(productId);
-
+console.log("[sdv vg] ", flatComponents);
   // Auto-flag sub_assembly when component has both parents and children
   useEffect(() => {
     if (editingComponent && parentIds.length > 0 && flatComponents) {
@@ -192,6 +193,16 @@ export function DeviceComponentsSection({
   const handleAddOrUpdate = async () => {
     if (!componentName.trim() || !productId || !companyId) return;
 
+    // Prevent duplicate component names within the same product
+    const trimmedName = componentName.trim();
+    const duplicate = flatComponents?.find(
+      c => c.name === trimmedName && c.id !== editingComponent?.id
+    );
+    if (duplicate) {
+      toast.error(`A component named "${trimmedName}" already exists. Please use a unique name.`);
+      return;
+    }
+
     if (editingComponent) {
       await updateComponent.mutateAsync({
         id: editingComponent.id,
@@ -270,24 +281,29 @@ export function DeviceComponentsSection({
   const createNodeDroppableId = (component: DbDeviceComponent, nodePath: string): string =>
     `comp-drop-id__${component.id}__node__${nodePath}`;
 
+  // Resolve scope by component ID, falling back to component name (backward compat with old data)
+  const resolveComponentScope = useCallback((comp: DbDeviceComponent): ItemExclusionScope => {
+    if (!getComponentExclusionScope) return {} as ItemExclusionScope;
+    const byId = getComponentExclusionScope(comp.id);
+    if (byId.excludedProductIds?.length || byId.excludedCategories?.length || (byId as any).isManualGroup) return byId;
+    return getComponentExclusionScope(comp.name);
+  }, [getComponentExclusionScope]);
+
   // Get parent's excluded product IDs for constraining child component scope
   const getParentExcludedIds = useCallback((comp: DbDeviceComponent): string[] | undefined => {
     if (!getComponentExclusionScope || !flatComponents) return undefined;
     if (!comp.parent_ids || comp.parent_ids.length === 0) return undefined; // root — no constraint
-    const parentNames = comp.parent_ids
-      .map(pid => flatComponents.find(c => c.id === pid)?.name)
-      .filter(Boolean) as string[];
-    if (parentNames.length === 0) return undefined;
-    // Union of all parent excluded IDs — device must be included in ALL parents
     const allExcluded = new Set<string>();
-    for (const pName of parentNames) {
-      const pScope = getComponentExclusionScope(pName);
+    for (const pid of comp.parent_ids) {
+      const parentComp = flatComponents.find(c => c.id === pid);
+      if (!parentComp) continue;
+      const pScope = resolveComponentScope(parentComp);
       for (const id of (pScope.excludedProductIds || [])) {
         allExcluded.add(id);
       }
     }
     return allExcluded.size > 0 ? [...allExcluded] : undefined;
-  }, [getComponentExclusionScope, flatComponents]);
+  }, [getComponentExclusionScope, flatComponents, resolveComponentScope]);
 
   // Render a single component row with indentation
   const renderComponent = (comp: DbDeviceComponent, depth: number = 0, nodePath: string = 'root-0') => {
@@ -296,7 +312,8 @@ export function DeviceComponentsSection({
     const bomCount = getLinkedBomCount(comp.id);
     const TypeIcon = COMPONENT_TYPE_OPTIONS.find(o => o.value === comp.component_type)?.icon || Cpu;
     const compDisplayId = `COMP-${String((componentIndexMap.get(comp.id) ?? 0) + 1).padStart(3, '0')}`;
-    const excluded = isComponentExcluded?.(comp.name, productId) ?? false;
+    const excludedById = isComponentExcluded?.(comp.id, productId) ?? false;
+    const excluded = excludedById || (isComponentExcluded?.(comp.name, productId) ?? false);
 
     // Option A: hide excluded components entirely on devices that don't have access
     if (excluded) return null;
@@ -366,8 +383,8 @@ export function DeviceComponentsSection({
               <InheritanceExclusionPopover
                 companyId={companyId}
                 currentProductId={productId}
-                itemId={comp.name}
-                exclusionScope={getComponentExclusionScope(comp.name)}
+                itemId={comp.id}
+                exclusionScope={resolveComponentScope(comp)}
                 onScopeChange={setComponentExclusionScope}
                 parentExcludedProductIds={getParentExcludedIds(comp)}
                 defaultCurrentDeviceOnly
@@ -656,7 +673,11 @@ export function DeviceComponentsSection({
         </Dialog>
       )}
       <CardContent className="space-y-3">
-        {!tree.length ? (
+        {loading ? (
+          <div className="flex justify-center py-8">
+            <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+          </div>
+        ) : !tree.length ? (
           <p className="text-muted-foreground text-center py-8">
             No components added yet. Click "Add Component" to define the physical or software components of your device.
           </p>

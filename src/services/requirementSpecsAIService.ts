@@ -27,6 +27,7 @@ export interface RequirementSpecsAIRequest {
     description: string;
   }>;
   selectedCategories: string[];
+  existingItems?: string[];
 }
 
 export interface RequirementSpecsAIResponse {

@@ -1168,11 +1168,14 @@ export function L2ContextualBar({
       'company-dashboard': COMPANY_MODULES.DASHBOARD,
       'company-products': COMPANY_MODULES.DEVICE_PORTFOLIO,
       'company-milestones': COMPANY_MODULES.MILESTONES,
+      'enterprise-compliance': COMPANY_MODULES.COMPLIANCE_INSTANCES,
       'compliance-instances': COMPANY_MODULES.COMPLIANCE_INSTANCES,
       'operations': COMPANY_MODULES.OPERATIONS,
       'commercial': COMPANY_MODULES.COMMERCIAL,
       'company-pms': COMPANY_MODULES.POST_MARKET_SURVEILLANCE,
-      'communications': COMPANY_MODULES.COMMUNICATIONS,
+      'quality-governance': COMPANY_MODULES.QUALITY_GOVERNANCE,
+      'company-hr': COMPANY_MODULES.HUMAN_RESOURCES,
+      'human-resources': COMPANY_MODULES.HUMAN_RESOURCES,
       'audit-log': COMPANY_MODULES.AUDIT_LOG,
     };
     return mapping[menuItemId] || null;
@@ -1371,11 +1374,12 @@ export function L2ContextualBar({
           }
         });
 
-        // Also add variants from allVariantsByBasicUDI that might not be in companyProducts
+        // Also add variants from allVariantsByBasicUDI that are in companyProducts (access-filtered)
+        const accessibleProductIds = new Set(companyProducts.map(p => p.id));
         masterFamilyMap.forEach((family) => {
           allDeviceInfo.forEach((device) => {
             if (device.parent_product_id === family.masterId && device.parent_relationship_type === 'variant') {
-              if (!family.devices.find((d: any) => d.id === device.id)) {
+              if (accessibleProductIds.has(device.id) && !family.devices.find((d: any) => d.id === device.id)) {
                 family.devices.push(device);
               }
             }

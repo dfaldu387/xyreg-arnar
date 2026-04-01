@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useRef, useState, useMemo } from 'react';
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { RichTextField } from "@/components/shared/RichTextField";
@@ -9,6 +9,8 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { FieldSuggestion, productDefinitionAIService } from '@/services/productDefinitionAIService';
 import { useTranslation } from '@/hooks/useTranslation';
 import { InheritanceExclusionPopover } from '@/components/shared/InheritanceExclusionPopover';
+import { resolveFieldValue, normalizeScopeValue } from '@/hooks/useAutoSyncScope';
+import type { ItemExclusionScope } from '@/hooks/useInheritanceExclusion';
 
 import { GovernanceBookmark } from '@/components/ui/GovernanceBookmark';
 import { useFieldGovernance } from '@/hooks/useFieldGovernance';
@@ -61,6 +63,8 @@ interface AdditionalInformationTabProps {
   };
   autoSyncScope?: (fieldKey: string, newValue: any) => void;
   familyProductIds?: string[];
+  familyProducts?: any[];
+  onScopeChangeWithPropagation?: (fieldKey: string, oldScope: ItemExclusionScope, newScope: ItemExclusionScope) => Promise<void>;
 }
 
 export function AdditionalInformationTab({
@@ -91,10 +95,39 @@ export function AdditionalInformationTab({
   fieldExclusion,
   autoSyncScope,
   familyProductIds,
+  familyProducts,
+  onScopeChangeWithPropagation,
 }: AdditionalInformationTabProps) {
   const { lang } = useTranslation();
   const [activeUserInstructionTab, setActiveUserInstructionTab] = useState('how_to_use');
   const { getSection } = useFieldGovernance(productId);
+
+  // Value-matching helpers for scope popovers
+  const getMatchingProductIds = useCallback((fieldKey: string, currentValue: any): string[] | undefined => {
+    if (!familyProducts?.length || !productId) return undefined;
+    const currentNormalized = JSON.stringify(normalizeScopeValue(fieldKey, currentValue));
+    return familyProducts
+      .filter(p => {
+        if (p.id === productId) return true;
+        return JSON.stringify(normalizeScopeValue(fieldKey, resolveFieldValue(p, fieldKey))) === currentNormalized;
+      })
+      .map(p => p.id);
+  }, [familyProducts, productId]);
+
+  const createValueMatchScopeChange = useCallback((fieldKey: string, currentValue: any) => {
+    return (id: string, newScope: ItemExclusionScope) => {
+      if (onScopeChangeWithPropagation && familyProducts?.length) {
+        const matchIds = getMatchingProductIds(fieldKey, currentValue);
+        const nonMatchingIds = matchIds
+          ? (familyProductIds || []).filter(pid => !matchIds.includes(pid))
+          : [];
+        const oldScope: ItemExclusionScope = { excludedProductIds: nonMatchingIds, excludedCategories: [], isManualGroup: true };
+        return onScopeChangeWithPropagation(id, oldScope, newScope);
+      } else if (fieldExclusion) {
+        return fieldExclusion.setExclusionScope(id, newScope);
+      }
+    };
+  }, [onScopeChangeWithPropagation, familyProducts, getMatchingProductIds, familyProductIds, fieldExclusion]);
 
   const getGovIcon = (sectionKey: string, label: string) => {
     const gov = getSection(sectionKey);
@@ -211,12 +244,8 @@ export function AdditionalInformationTab({
     } else {
       setLocalInstructions(prev => ({ ...prev, [field]: value }));
       handleInstructionChange(field, value);
-      // Propagate to scoped devices
-      if (syncKey && autoSyncScope) {
-        autoSyncScope(syncKey, value);
-      }
     }
-  }, [effectivePFMode, handleInstructionChange, autoSyncScope]);
+  }, [effectivePFMode, handleInstructionChange]);
 
   const handlePfBlur = useCallback(() => {
     if (effectivePFMode) {
@@ -253,21 +282,12 @@ export function AdditionalInformationTab({
       f.id === fieldId ? { ...f, [key]: val } : f
     );
     persistInstructions({ ...localInstructions, custom_fields: fields });
-    // Propagate custom field to scoped devices
-    const updatedField = fields.find(f => f.id === fieldId);
-    if (updatedField && autoSyncScope) {
-      autoSyncScope(`userInstructions_custom_${fieldId}`, updatedField);
-    }
-  }, [localInstructions, persistInstructions, autoSyncScope]);
+  }, [localInstructions, persistInstructions]);
 
   const handleRemoveCustomField = useCallback((fieldId: string) => {
     const fields = (localInstructions.custom_fields || []).filter(f => f.id !== fieldId);
     persistInstructions({ ...localInstructions, custom_fields: fields });
-    // Propagate deletion to scoped devices
-    if (autoSyncScope) {
-      autoSyncScope(`userInstructions_custom_${fieldId}`, null);
-    }
-  }, [localInstructions, persistInstructions, autoSyncScope]);
+  }, [localInstructions, persistInstructions]);
 
   // When a custom field's scope is toggled to PF on a variant, mirror it to the master
   const handleCustomScopeChange = useCallback(async (fieldKey: string, scope: 'individual' | 'product_family', fieldId: string) => {
@@ -394,9 +414,10 @@ export function AdditionalInformationTab({
                   currentProductId={productId}
                   itemId="userInstructions_howToUse"
                   exclusionScope={fieldExclusion.getExclusionScope('userInstructions_howToUse')}
-                  onScopeChange={(id, scope) => fieldExclusion.setExclusionScope(id, scope)}
+                  onScopeChange={createValueMatchScopeChange('userInstructions_howToUse', localInstructions.how_to_use || '')}
                   defaultCurrentDeviceOnly
                   familyProductIds={familyProductIds}
+                  valueMatchingProductIds={getMatchingProductIds('userInstructions_howToUse', localInstructions.how_to_use || '')}
                 />
               ) : null}
               {getGovIcon('user_instructions_how_to_use', 'How to Use')}
@@ -428,9 +449,10 @@ export function AdditionalInformationTab({
                   currentProductId={productId}
                   itemId="userInstructions_charging"
                   exclusionScope={fieldExclusion.getExclusionScope('userInstructions_charging')}
-                  onScopeChange={(id, scope) => fieldExclusion.setExclusionScope(id, scope)}
+                  onScopeChange={createValueMatchScopeChange('userInstructions_charging', localInstructions.charging || '')}
                   defaultCurrentDeviceOnly
                   familyProductIds={familyProductIds}
+                  valueMatchingProductIds={getMatchingProductIds('userInstructions_charging', localInstructions.charging || '')}
                 />
               ) : null}
               {getGovIcon('user_instructions_charging', 'Charging Instructions')}
@@ -462,9 +484,10 @@ export function AdditionalInformationTab({
                   currentProductId={productId}
                   itemId="userInstructions_maintenance"
                   exclusionScope={fieldExclusion.getExclusionScope('userInstructions_maintenance')}
-                  onScopeChange={(id, scope) => fieldExclusion.setExclusionScope(id, scope)}
+                  onScopeChange={createValueMatchScopeChange('userInstructions_maintenance', localInstructions.maintenance || '')}
                   defaultCurrentDeviceOnly
                   familyProductIds={familyProductIds}
+                  valueMatchingProductIds={getMatchingProductIds('userInstructions_maintenance', localInstructions.maintenance || '')}
                 />
               ) : null}
               {getGovIcon('user_instructions_maintenance', 'Maintenance Instructions')}
@@ -516,9 +539,10 @@ export function AdditionalInformationTab({
                       currentProductId={productId}
                       itemId={`userInstructions_custom_${field.id}`}
                       exclusionScope={fieldExclusion.getExclusionScope(`userInstructions_custom_${field.id}`)}
-                      onScopeChange={(id, scope) => fieldExclusion.setExclusionScope(id, scope)}
+                      onScopeChange={createValueMatchScopeChange(`userInstructions_custom_${field.id}`, field.value || '')}
                       defaultCurrentDeviceOnly
                       familyProductIds={familyProductIds}
+                      valueMatchingProductIds={getMatchingProductIds(`userInstructions_custom_${field.id}`, field.value || '')}
                     />
                   ) : null}
                   {getGovIcon(`user_instructions_custom_${field.id}`, field.label || 'Custom Field')}

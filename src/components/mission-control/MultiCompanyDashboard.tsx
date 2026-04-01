@@ -3,6 +3,7 @@ import { useCompanyRole } from "@/context/CompanyRoleContext";
 import { useDashboardContext } from "@/hooks/useDashboardContext";
 import { useMissionControl } from "@/context/MissionControlContext";
 import { useTranslation } from "@/hooks/useTranslation";
+import { hasEditorPrivileges } from "@/utils/roleUtils";
 import { CompanySelector } from "./CompanySelector";
 import { WidgetPalette } from "./WidgetPalette";
 import { SortableWidgetColumn } from "./SortableWidgetColumn";
@@ -51,7 +52,8 @@ export function MultiCompanyDashboard() {
   const currentCompanyRole = companyId ? companyRoles.find(r => r.companyId === companyId) : null;
   const userRole = currentCompanyRole?.role;
   const isAdmin = userRole === 'admin';
-  const filteredEnabledWidgets = enabledWidgets.filter(w => !w.adminOnly || isAdmin);
+  const canViewAdminWidgets = hasEditorPrivileges(userRole || 'viewer');
+  const filteredEnabledWidgets = enabledWidgets.filter(w => !w.adminOnly || canViewAdminWidgets);
 
   const renderWidget = (widgetId: string) => {
     switch (widgetId) {
@@ -64,7 +66,7 @@ export function MultiCompanyDashboard() {
       case 'document-status':
         return <DocumentStatusWidget key={widgetId} companyId={companyId} onRemove={() => removeWidget(widgetId)} />;
       case 'feedback-tracker':
-        return <FeedbackTrackerWidget key={widgetId} companyId={companyId} onRemove={() => removeWidget(widgetId)} />;
+        return <FeedbackTrackerWidget key={widgetId} companyId={companyId} onRemove={() => removeWidget(widgetId)} readOnly={!isAdmin} />;
       default:
         return null;
     }

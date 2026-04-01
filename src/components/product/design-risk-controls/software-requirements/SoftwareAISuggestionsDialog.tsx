@@ -11,6 +11,7 @@ import { requirementSpecificationsService } from "@/services/requirementSpecific
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useTranslation } from "@/hooks/useTranslation";
+import { deduplicateSuggestions } from '@/utils/deduplicateSuggestions';
 
 interface Suggestion {
   description: string;
@@ -48,8 +49,10 @@ export function SoftwareAISuggestionsDialog({
       // Fetch system requirements first
       const systemRequirements = await requirementSpecificationsService.getByProductAndType(productId, 'system');
       
+      // Fetch existing software requirements for deduplication
+      const existingSWReqs = await requirementSpecificationsService.getByProductAndType(productId, 'software');
+      const existingDescriptions = existingSWReqs.map(r => r.description).filter(Boolean);
       
-      // TODO: Get actual product data
       const productData = {};
       
       const response = await SoftwareRequirementsAIService.generateSoftwareRequirements({
@@ -60,14 +63,23 @@ export function SoftwareAISuggestionsDialog({
           requirement_id: sr.requirement_id,
           description: sr.description
         })),
-        selectedCategories: []
+        selectedCategories: [],
+        existingItems: existingDescriptions,
       });
-      return response;
+      return { response, existingDescriptions };
     },
-    onSuccess: (response) => {
+    onSuccess: ({ response, existingDescriptions }) => {
       if (response.success && response.suggestions) {
-        setSuggestions(response.suggestions);
-        toast.success(lang('softwareRequirements.suggestions.generateSuccess', { count: response.suggestions.length }));
+        const { filtered, removedCount } = deduplicateSuggestions(
+          response.suggestions,
+          existingDescriptions,
+          s => s.description
+        );
+        if (removedCount > 0) {
+          toast.info(`${removedCount} duplicate suggestion(s) filtered out`);
+        }
+        setSuggestions(filtered);
+        toast.success(lang('softwareRequirements.suggestions.generateSuccess', { count: filtered.length }));
       } else {
         toast.error(response.error || lang('softwareRequirements.suggestions.generateError'));
       }

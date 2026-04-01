@@ -1014,7 +1014,10 @@ export function CompanyDocumentManager({ companyId, disabled = false }: CompanyD
       <DocumentDraftDrawer
         open={!!draftDrawerDocument}
         onOpenChange={(open) => {
-          if (!open) setDraftDrawerDocument(null);
+          if (!open) {
+            setDraftDrawerDocument(null);
+            refetch();
+          }
         }}
         documentId={draftDrawerDocument?.id || ''}
         documentName={draftDrawerDocument?.name || ''}

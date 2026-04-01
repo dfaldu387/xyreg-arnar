@@ -98,14 +98,15 @@ const SuperAdminPlanPricing = lazy(() => import("@/pages/SuperAdminPlanPricing")
 const SuperAdminApiKeyManagement = lazy(() => import("@/components/super-admin/SuperAdminApiKeyManagement"));
 const SuperAdminDocuments = lazy(() => import("@/pages/SuperAdminDocuments"));
 const SuperAdminTemplates = lazy(() => import("@/pages/SuperAdminTemplates"));
+const SuperAdminReleases = lazy(() => import("@/pages/super-admin/SuperAdminReleases"));
 const SuperAdminAuditLog = lazy(() => import("@/pages/SuperAdminAuditLog"));
-const SuperAdminGapAnalysis = lazy(() => import("@/pages/SuperAdminGapAnalysis"));
+
 const SuperAdminFeedback = lazy(() => import("@/pages/SuperAdminFeedback"));
-const SuperAdminVariantConfiguration = lazy(() => import("@/pages/SuperAdminVariantConfiguration"));
+
 const SuperAdminWHXCodes = lazy(() => import("@/components/super-admin/SuperAdminWHXCodes"));
 const SuperAdminWHXUsers = lazy(() => import("@/components/super-admin/SuperAdminWHXUsers"));
 const SuperAdminAccessManagement = lazy(() => import("@/pages/SuperAdminAccessManagement"));
-const SuperAdminVariantDocuments = lazy(() => import("@/pages/SuperAdminVariantDocuments"));
+
 const ViewerCompliancePage = lazy(() => import("@/pages/ViewerCompliancePage"));
 const ViewerDocumentsPage = lazy(() => import("@/pages/ViewerDocumentsPage"));
 const ViewerGapAnalysisPage = lazy(() => import("@/pages/ViewerGapAnalysisPage"));
@@ -116,6 +117,7 @@ const ProductTemplateHubPage = lazy(() => import("@/pages/ProductTemplateHubPage
 const DocumentComposerPage = lazy(() => import("@/pages/DocumentComposerPage"));
 const ComplianceInstancesPage = lazy(() => import("@/pages/ComplianceInstancesPage"));
 const ProductComplianceInstancesPage = lazy(() => import("@/pages/ProductComplianceInstancesPage"));
+const ProductTechnicalFilePage = lazy(() => import("@/pages/ProductTechnicalFilePage"));
 const CompanyCommercialLandingPage = lazy(() => import("@/pages/CompanyCommercialLandingPage"));
 const ProductBusinessCaseLandingPage = lazy(() => import("@/pages/ProductBusinessCaseLandingPage"));
 const ProductDefinitionLandingPage = lazy(() => import("@/pages/ProductDefinitionLandingPage"));
@@ -424,14 +426,6 @@ function App() {
                 </Suspense>
               } />
 
-              {/* Super Admin Gap Analysis */}
-              <Route path="app/gap-analysis" element={
-                <Suspense fallback={<PageLoader />}>
-                  <ErrorBoundary level="component">
-                    <SuperAdminGapAnalysis />
-                  </ErrorBoundary>
-                </Suspense>
-              } />
 
               {/* Super Admin Feedback */}
               <Route path="app/feedback" element={
@@ -442,14 +436,15 @@ function App() {
                 </Suspense>
               } />
 
-              {/* Super Admin Variant Configuration */}
-              <Route path="app/variant-config" element={
+              {/* Super Admin Releases */}
+              <Route path="app/releases" element={
                 <Suspense fallback={<PageLoader />}>
                   <ErrorBoundary level="component">
-                    <SuperAdminVariantConfiguration />
+                    <SuperAdminReleases />
                   </ErrorBoundary>
                 </Suspense>
               } />
+
 
               {/* Super Admin WHX Event Codes */}
               <Route path="app/whx-codes" element={
@@ -478,13 +473,6 @@ function App() {
                 </Suspense>
               } />
 
-              <Route path="app/variant-documents" element={
-                <Suspense fallback={<PageLoader />}>
-                  <ErrorBoundary level="component">
-                    <SuperAdminVariantDocuments />
-                  </ErrorBoundary>
-                </Suspense>
-              } />
 
               {/* Add more super admin routes here as needed */}
               <Route path="app/companies" element={
@@ -1051,12 +1039,71 @@ function App() {
                 </Suspense>
               } />
 
-              {/* Portfolio landing - accessible to all authenticated users with company access */}
+              {/* Portfolio landing - accessible to users with Portfolio Management module access */}
               <Route path="company/:companyName/portfolio-landing" element={
                 <Suspense fallback={<PageLoader />}>
                   <ErrorBoundary level="component">
                     <CompanyRouteGuard>
-                      <PortfolioLandingPage />
+                      <CompanyModuleAccessGuard requiredModuleId={COMPANY_MODULES.DEVICE_PORTFOLIO}>
+                        <PortfolioLandingPage />
+                      </CompanyModuleAccessGuard>
+                    </CompanyRouteGuard>
+                  </ErrorBoundary>
+                </Suspense>
+              } />
+
+              {/* Portfolio routes - accessible to users with Portfolio Management module access */}
+              <Route path="company/:companyName/portfolio" element={
+                <Suspense fallback={<PageLoader />}>
+                  <ErrorBoundary level="component">
+                    <CompanyRouteGuard>
+                      <CompanyModuleAccessGuard requiredModuleId={COMPANY_MODULES.DEVICE_PORTFOLIO}>
+                        <ProductPortfolio />
+                      </CompanyModuleAccessGuard>
+                    </CompanyRouteGuard>
+                  </ErrorBoundary>
+                </Suspense>
+              } />
+              <Route path="company/:companyName/product-family/:familyKey" element={
+                <Suspense fallback={<PageLoader />}>
+                  <ErrorBoundary level="component">
+                    <CompanyRouteGuard>
+                      <CompanyModuleAccessGuard requiredModuleId={COMPANY_MODULES.DEVICE_PORTFOLIO}>
+                        <ProductFamilyView />
+                      </CompanyModuleAccessGuard>
+                    </CompanyRouteGuard>
+                  </ErrorBoundary>
+                </Suspense>
+              } />
+              <Route path="company/:companyName/basic-udi-overview" element={
+                <Suspense fallback={<PageLoader />}>
+                  <ErrorBoundary level="component">
+                    <CompanyRouteGuard>
+                      <CompanyModuleAccessGuard requiredModuleId={COMPANY_MODULES.DEVICE_PORTFOLIO}>
+                        <BasicUDIOverview />
+                      </CompanyModuleAccessGuard>
+                    </CompanyRouteGuard>
+                  </ErrorBoundary>
+                </Suspense>
+              } />
+              <Route path="company/:companyName/basic-udi/:basicUdiDi" element={
+                <Suspense fallback={<PageLoader />}>
+                  <ErrorBoundary level="component">
+                    <CompanyRouteGuard>
+                      <CompanyModuleAccessGuard requiredModuleId={COMPANY_MODULES.DEVICE_PORTFOLIO}>
+                        <BasicUDIDetail />
+                      </CompanyModuleAccessGuard>
+                    </CompanyRouteGuard>
+                  </ErrorBoundary>
+                </Suspense>
+              } />
+              <Route path="company/:companyName/platforms/:platformId" element={
+                <Suspense fallback={<PageLoader />}>
+                  <ErrorBoundary level="component">
+                    <CompanyRouteGuard>
+                      <CompanyModuleAccessGuard requiredModuleId={COMPANY_MODULES.DEVICE_PORTFOLIO}>
+                        <PlatformProfile />
+                      </CompanyModuleAccessGuard>
                     </CompanyRouteGuard>
                   </ErrorBoundary>
                 </Suspense>
@@ -1082,54 +1129,11 @@ function App() {
                     </ErrorBoundary>
                   </Suspense>
                 } />
-                <Route path="company/:companyName/portfolio" element={
-                  <Suspense fallback={<PageLoader />}>
-                    <ErrorBoundary level="component">
-                      <CompanyRouteGuard>
-                        <ProductPortfolio />
-                      </CompanyRouteGuard>
-                    </ErrorBoundary>
-                  </Suspense>
-                } />
-                <Route path="company/:companyName/product-family/:familyKey" element={
-                  <Suspense fallback={<PageLoader />}>
-                    <ErrorBoundary level="component">
-                      <ProductFamilyView />
-                    </ErrorBoundary>
-                  </Suspense>
-                } />
                 <Route path="company/:companyName/ip-portfolio" element={
                   <Suspense fallback={<PageLoader />}>
                     <ErrorBoundary level="component">
                       <CompanyRouteGuard>
                         <CompanyIPPortfolioPage />
-                      </CompanyRouteGuard>
-                    </ErrorBoundary>
-                  </Suspense>
-                } />
-                <Route path="company/:companyName/basic-udi-overview" element={
-                  <Suspense fallback={<PageLoader />}>
-                    <ErrorBoundary level="component">
-                      <CompanyRouteGuard>
-                        <BasicUDIOverview />
-                      </CompanyRouteGuard>
-                    </ErrorBoundary>
-                  </Suspense>
-                } />
-                <Route path="company/:companyName/basic-udi/:basicUdiDi" element={
-                  <Suspense fallback={<PageLoader />}>
-                    <ErrorBoundary level="component">
-                      <CompanyRouteGuard>
-                        <BasicUDIDetail />
-                      </CompanyRouteGuard>
-                    </ErrorBoundary>
-                  </Suspense>
-                } />
-                <Route path="company/:companyName/platforms/:platformId" element={
-                  <Suspense fallback={<PageLoader />}>
-                    <ErrorBoundary level="component">
-                      <CompanyRouteGuard>
-                        <PlatformProfile />
                       </CompanyRouteGuard>
                     </ErrorBoundary>
                   </Suspense>
@@ -1356,6 +1360,14 @@ function App() {
                 <Suspense fallback={<PageLoader />}>
                   <ErrorBoundary level="component">
                     <ProductGanttV23Page />
+                  </ErrorBoundary>
+                </Suspense>
+              } />
+
+              <Route path="product/:productId/technical-file" element={
+                <Suspense fallback={<PageLoader />}>
+                  <ErrorBoundary level="component">
+                    <ProductTechnicalFilePage />
                   </ErrorBoundary>
                 </Suspense>
               } />

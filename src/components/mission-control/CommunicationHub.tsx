@@ -6,7 +6,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { MessageSquare, Send, Bell, Users, Plus, Maximize2, Minimize2, Search } from "lucide-react";
+import { MessageSquare, Send, Bell, Plus, Maximize2, Minimize2, Search, UsersRound, UserPen } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useTranslation } from "@/hooks/useTranslation";
 import { ThreadCardClickable } from "@/components/communications/ThreadCardClickable";
@@ -15,6 +15,7 @@ import { NewCommunicationDialog } from "@/components/communications/NewCommunica
 import { CommunicationThread } from "@/types/communications";
 import { ErrorBoundary } from "@/components/error/ErrorBoundary";
 import { useCommunicationThreads } from "@/hooks/useCommunicationThreads";
+
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 
@@ -40,7 +41,7 @@ export function CommunicationHub({ scope, companyId, productId }: CommunicationH
   const [companyUsers, setCompanyUsers] = useState<CompanyUser[]>([]);
   const { lang } = useTranslation();
 
-  const { threads, isLoading, error, unreadCount, activeCount, createThread } = useCommunicationThreads({
+  const { threads, isLoading, error, unreadCount, activeCount, myThreadsCount, createThread } = useCommunicationThreads({
     companyId,
     status: isExpanded ? activeTab : undefined,
     searchQuery: isExpanded ? searchQuery : undefined,
@@ -113,7 +114,7 @@ export function CommunicationHub({ scope, companyId, productId }: CommunicationH
 
   // Recent threads for collapsed view (max 5)
   const recentThreads = threads.slice(0, 5);
-  const highPriorityCount = threads.filter(t => (t.my_unread_count || 0) > 0).length;
+
 
   if (isLoading) {
     return (
@@ -176,27 +177,34 @@ export function CommunicationHub({ scope, companyId, productId }: CommunicationH
           </CardHeader>
           <CardContent className="space-y-4">
             {/* Stats row */}
-            <div className="grid gap-4 grid-cols-3">
-              <div className="flex items-center gap-2">
-                <Bell className="h-5 w-5 text-primary" />
-                <div>
+            <div className="grid gap-4 grid-cols-2 md:grid-cols-4">
+              <div className="flex flex-col items-center justify-center p-3 rounded-lg">
+                <div className="flex items-center gap-2">
+                  <Bell className="h-5 w-5 text-primary" />
                   <p className="text-lg font-bold">{unreadCount}</p>
-                  <p className="text-xs text-muted-foreground">{lang('missionControl.unreadMessages')}</p>
                 </div>
+                <p className="text-xs text-muted-foreground mt-1">{lang('missionControl.unreadMessages')}</p>
               </div>
-              <div className="flex items-center gap-2">
-                <MessageSquare className="h-5 w-5 text-warning" />
-                <div>
-                  <p className="text-lg font-bold">{highPriorityCount}</p>
-                  <p className="text-xs text-muted-foreground">{lang('missionControl.highPriority')}</p>
+              <div className="flex flex-col items-center justify-center p-3 rounded-lg">
+                <div className="flex items-center gap-2">
+                  <UsersRound className="h-5 w-5 text-emerald-500" />
+                  <p className="text-lg font-bold">{companyUsers.length}</p>
                 </div>
+                <p className="text-xs text-muted-foreground mt-1">{lang('missionControl.users')}</p>
               </div>
-              <div className="flex items-center gap-2">
-                <Users className="h-5 w-5 text-success" />
-                <div>
+              <div className="flex flex-col items-center justify-center p-3 rounded-lg">
+                <div className="flex items-center gap-2">
+                  <MessageSquare className="h-5 w-5 text-amber-500" />
                   <p className="text-lg font-bold">{activeCount}</p>
-                  <p className="text-xs text-muted-foreground">{lang('missionControl.activeThreads')}</p>
                 </div>
+                <p className="text-xs text-muted-foreground mt-1">{lang('missionControl.activeThreads')}</p>
+              </div>
+              <div className="flex flex-col items-center justify-center p-3 rounded-lg">
+                <div className="flex items-center gap-2">
+                  <UserPen className="h-5 w-5 text-blue-500" />
+                  <p className="text-lg font-bold">{myThreadsCount}</p>
+                </div>
+                <p className="text-xs text-muted-foreground mt-1">{lang('missionControl.myThreads')}</p>
               </div>
             </div>
 
@@ -273,28 +281,50 @@ export function CommunicationHub({ scope, companyId, productId }: CommunicationH
           </div>
         </CardHeader>
         <CardContent>
-          <div className="grid gap-4 md:grid-cols-3">
-            <div className="flex items-center gap-3">
-              <Bell className="h-8 w-8 text-primary" />
-              <div>
+          <div className="grid gap-4 grid-cols-2 md:grid-cols-4">
+            <button
+              type="button"
+              className="flex flex-col items-center justify-center p-4 rounded-lg hover:bg-muted/50 transition-colors cursor-pointer"
+              onClick={() => { setIsExpanded(true); setActiveTab('all'); }}
+              title="View unread messages"
+            >
+              <div className="flex items-center gap-2">
+                <Bell className="h-6 w-6 text-primary" />
                 <p className="text-2xl font-bold">{unreadCount}</p>
-                <p className="text-sm text-muted-foreground">{lang('missionControl.unreadMessages')}</p>
               </div>
-            </div>
-            <div className="flex items-center gap-3">
-              <MessageSquare className="h-8 w-8 text-warning" />
-              <div>
-                <p className="text-2xl font-bold">{highPriorityCount}</p>
-                <p className="text-sm text-muted-foreground">{lang('missionControl.highPriority')}</p>
+              <p className="text-sm text-muted-foreground mt-1">{lang('missionControl.unreadMessages')}</p>
+            </button>
+            <div className="flex flex-col items-center justify-center p-4 rounded-lg">
+              <div className="flex items-center gap-2">
+                <UsersRound className="h-6 w-6 text-emerald-500" />
+                <p className="text-2xl font-bold">{companyUsers.length}</p>
               </div>
+              <p className="text-sm text-muted-foreground mt-1">{lang('missionControl.users')}</p>
             </div>
-            <div className="flex items-center gap-3">
-              <Users className="h-8 w-8 text-success" />
-              <div>
+            <button
+              type="button"
+              className="flex flex-col items-center justify-center p-4 rounded-lg hover:bg-muted/50 transition-colors cursor-pointer"
+              onClick={() => { setIsExpanded(true); setActiveTab('active'); }}
+              title="View active threads"
+            >
+              <div className="flex items-center gap-2">
+                <MessageSquare className="h-6 w-6 text-amber-500" />
                 <p className="text-2xl font-bold">{activeCount}</p>
-                <p className="text-sm text-muted-foreground">{lang('missionControl.activeThreads')}</p>
               </div>
-            </div>
+              <p className="text-sm text-muted-foreground mt-1">{lang('missionControl.activeThreads')}</p>
+            </button>
+            <button
+              type="button"
+              className="flex flex-col items-center justify-center p-4 rounded-lg hover:bg-muted/50 transition-colors cursor-pointer"
+              onClick={() => { setIsExpanded(true); setActiveTab('all'); }}
+              title="View my threads"
+            >
+              <div className="flex items-center gap-2">
+                <UserPen className="h-6 w-6 text-blue-500" />
+                <p className="text-2xl font-bold">{myThreadsCount}</p>
+              </div>
+              <p className="text-sm text-muted-foreground mt-1">{lang('missionControl.myThreads')}</p>
+            </button>
           </div>
         </CardContent>
       </Card>

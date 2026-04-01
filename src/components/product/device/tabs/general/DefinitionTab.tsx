@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { Textarea } from "@/components/ui/textarea";
 import { RichTextField } from '@/components/shared/RichTextField';
 import { useSearchParams, useParams } from 'react-router-dom';
@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { HelpCircle, Check, Package, Lock, AlertTriangle } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { InheritanceExclusionPopover } from '@/components/shared/InheritanceExclusionPopover';
+import { resolveFieldValue, normalizeScopeValue } from '@/hooks/useAutoSyncScope';
 import { GovernanceBookmark } from '@/components/ui/GovernanceBookmark';
 
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
@@ -91,6 +92,8 @@ interface DefinitionTabProps {
   };
   autoSyncScope?: (fieldKey: string, newValue: any) => void;
   familyProductIds?: string[];
+  familyProducts?: any[];
+  onScopeChangeWithPropagation?: (fieldKey: string, oldScope: import('@/hooks/useInheritanceExclusion').ItemExclusionScope, newScope: import('@/hooks/useInheritanceExclusion').ItemExclusionScope) => Promise<void>;
 }
 
 export function DefinitionTab({
@@ -128,6 +131,8 @@ export function DefinitionTab({
   classificationExclusion,
   autoSyncScope,
   familyProductIds,
+  familyProducts,
+  onScopeChangeWithPropagation,
 }: DefinitionTabProps) {
   const { lang } = useTranslation();
   const { isInInvestorFlow } = useInvestorFlow();
@@ -199,11 +204,11 @@ export function DefinitionTab({
     const { field, value } = pendingOverride;
     setConfirmedOverrides(prev => new Set(prev).add(field));
     if (field === 'deviceName') onProductNameChange?.(value);
-    else if (field === 'tradeName') { onTradeNameChange?.(value); autoSyncScope?.('definition_tradeName', value); }
-    else if (field === 'deviceModel') { onModelReferenceChange?.(value); autoSyncScope?.('definition_modelReference', value); }
+    else if (field === 'tradeName') { onTradeNameChange?.(value); }
+    else if (field === 'deviceModel') { onModelReferenceChange?.(value); }
     setPendingOverride(null);
     setOverrideWarningOpen(false);
-  }, [pendingOverride, onProductNameChange, onTradeNameChange, onModelReferenceChange, autoSyncScope]);
+  }, [pendingOverride, onProductNameChange, onTradeNameChange, onModelReferenceChange]);
 
   const renderFieldBadges = (field: string, currentValue: string | undefined) => {
     if (!isFieldLocked(field)) return null;
@@ -241,7 +246,44 @@ export function DefinitionTab({
     return <GovernanceBookmark status={null} />;
   };
 
-  const renderScopeAndGov = (fieldKey: string, hideScope = false) => (
+  // --- Value-matching helpers for Device Applicability popovers ---
+  const getMatchingProductIds = useCallback((fieldKey: string, currentValue: any): string[] | undefined => {
+    if (!familyProducts?.length || !productId) return undefined;
+    const currentNormalized = JSON.stringify(normalizeScopeValue(fieldKey, currentValue));
+    return familyProducts
+      .filter(p => {
+        if (p.id === productId) return true;
+        return JSON.stringify(normalizeScopeValue(fieldKey, resolveFieldValue(p, fieldKey))) === currentNormalized;
+      })
+      .map(p => p.id);
+  }, [familyProducts, productId]);
+
+  const getMatchSummary = useCallback((fieldKey: string, currentValue: any) => {
+    const matchIds = getMatchingProductIds(fieldKey, currentValue);
+    if (!matchIds || !familyProducts?.length) return undefined;
+    return `${matchIds.length}/${familyProducts.length}`;
+  }, [getMatchingProductIds, familyProducts]);
+
+  const createValueMatchScopeChange = useCallback((fieldKey: string, currentValue: any) => {
+    return (id: string, newScope: import('@/hooks/useInheritanceExclusion').ItemExclusionScope) => {
+      if (onScopeChangeWithPropagation && familyProducts?.length) {
+        const matchIds = getMatchingProductIds(fieldKey, currentValue);
+        const nonMatchingIds = matchIds
+          ? (familyProductIds || []).filter(pid => !matchIds.includes(pid))
+          : [];
+        const oldScope: import('@/hooks/useInheritanceExclusion').ItemExclusionScope = {
+          excludedProductIds: nonMatchingIds,
+          excludedCategories: [],
+          isManualGroup: true,
+        };
+        return onScopeChangeWithPropagation(id, oldScope, newScope);
+      } else if (classificationExclusion) {
+        return classificationExclusion.setExclusionScope(id, newScope);
+      }
+    };
+  }, [onScopeChangeWithPropagation, familyProducts, getMatchingProductIds, familyProductIds, classificationExclusion]);
+
+  const renderScopeAndGov = (fieldKey: string, hideScope = false, currentValue?: any) => (
     <div className="flex items-center gap-0.5 ml-auto">
       {!hideScope && belongsToFamily && company_id && productId && classificationExclusion ? (
         <InheritanceExclusionPopover
@@ -249,9 +291,11 @@ export function DefinitionTab({
           currentProductId={productId}
           itemId={fieldKey}
           exclusionScope={classificationExclusion.getExclusionScope(fieldKey)}
-          onScopeChange={(id, scope) => classificationExclusion.setExclusionScope(id, scope)}
+          onScopeChange={createValueMatchScopeChange(fieldKey, currentValue)}
           defaultCurrentDeviceOnly
           familyProductIds={familyProductIds}
+          summaryText={getMatchSummary(fieldKey, currentValue)}
+          valueMatchingProductIds={getMatchingProductIds(fieldKey, currentValue)}
         />
       ) : null}
       {getGovIcon(fieldKey)}
@@ -309,7 +353,7 @@ export function DefinitionTab({
               <Package className="h-4 w-4 text-purple-600" />
               {lang('deviceBasics.identification.productFamilyLabel')}
             </Label>
-            {renderScopeAndGov('definition_platform')}
+            {renderScopeAndGov('definition_platform', false, product_platform)}
           </div>
           {wrapWithOverlay('definition_platform', (
             <ProductPlatformSelector
@@ -332,14 +376,14 @@ export function DefinitionTab({
               {lang('deviceBasics.identification.tradeNameLabel')}
               {renderFieldBadges('tradeName', tradeName)}
             </Label>
-            {renderScopeAndGov('definition_tradeName')}
+            {renderScopeAndGov('definition_tradeName', false, tradeName)}
           </div>
           {wrapWithOverlay('definition_tradeName', (
             <>
               <Input
                 id="trade-name"
                 value={tradeName || ''}
-                onChange={(e) => handleLockedFieldChange('tradeName', e.target.value, (v) => { onTradeNameChange?.(v); autoSyncScope?.('definition_tradeName', v); })}
+                onChange={(e) => handleLockedFieldChange('tradeName', e.target.value, (v) => { onTradeNameChange?.(v); })}
                 placeholder={lang('deviceBasics.identification.tradeNamePlaceholder')}
                 disabled={isLoading}
                 maxLength={255}
@@ -353,13 +397,13 @@ export function DefinitionTab({
         <div>
           <div className="flex items-center">
             <Label htmlFor="device-category">{lang('deviceBasics.identification.deviceCategoryLabel')}</Label>
-            {renderScopeAndGov('definition_deviceCategory')}
+            {renderScopeAndGov('definition_deviceCategory', false, deviceCategory)}
           </div>
           {wrapWithOverlay('definition_deviceCategory', (
             <DeviceCategorySelector
               companyId={company_id || ''}
               value={deviceCategory || ''}
-              onValueChange={(val) => { onDeviceCategoryChange?.(val); autoSyncScope?.('definition_deviceCategory', val); }}
+              onValueChange={(val) => { onDeviceCategoryChange?.(val); }}
               placeholder={lang('deviceBasics.identification.deviceCategoryPlaceholder')}
             />
           ))}
@@ -371,13 +415,13 @@ export function DefinitionTab({
               {lang('deviceBasics.identification.modelReferenceLabel')}
               {renderFieldBadges('deviceModel', modelReference)}
             </Label>
-            {renderScopeAndGov('definition_modelReference')}
+            {renderScopeAndGov('definition_modelReference', false, modelReference)}
           </div>
           {wrapWithOverlay('definition_modelReference', (
             <ProductModelSelector
               companyId={company_id || ''}
               value={modelReference || ''}
-              onValueChange={(val) => handleLockedFieldChange('deviceModel', val, (v) => { onModelReferenceChange?.(v); autoSyncScope?.('definition_modelReference', v); })}
+              onValueChange={(val) => handleLockedFieldChange('deviceModel', val, (v) => { onModelReferenceChange?.(v); })}
               placeholder={lang('deviceBasics.identification.modelReferencePlaceholder')}
               disabled={isLoading}
               className="justify-start mt-1"
@@ -390,7 +434,7 @@ export function DefinitionTab({
       <div ref={descriptionRef} className={isInGenesisFlow ? `p-3 rounded-lg transition-colors ${description?.trim() ? 'border-2 border-emerald-500 bg-emerald-50/30' : 'border-2 border-amber-400 bg-amber-50/30'}` : ''}>
         <div className="flex items-center gap-2 mb-1">
           <Label htmlFor="description">{lang('deviceBasics.definition.descriptionLabel')}</Label>
-          {renderScopeAndGov('definition_description')}
+          {renderScopeAndGov('definition_description', false, description)}
           {isInInvestorFlow && <InvestorVisibleBadge />}
           <Popover>
             <PopoverTrigger asChild>
@@ -412,7 +456,7 @@ export function DefinitionTab({
         {wrapWithOverlay('definition_description', (
           <RichTextField
             value={description || ''}
-            onChange={(html) => { onDescriptionChange?.(html); autoSyncScope?.('definition_description', html); }}
+            onChange={(html) => { onDescriptionChange?.(html); }}
             placeholder={lang('deviceBasics.definition.descriptionPlaceholder')}
             minHeight="100px"
             disabled={isLoading}

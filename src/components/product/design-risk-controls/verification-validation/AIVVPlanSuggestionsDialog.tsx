@@ -4,22 +4,12 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Textarea } from '@/components/ui/textarea';
-import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Checkbox } from '@/components/ui/checkbox';
-import { Loader2, Sparkles, Info, CheckCircle, Users, Globe } from 'lucide-react';
+import { Loader2, Sparkles, CheckCircle, Users } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useProductDetails } from '@/hooks/useProductDetails';
 import { useLanguage } from '@/context/LanguageContext';
-import type { VVPlanInitialData } from './CreateVVPlanDialog';
-
-const LANGUAGE_OPTIONS = [
-  { value: 'en', label: 'English' },
-  { value: 'de', label: 'Deutsch' },
-  { value: 'fr', label: 'Français' },
-  { value: 'fi', label: 'Suomi' },
-];
+import { AIContextSourcesPanel } from '@/components/product/ai-assistant/AIContextSourcesPanel';
+import type { VVPlanInitialData } from './CreateVVPlanSheet';
 
 interface AIVVPlanSuggestionsDialogProps {
   productId: string;
@@ -72,7 +62,6 @@ export function AIVVPlanSuggestionsDialog({
   const { language: appLanguage } = useLanguage();
   const [additionalPrompt, setAdditionalPrompt] = useState('');
   const [outputLanguage, setOutputLanguage] = useState<string>(appLanguage);
-  const [sourceChecks, setSourceChecks] = useState<Set<number>>(new Set([0, 1, 2]));
 
   const handleGenerate = async () => {
     setIsGenerating(true);
@@ -144,77 +133,18 @@ export function AIVVPlanSuggestionsDialog({
         </DialogHeader>
 
         <div className="space-y-4">
-          {/* Source Data with checkboxes */}
-          <Card className="bg-muted/50">
-            <CardContent className="p-4">
-              <div className="flex items-start gap-2 mb-3">
-                <Info className="h-4 w-4 text-muted-foreground mt-0.5" />
-                <span className="text-sm font-medium text-foreground">Select data sources</span>
-              </div>
-              <div className="divide-y divide-border rounded-md border bg-muted/20">
-                {[
-                  { label: 'Product', value: product?.name || 'N/A' },
-                  { label: 'Device Class', value: product?.class || 'N/A' },
-                  { label: 'Markets', value: product?.markets?.map((m: any) => m.name || m).join(', ') || 'N/A' },
-                ].map((item, i) => (
-                  <div key={i} className="flex items-center gap-2 px-3 py-2 text-sm">
-                    <Checkbox
-                      checked={sourceChecks.has(i)}
-                      onCheckedChange={() => {
-                        const next = new Set(sourceChecks);
-                        next.has(i) ? next.delete(i) : next.add(i);
-                        setSourceChecks(next);
-                      }}
-                      className="h-3.5 w-3.5"
-                    />
-                    <span className="text-muted-foreground">{item.label}:</span>
-                    <span className="font-medium text-foreground">{item.value}</span>
-                  </div>
-                ))}
-                {isFamily && familyProducts && familyProducts.length > 0 && (
-                  <div className="px-3 py-2 border-t border-border">
-                    <span className="text-sm text-muted-foreground">Family Variants:</span>
-                    <div className="flex flex-wrap gap-1 mt-1">
-                      {familyProducts.map((p) => (
-                        <Badge key={p.id} variant="secondary" className="text-xs">
-                          {p.name} {p.class ? `(${p.class})` : ''}
-                        </Badge>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Language selector */}
-          <div className="flex items-center gap-3">
-            <Label className="text-sm font-medium flex items-center gap-1.5 whitespace-nowrap">
-              <Globe className="h-3.5 w-3.5 text-muted-foreground" />
-              Output language
-            </Label>
-            <Select value={outputLanguage} onValueChange={setOutputLanguage}>
-              <SelectTrigger className="w-40">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {LANGUAGE_OPTIONS.map(opt => (
-                  <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          {/* Additional instructions */}
-          <div className="space-y-1.5">
-            <Label className="text-sm font-medium">Additional instructions (optional)</Label>
-            <Textarea
-              placeholder="Add specific instructions for the AI generation..."
-              className="min-h-[60px] text-sm resize-y"
-              value={additionalPrompt}
-              onChange={(e) => setAdditionalPrompt(e.target.value)}
-            />
-          </div>
+          {/* Shared AI Context Sources Panel */}
+          <AIContextSourcesPanel
+            productId={productId}
+            additionalSources={[
+              ...(isFamily && familyProducts ? [`Family Variants (${familyProducts.length})`] : []),
+              'Requirements',
+              'Risk Hazards',
+            ]}
+            mode="select"
+            onLanguageChange={setOutputLanguage}
+            onPromptChange={setAdditionalPrompt}
+          />
 
           {/* Generate / Results */}
           {isGenerating ? (

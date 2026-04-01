@@ -1,6 +1,6 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import { useDropzone } from 'react-dropzone';
-import { Upload, Download, Trash2, X, FileText, Loader2, Eye, Pencil } from 'lucide-react';
+import { Upload, Download, Trash2, X, FileText, Loader2, Eye, Pencil, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
@@ -46,6 +46,8 @@ export function ReferenceDocumentsTab({ companyId, disabled }: ReferenceDocument
   const [tagInput, setTagInput] = useState('');
   const [pendingTags, setPendingTags] = useState<string[]>([]);
   const [filterTag, setFilterTag] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const pageSize = 10;
 
   // Edit state
   const [editingDoc, setEditingDoc] = useState<ReferenceDocument | null>(null);
@@ -90,7 +92,13 @@ export function ReferenceDocumentsTab({ companyId, disabled }: ReferenceDocument
   // Upload
   const handleUpload = () => {
     if (pendingFiles.length === 0) return;
-    upload({ files: pendingFiles, tags: pendingTags });
+    // Auto-add any uncommitted tag text before uploading
+    const finalTags = [...pendingTags];
+    const leftover = tagInput.trim();
+    if (leftover && !finalTags.includes(leftover)) {
+      finalTags.push(leftover);
+    }
+    upload({ files: pendingFiles, tags: finalTags });
     setPendingFiles([]);
     setPendingTags([]);
     setTagInput('');
@@ -158,8 +166,16 @@ export function ReferenceDocumentsTab({ companyId, disabled }: ReferenceDocument
     ? documents.filter(d => d.tags?.some(t => t.toLowerCase().includes(filterTag.toLowerCase())))
     : documents;
 
+  // Pagination
+  const totalPages = Math.max(1, Math.ceil(filteredDocs.length / pageSize));
+  const safeCurrentPage = Math.min(currentPage, totalPages);
+  const paginatedDocs = useMemo(() => {
+    const start = (safeCurrentPage - 1) * pageSize;
+    return filteredDocs.slice(start, start + pageSize);
+  }, [filteredDocs, safeCurrentPage, pageSize]);
+
   return (
-    <div className="flex-1 flex flex-col bg-background">
+    <div className="flex-1 flex flex-col bg-background min-h-0 overflow-hidden">
       {/* Header */}
       <div className="p-4 border-b flex items-center justify-between">
         <h2 className="text-lg font-semibold text-foreground">Reference Documents</h2>
@@ -177,7 +193,7 @@ export function ReferenceDocumentsTab({ companyId, disabled }: ReferenceDocument
         <Input
           placeholder="Filter by tag…"
           value={filterTag}
-          onChange={e => setFilterTag(e.target.value)}
+          onChange={e => { setFilterTag(e.target.value); setCurrentPage(1); }}
           className="max-w-xs"
         />
       </div>
@@ -195,7 +211,7 @@ export function ReferenceDocumentsTab({ companyId, disabled }: ReferenceDocument
         <div className="flex-1 flex items-center justify-center">
           <Loader2 className="w-8 h-8 animate-spin text-primary" />
         </div>
-      ) : filteredDocs.length === 0 ? (
+      ) : paginatedDocs.length === 0 && filteredDocs.length === 0 ? (
         <div className="flex-1 flex items-center justify-center">
           <div className="text-center space-y-3 p-12">
             <FileText className="w-12 h-12 text-muted-foreground mx-auto" />
@@ -205,8 +221,8 @@ export function ReferenceDocumentsTab({ companyId, disabled }: ReferenceDocument
           </div>
         </div>
       ) : (
-        <div className="flex-1 overflow-y-auto">
-          <Table>
+        <div className="flex-1 min-h-0 overflow-y-auto">
+          <Table className="table-fixed w-full">
             <TableHeader>
               <TableRow>
                 <TableHead>Name</TableHead>
@@ -218,9 +234,11 @@ export function ReferenceDocumentsTab({ companyId, disabled }: ReferenceDocument
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filteredDocs.map(doc => (
+              {paginatedDocs.map(doc => (
                 <TableRow key={doc.id}>
-                  <TableCell className="font-medium">{doc.file_name}</TableCell>
+                  <TableCell className="font-medium max-w-[400px]">
+                    <span className="block truncate" title={doc.file_name}>{doc.file_name}</span>
+                  </TableCell>
                   <TableCell>
                     <div className="flex flex-wrap gap-1">
                       {(doc.tags || []).map(tag => (
@@ -278,9 +296,41 @@ export function ReferenceDocumentsTab({ companyId, disabled }: ReferenceDocument
         </div>
       )}
 
+      {/* Pagination */}
+      {filteredDocs.length > 0 && (
+        <div className="px-4 py-3 border-t flex items-center justify-between">
+          <p className="text-sm text-muted-foreground">
+            Showing {((safeCurrentPage - 1) * pageSize) + 1}–{Math.min(safeCurrentPage * pageSize, filteredDocs.length)} of {filteredDocs.length} documents
+          </p>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+              disabled={safeCurrentPage <= 1}
+            >
+              <ChevronLeft className="w-4 h-4 mr-1" />
+              Previous
+            </Button>
+            <span className="text-sm text-muted-foreground">
+              Page {safeCurrentPage} of {totalPages}
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+              disabled={safeCurrentPage >= totalPages}
+            >
+              Next
+              <ChevronRight className="w-4 h-4 ml-1" />
+            </Button>
+          </div>
+        </div>
+      )}
+
       {/* Upload Dialog */}
       <Dialog open={showUploadDialog} onOpenChange={setShowUploadDialog}>
-        <DialogContent className="sm:max-w-2xl">
+        <DialogContent className="sm:max-w-xl">
           <DialogHeader>
             <DialogTitle>Upload Reference Documents</DialogTitle>
           </DialogHeader>
@@ -291,7 +341,7 @@ export function ReferenceDocumentsTab({ companyId, disabled }: ReferenceDocument
               <div className="max-h-48 overflow-y-auto space-y-1">
               {pendingFiles.map((f, i) => (
                 <div key={i} className="flex items-center justify-between text-sm bg-muted/50 rounded px-3 py-1.5">
-                  <span className="truncate">{f.name}</span>
+                  <span className="truncate min-w-0 max-w-96 flex-1" title={f.name}>{f.name}</span>
                   <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setPendingFiles(prev => prev.filter((_, idx) => idx !== i))}>
                     <X className="w-3 h-3" />
                   </Button>

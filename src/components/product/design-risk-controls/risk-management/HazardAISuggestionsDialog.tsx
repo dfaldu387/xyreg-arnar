@@ -15,6 +15,8 @@ import {
 } from '@/services/hazardAIService';
 import { supabase } from "@/integrations/supabase/client";
 import { useTranslation } from "@/hooks/useTranslation";
+import { deduplicateSuggestions } from '@/utils/deduplicateSuggestions';
+import { toast } from 'sonner';
 
 interface HazardAISuggestionsDialogProps {
   productId: string;
@@ -107,7 +109,7 @@ export function HazardAISuggestionsDialog({
     setSuggestions([]);
 
     try {
-      const [productResponse, requirementsResponse] = await Promise.all([
+      const [productResponse, requirementsResponse, existingHazardsResponse] = await Promise.all([
         supabase
           .from('products')
           .select('name, class, intended_purpose_data')
@@ -116,11 +118,16 @@ export function HazardAISuggestionsDialog({
         supabase
           .from('requirement_specifications')
           .select('id, requirement_id, description, category, linked_risks')
+          .eq('product_id', productId),
+        supabase
+          .from('hazards')
+          .select('description')
           .eq('product_id', productId)
       ]);
 
       const { data: productData, error } = productResponse;
       const { data: requirements, error: reqError } = requirementsResponse;
+      const existingDescriptions = (existingHazardsResponse.data || []).map(h => h.description).filter(Boolean);
 
       if (error) {
         throw new Error('Failed to fetch product data');
@@ -145,6 +152,7 @@ export function HazardAISuggestionsDialog({
           product_name: productData.name || ''
         },
         requirementSpecifications: requirements || [],
+        existingItems: existingDescriptions,
         additionalPrompt: additionalPrompt || undefined,
         outputLanguage: outputLanguage || undefined,
       } as any;
@@ -152,7 +160,15 @@ export function HazardAISuggestionsDialog({
       const response = await HazardAIService.generateHazardSuggestions(request);
 
       if (response.success && response.suggestions) {
-        setSuggestions(response.suggestions);
+        const { filtered, removedCount } = deduplicateSuggestions(
+          response.suggestions,
+          existingDescriptions,
+          s => s.description
+        );
+        if (removedCount > 0) {
+          toast.info(`${removedCount} duplicate suggestion(s) filtered out`);
+        }
+        setSuggestions(filtered);
       } else {
         throw new Error(response.error || 'Failed to generate suggestions');
       }

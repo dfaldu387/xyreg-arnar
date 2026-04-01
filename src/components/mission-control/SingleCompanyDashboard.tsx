@@ -4,11 +4,13 @@ import { useCompanyRole } from "@/context/CompanyRoleContext";
 import { useMissionControl } from "@/context/MissionControlContext";
 import { useDashboardContext } from "@/hooks/useDashboardContext";
 import { getCompanyFromUrl } from "@/utils/urlCompanyContext";
+import { hasEditorPrivileges } from "@/utils/roleUtils";
 import { MyActionItems } from "./MyActionItems";
 import { ProjectHealthAlerts } from "./ProjectHealthAlerts";
 import { CommunicationHub } from "./CommunicationHub";
 import { KnowledgeBotWidget } from "./KnowledgeBotWidget";
 import { FeedbackTrackerWidget } from "./widgets/FeedbackTrackerWidget";
+import { ReviewActionItemsWidget } from "./widgets/ReviewActionItemsWidget";
 import { TrainingStatusCard } from "./TrainingStatusCard";
 import { DocumentStatusWidget } from "./DocumentStatusWidget";
 import { CompanySelector } from "./CompanySelector";
@@ -55,7 +57,8 @@ export function SingleCompanyDashboard() {
   const currentCompanyId = currentCompany?.companyId;
   const userRole = currentCompany?.role;
   const isAdmin = userRole === 'admin';
-  const filteredEnabledWidgets = enabledWidgets.filter(w => !w.adminOnly || isAdmin);
+  const canViewAdminWidgets = hasEditorPrivileges(userRole || 'viewer');
+  const filteredEnabledWidgets = enabledWidgets.filter(w => !w.adminOnly || canViewAdminWidgets);
   const handleCompanyChange = (companyId: string, companyName: string) => {
     if (companyId === 'all') {
       setSelectedCompany(null, null);
@@ -124,8 +127,10 @@ export function SingleCompanyDashboard() {
         return <DocumentStatusWidget key={widgetId} companyId={currentCompanyId} onRemove={() => removeWidget(widgetId)} />;
       case 'knowledge-bot':
         return <KnowledgeBotWidget key={widgetId} companyId={currentCompanyId} onRemove={() => removeWidget(widgetId)} />;
+      case 'review-action-items':
+        return <ReviewActionItemsWidget key={widgetId} companyId={currentCompanyId} onRemove={() => removeWidget(widgetId)} />;
       case 'feedback-tracker':
-        return <FeedbackTrackerWidget key={widgetId} companyId={currentCompanyId} onRemove={() => removeWidget(widgetId)} />;
+        return <FeedbackTrackerWidget key={widgetId} companyId={currentCompanyId} onRemove={() => removeWidget(widgetId)} readOnly={!isAdmin} />;
       default:
         return null;
     }

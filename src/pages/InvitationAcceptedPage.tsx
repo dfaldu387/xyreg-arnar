@@ -9,7 +9,8 @@ import {
     Star,
     RefreshCw,
     ExternalLink,
-    Bell
+    Bell,
+    LogIn
 } from "lucide-react";
 
 export default function InvitationAcceptedPage() {
@@ -187,27 +188,17 @@ export default function InvitationAcceptedPage() {
 
 
 
-                        {/* Action Buttons */}
-                        {/* <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
-              <Button
-                onClick={() => navigate("/login")}
-                className="bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-700 hover:to-emerald-800 text-white font-semibold px-8 py-4 rounded-xl transition-all duration-300 transform hover:scale-105 shadow-lg"
-                size="lg"
-              >
-                <ArrowRight className="mr-2 h-5 w-5" />
-                Go to Login Page
-              </Button>
-              
-              <Button
-                onClick={() => navigate("/")}
-                variant="outline"
-                className="border-2 border-gray-200 hover:border-gray-300 text-gray-700 hover:bg-gray-50 font-medium px-8 py-4 rounded-xl transition-all duration-300"
-                size="lg"
-              >
-                <Home className="mr-2 h-4 w-4" />
-                Back to Home
-              </Button>
-            </div> */}
+                        {/* Action Button */}
+                        <div className="flex justify-center mt-6">
+                            <Button
+                                onClick={() => navigate("/")}
+                                className="font-semibold px-8 py-3 rounded-xl transition-all duration-300 transform hover:scale-105"
+                                size="lg"
+                            >
+                                <LogIn className="mr-2 h-5 w-5" />
+                                Go to Login
+                            </Button>
+                        </div>
 
                         {/* Email Timer */}
                         {countdown > 0 && (
