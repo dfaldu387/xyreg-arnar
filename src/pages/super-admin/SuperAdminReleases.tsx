@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -47,7 +48,11 @@ interface CompanyAdoption {
 
 export default function SuperAdminReleases() {
   const queryClient = useQueryClient();
-  const [activeTab, setActiveTab] = useState('releases');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeTab = searchParams.get('tab') || 'releases';
+  const setActiveTab = useCallback((tab: string) => {
+    setSearchParams({ tab }, { replace: true });
+  }, [setSearchParams]);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [newEmail, setNewEmail] = useState('');
@@ -828,8 +833,7 @@ export default function SuperAdminReleases() {
                             </SelectTrigger>
                             <SelectContent>
                               <SelectItem value="pending">Pending</SelectItem>
-                              <SelectItem value="active">Active</SelectItem>
-                              <SelectItem value="completed">Completed</SelectItem>
+                              <SelectItem value="active">Installed</SelectItem>
                             </SelectContent>
                           </Select>
                         </TableCell>
