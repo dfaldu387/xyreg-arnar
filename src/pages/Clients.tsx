@@ -236,12 +236,6 @@ function ClientsContent() {
       {/* Main content area with proper scrolling */}
       <div className="flex-1 overflow-y-auto">
         <div className="w-full py-6">
-          {/* Awaiting My Review Widget */}
-          {!isRestricted && (
-            <div className="mb-6">
-              <AwaitingMyReviewWidget />
-            </div>
-          )}
 
           {/* Emergency Fix for Nox Medical moved to notification bell */}
 
