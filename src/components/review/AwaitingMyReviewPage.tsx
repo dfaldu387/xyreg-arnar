@@ -23,7 +23,7 @@ interface AssignedDocument {
   priority?: string;
   reviewerGroupName?: string;
   reviewerGroupId?: string;
-  role?: 'review' | 'author';
+  role?: 'review' | 'author' | 'approver';
   isAlsoApprover?: boolean;
   myDecision?: string;
   deviceName?: string;
@@ -119,9 +119,10 @@ export function AwaitingMyReviewPage({ companyId, userGroups, companyName, first
     };
   }, [location.search, documents.length]);
 
+  // Re-fetch when company/groups change, or when navigated here (e.g. via notification click which changes location.search)
   useEffect(() => {
     fetchAssignedDocuments();
-  }, [companyId, userGroups]);
+  }, [companyId, userGroups, location.search]);
 
   const fetchAssignedDocuments = async () => {
     if (!user?.id || !companyId) {
@@ -469,7 +470,7 @@ export function AwaitingMyReviewPage({ companyId, userGroups, companyName, first
             dueDate: (doc as any).approver_due_date || doc.due_date || doc.deadline,
             reviewerGroupName: 'Approver',
             reviewerGroupId: '',
-            role: 'author' as const,
+            role: 'approver' as const,
             deviceName: isCompanyDoc ? undefined : ((doc as any).product_id
               ? productNameMap.get((doc as any).product_id)
               : (doc.phase_id ? phaseProductMap.get(doc.phase_id) : undefined)),
@@ -870,11 +871,13 @@ export function AwaitingMyReviewPage({ companyId, userGroups, companyName, first
           companyId={companyId}
           reviewerGroupId={viewingDocument.reviewerGroupId || userGroups[0]}
           userRole={
-            viewingDocument.reviewerGroupName === 'Approver' ? 'approver'
+            viewingDocument.role === 'approver' ? 'approver'
+            : viewingDocument.reviewerGroupName === 'Approver' ? 'approver'
             : (viewingDocument.isAlsoApprover && (viewingDocument.myDecision === 'reviewed' || viewingDocument.myDecision === 'approved')) ? 'approver'
             : viewingDocument.role === 'review' ? 'review'
             : 'author'
           }
+          isAlsoApprover={viewingDocument.isAlsoApprover}
         />
       )}
 

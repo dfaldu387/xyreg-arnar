@@ -7835,6 +7835,57 @@ export type Database = {
           },
         ]
       }
+      docx_comments: {
+        Row: {
+          id: string
+          document_id: string
+          version: number
+          docx_comment_id: string
+          author: string | null
+          author_initials: string | null
+          comment_date: string | null
+          content: string
+          quoted_text: string | null
+          parent_comment_docx_id: string | null
+          is_resolved: boolean
+          metadata: Json
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          document_id: string
+          version: number
+          docx_comment_id: string
+          author?: string | null
+          author_initials?: string | null
+          comment_date?: string | null
+          content: string
+          quoted_text?: string | null
+          parent_comment_docx_id?: string | null
+          is_resolved?: boolean
+          metadata?: Json
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          document_id?: string
+          version?: number
+          docx_comment_id?: string
+          author?: string | null
+          author_initials?: string | null
+          comment_date?: string | null
+          content?: string
+          quoted_text?: string | null
+          parent_comment_docx_id?: string | null
+          is_resolved?: boolean
+          metadata?: Json
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       document_editor_sessions: {
         Row: {
           document_id: string
@@ -21932,6 +21983,51 @@ export type Database = {
           timeline_months?: number | null
           typical_cost?: number
           updated_at?: string
+        }
+        Relationships: []
+      }
+      regulatory_news_items: {
+        Row: {
+          category: string | null
+          created_at: string | null
+          id: string
+          published_at: string | null
+          region: string | null
+          relevance_score: number | null
+          scraped_at: string | null
+          source: string
+          source_name: string
+          summary: string | null
+          title: string
+          url: string | null
+        }
+        Insert: {
+          category?: string | null
+          created_at?: string | null
+          id?: string
+          published_at?: string | null
+          region?: string | null
+          relevance_score?: number | null
+          scraped_at?: string | null
+          source: string
+          source_name: string
+          summary?: string | null
+          title: string
+          url?: string | null
+        }
+        Update: {
+          category?: string | null
+          created_at?: string | null
+          id?: string
+          published_at?: string | null
+          region?: string | null
+          relevance_score?: number | null
+          scraped_at?: string | null
+          source?: string
+          source_name?: string
+          summary?: string | null
+          title?: string
+          url?: string | null
         }
         Relationships: []
       }

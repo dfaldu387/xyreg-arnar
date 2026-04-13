@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { ISO_13485_GROUPS } from '@/config/gapISO13485Sections';
 import type { QualityManualSection } from '@/hooks/useQualityManual';
+import { useRegisterRightRail } from '@/context/RightRailContext';
 
 interface QualityManualSidebarProps {
   sections: QualityManualSection[];
@@ -18,6 +19,7 @@ export function QualityManualSidebar({
   onSelectSection,
   generating,
 }: QualityManualSidebarProps) {
+  useRegisterRightRail();
   const groups = ISO_13485_GROUPS;
 
   const completionMap = useMemo(() => {

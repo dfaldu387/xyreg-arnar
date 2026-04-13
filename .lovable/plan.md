@@ -1,32 +1,15 @@
 
 
-## Fix: Missing Status Badges Due to Key Mismatches
+## Plan: Add search to Regulatory News widget
 
-### Root Cause
-The `standard_version_status` database table uses different `framework_key` values than the frontend. When `buildScopeProps('IEC_62366_1')` calls `getStatus('IEC_62366_1')`, it finds no match because the DB row has `framework_key = 'IEC_62366'`.
+### Change
 
-### Mismatched Keys
+**File: `src/components/mission-control/widgets/RegulatoryNewsWidget.tsx`**
 
-```text
-DB key          →  Frontend key (used in buildScopeProps)
-─────────────────────────────────────────────────────────
-IEC_62366       →  IEC_62366_1      (no match!)
-ISO_15223       →  ISO_15223_1      (no match!)
-IEEE_14971      →  ISO_14971_DEVICE (no match!)
-```
+- Add a search input field (using the existing `Input` component) between the region filter chips and the news list
+- Add local state `searchQuery` to track the input
+- Filter `newsItems` by matching the query against `title`, `summary`, and `source_name` (case-insensitive) before rendering
+- Show "No matching news" message when search yields no results but items exist
 
-### Fix
-Update the three `framework_key` values in the database to match the frontend keys:
-
-```sql
-UPDATE standard_version_status SET framework_key = 'IEC_62366_1'    WHERE framework_key = 'IEC_62366';
-UPDATE standard_version_status SET framework_key = 'ISO_15223_1'    WHERE framework_key = 'ISO_15223';
-UPDATE standard_version_status SET framework_key = 'ISO_14971_DEVICE' WHERE framework_key = 'IEEE_14971';
-```
-
-Also update the hardcoded standards list in `supabase/functions/check-standard-status/index.ts` to use the corrected keys so nightly checks continue to match.
-
-### Files
-- **Migrate**: SQL to update the 3 mismatched keys
-- **Modify**: `supabase/functions/check-standard-status/index.ts` — fix the 3 keys in the standards array
+Single file change, no new dependencies.
 

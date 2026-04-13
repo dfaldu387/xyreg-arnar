@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { ISO_13485_SECTIONS, ISO_13485_GROUPS, type ISO13485SectionItem } from '@/config/gapISO13485Sections';
 import type { GapAnalysisItem } from '@/types/client';
+import { useRegisterRightRail } from '@/context/RightRailContext';
 
 interface GapISO13485SidebarProps {
   items: GapAnalysisItem[];
@@ -30,6 +31,7 @@ function getCompletionMap(items: GapAnalysisItem[]): Map<string, { isComplete: b
 }
 
 export function GapISO13485Sidebar({ items, disabled = false }: GapISO13485SidebarProps) {
+  useRegisterRightRail();
   const navigate = useNavigate();
   const { companyName } = useParams();
   const completionMap = getCompletionMap(items);

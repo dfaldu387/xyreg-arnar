@@ -8,6 +8,7 @@ import { cn } from '@/lib/utils';
 import { ANNEX_II_SECTIONS, ANNEX_II_GROUPS, type AnnexIISectionItem } from '@/config/gapAnnexIISections';
 import type { GapAnalysisItem } from '@/types/client';
 import type { ActiveSubStep } from '@/components/company/gap-analysis/GenericGapSidebar';
+import { useRegisterRightRail } from '@/context/RightRailContext';
 
 interface GapAnnexIISidebarProps {
   items: GapAnalysisItem[];
@@ -46,6 +47,7 @@ export function GapAnnexIISidebar({
   activeStepIndex,
   onStepClick,
 }: GapAnnexIISidebarProps) {
+  useRegisterRightRail();
   const navigate = useNavigate();
   const { productId } = useParams();
   const [creating, setCreating] = useState(false);

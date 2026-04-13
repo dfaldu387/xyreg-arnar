@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { IconButton, Box, Typography, CircularProgress, Tooltip } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
@@ -11,7 +11,7 @@ import { useCompanyRole } from '@/context/CompanyRoleContext';
 import { useAuth } from '@/context/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { DocumentEditor } from "@onlyoffice/document-editor-react";
-import { FileEdit, ArrowLeft, Loader2, AlertCircle, Send, Check, CheckCircle, FilePen, Eye, ShieldCheck, CircleCheckBig, Hourglass, ExternalLink, Star, Users, UserCheck, Calendar, PenTool, ChevronDown, ChevronUp, Link2 } from 'lucide-react';
+import { FileEdit, ArrowLeft, Loader2, AlertCircle, Send, Check, CheckCircle, FilePen, Eye, ShieldCheck, CircleCheckBig, Hourglass, ExternalLink, Star, Users, UserCheck, Calendar, PenTool, ChevronDown, ChevronUp, Link2, MessageSquare } from 'lucide-react';
 import { useDocumentStar } from '@/hooks/useDocumentStar';
 import { DocumentEditorSidebar } from '@/components/document-composer/DocumentEditorSidebar';
 import { ReviewDraftsList } from '@/components/document-composer/ReviewDraftsList';
@@ -33,6 +33,9 @@ import { Button } from '@/components/ui/button';
 import { DocumentExportService } from '@/services/documentExportService';
 import { AppNotificationService } from '@/services/appNotificationService';
 import { DocumentValidationService, UnresolvedReferenceSource } from '@/services/documentValidationService';
+import { DocxCommentSidebar } from '@/components/review/DocxCommentSidebar';
+import { DocxCommentHighlighter } from '@/components/review/DocxCommentHighlighter';
+import { useDocxComments } from '@/hooks/useDocxComments';
 
 // OnlyOffice constants
 const SUPABASE_URL = "https://wzzkbmmgxxrfhhxggrcl.supabase.co";
@@ -150,6 +153,8 @@ export function DocumentDraftDrawer({
   const [reviewFormAutoCollapsed, setReviewFormAutoCollapsed] = useState(false);
   const [reviewCommentsExpanded, setReviewCommentsExpanded] = useState(false);
   const [alreadyReviewedUserIds, setAlreadyReviewedUserIds] = useState<string[]>([]);
+  const [showDocxComments, setShowDocxComments] = useState(false);
+  const draftContentRef = useRef<HTMLDivElement>(null);
   const [alreadyApprovedUserIds, setAlreadyApprovedUserIds] = useState<string[]>([]);
 
   const resolvedCompanyId = companyId || activeCompanyRole?.companyId;
@@ -271,6 +276,7 @@ export function DocumentDraftDrawer({
   }, [documentId, open]);
 
   const { isStarred, isLoading: starLoading, toggleStar } = useDocumentStar(normalizedDocId);
+  const { comments: docxComments } = useDocxComments(showDocxComments ? normalizedDocId : undefined);
 
   // Fetch document status for stepper (skip for new unsaved documents)
   useEffect(() => {
@@ -1116,6 +1122,21 @@ export function DocumentDraftDrawer({
               </IconButton>
             </Tooltip>
           )}
+          <Tooltip title={showDocxComments ? "Hide Review Comments" : "Show Review Comments"} arrow>
+            <IconButton
+              onClick={() => setShowDocxComments(prev => !prev)}
+              size="small"
+              sx={{
+                color: showDocxComments ? '#fff' : '#0891b2',
+                backgroundColor: showDocxComments ? '#0891b2' : 'transparent',
+                border: '1px solid #0891b2',
+                borderRadius: '6px',
+                '&:hover': { backgroundColor: showDocxComments ? '#0e7490' : 'rgba(8, 145, 178, 0.08)' },
+              }}
+            >
+              <MessageSquare style={{ width: 16, height: 16 }} />
+            </IconButton>
+          </Tooltip>
           <Tooltip title={isStarred ? "Unstar document" : "Star document"} arrow>
             <IconButton
               onClick={(e) => { e.stopPropagation(); toggleStar(); }}
@@ -1836,6 +1857,24 @@ export function DocumentDraftDrawer({
                     )
                   )}
 
+                  {/* DOCX Comments (extracted from OnlyOffice) */}
+                  {normalizedDocId && (
+                    <div className="mt-4">
+                      <details className="group">
+                        <summary className="flex items-center gap-2 cursor-pointer text-sm font-semibold text-foreground/80 hover:text-foreground select-none">
+                          <ChevronDown className="h-4 w-4 transition-transform group-open:rotate-180" />
+                          Document Annotations
+                        </summary>
+                        <div className="mt-2 border rounded-lg overflow-hidden" style={{ height: '400px' }}>
+                          <DocxCommentSidebar
+                            documentId={normalizedDocId}
+                            fullWidth
+                          />
+                        </div>
+                      </details>
+                    </div>
+                  )}
+
                   {/* Review Drafts — always visible */}
                   {resolvedCompanyId && normalizedDocId && (
                     <div className="mt-4">
@@ -2116,7 +2155,10 @@ export function DocumentDraftDrawer({
               />
             )}
 
-            {/* Editor area */}
+            {/* Editor area + optional comments sidebar */}
+            <Box sx={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'row', minWidth: 0 }}>
+
+            {/* Editor column */}
             <Box sx={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', minWidth: 0 }}>
             {/* Advanced Editor — hidden via CSS instead of unmounting to avoid DOM errors */}
             {editorMounted && resolvedDocUrl && editorKey && (
@@ -2160,7 +2202,11 @@ export function DocumentDraftDrawer({
             )}
 
             {/* Draft Editor */}
-            <Box sx={{ flex: 1, overflow: 'auto', display: showAdvancedEditor ? 'none' : 'flex', flexDirection: 'column' }}>
+            <Box
+              ref={draftContentRef}
+              className={showDocxComments ? 'scrollbar-hide' : ''}
+              sx={{ flex: 1, overflow: 'auto', display: showAdvancedEditor ? 'none' : 'flex', flexDirection: 'column', position: 'relative' }}
+            >
               {isLoading ? (
                 <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '200px' }}>
                   <CircularProgress />
@@ -2189,7 +2235,23 @@ export function DocumentDraftDrawer({
                   hideVersioning
                 />
               ) : null}
+              {/* Inline comment highlights on document text */}
+              {showDocxComments && docxComments.length > 0 && (
+                <DocxCommentHighlighter
+                  containerRef={draftContentRef}
+                  comments={docxComments}
+                />
+              )}
             </Box>
+            </Box>
+
+            {/* DOCX Comments Sidebar — visible when toggled */}
+            {showDocxComments && normalizedDocId && (
+              <DocxCommentSidebar
+                documentId={normalizedDocId}
+                onClose={() => setShowDocxComments(false)}
+              />
+            )}
             </Box>
           </>
         )}

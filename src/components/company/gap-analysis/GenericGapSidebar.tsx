@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import type { GapAnalysisItem } from '@/types/client';
 import type { GenericSectionItem, GenericSectionGroup } from './GenericGapLaunchView';
+import { useRegisterRightRail } from '@/context/RightRailContext';
 
 export interface ActiveSubStep {
   id: string;
@@ -65,6 +66,7 @@ export function GenericGapSidebar({
   activeStepIndex,
   onStepClick,
 }: GenericGapSidebarProps) {
+  useRegisterRightRail();
   const navigate = useNavigate();
   const { companyName, productId: paramProductId } = useParams();
   const resolvedBaseUrl = baseUrl || (paramProductId ? `/app/product/${paramProductId}` : `/app/company/${companyName}`);
