@@ -38,7 +38,7 @@ export class AuthService {
       if (accessData) {
         console.log('Access data:', accessData);
       }
-      const allowedCompanies = ["xyreg", "Actiweight Labs AS", "David Health Solutions Oy"];
+      const allowedCompanies = ["xyreg", "Actiweight Labs AS", "David Health Solutions Oy", "Genis ehf"];
       if (email.toLowerCase() !== 'superadmin@gmail.com' &&
         !(accessData?.some((access: any) => allowedCompanies.includes(access.companies?.name)))) {
         toast.error("User not found. Only authorized company users can log in.");
