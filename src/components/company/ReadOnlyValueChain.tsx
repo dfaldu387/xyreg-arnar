@@ -201,6 +201,7 @@ export function ReadOnlyValueChain({ companyId }: ReadOnlyValueChainProps) {
           onCategoryChange={() => {}}
           onReorder={() => {}}
           companyId={companyId}
+          readOnly
         />
       </CardContent>
     </Card>

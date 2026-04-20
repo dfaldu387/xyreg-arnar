@@ -177,6 +177,37 @@ export function CompanyUserPermissions({ user, onRemove, companyId }: CompanyUse
     fileInputRef.current?.click();
   };
 
+  const handleAvatarDelete = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setIsUploadingAvatar(true);
+    try {
+      // Delete from storage
+      const currentAvatarUrl = user.avatar || avatarUrl;
+      if (currentAvatarUrl) {
+        const oldPath = currentAvatarUrl.split('/avatars/')[1]?.split('?')[0];
+        if (oldPath) {
+          await supabase.storage.from('avatars').remove([oldPath]);
+        }
+      }
+
+      // Clear avatar_url in database
+      const { error: updateError } = await supabase
+        .from('user_profiles')
+        .update({ avatar_url: null })
+        .eq('id', user.id);
+
+      if (updateError) throw updateError;
+
+      setAvatarUrl(null);
+      toast.success('Profile photo removed');
+    } catch (error: any) {
+      console.error('Error deleting avatar:', error);
+      toast.error(error.message || 'Failed to remove profile photo');
+    } finally {
+      setIsUploadingAvatar(false);
+    }
+  };
+
   const handleAvatarUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -602,10 +633,12 @@ export function CompanyUserPermissions({ user, onRemove, companyId }: CompanyUse
                 </Avatar>
                 <div
                   className="absolute inset-0 bg-black bg-opacity-50 rounded-full flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity cursor-pointer"
-                  onClick={handleAvatarClick}
+                  onClick={avatarUrl ? handleAvatarDelete : handleAvatarClick}
                 >
                   {isUploadingAvatar ? (
                     <div className="w-5 h-5 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                  ) : avatarUrl ? (
+                    <Trash2 className="w-5 h-5 text-white" />
                   ) : (
                     <Camera className="w-5 h-5 text-white" />
                   )}
@@ -615,7 +648,7 @@ export function CompanyUserPermissions({ user, onRemove, companyId }: CompanyUse
                   type="file"
                   accept="image/*"
                   onChange={handleAvatarUpload}
-                  className="hidden"  
+                  className="hidden"
                 />
               </div>
               <div className="flex-1">
@@ -758,10 +791,12 @@ export function CompanyUserPermissions({ user, onRemove, companyId }: CompanyUse
                   </Avatar>
                   <div
                     className="absolute inset-0 bg-black bg-opacity-50 rounded-full flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity cursor-pointer"
-                    onClick={handleAvatarClick}
+                    onClick={avatarUrl ? handleAvatarDelete : handleAvatarClick}
                   >
                     {isUploadingAvatar ? (
                       <div className="w-4 h-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                    ) : avatarUrl ? (
+                      <Trash2 className="w-4 h-4 text-white" />
                     ) : (
                       <Camera className="w-4 h-4 text-white" />
                     )}

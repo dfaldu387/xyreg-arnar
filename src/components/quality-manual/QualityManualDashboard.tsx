@@ -6,6 +6,8 @@ import { QualityManualLaunchView } from './QualityManualLaunchView';
 import { useQualityManual } from '@/hooks/useQualityManual';
 import { Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
+import { getDefaultConfig, type GenerationConfig } from './QualityManualGenerationConfig';
+import { useLanguage } from '@/context/LanguageContext';
 
 interface QualityManualDashboardProps {
   companyId: string;
@@ -14,6 +16,7 @@ interface QualityManualDashboardProps {
 export function QualityManualDashboard({ companyId }: QualityManualDashboardProps) {
   const { companyName: companyNameParam } = useParams<{ companyName: string }>();
   const decodedCompanyName = companyNameParam ? decodeURIComponent(companyNameParam) : '';
+  const { language } = useLanguage();
   const {
     sections,
     exclusions,
@@ -29,6 +32,7 @@ export function QualityManualDashboard({ companyId }: QualityManualDashboardProp
 
   const [activeSection, setActiveSection] = useState<string | null>(null);
   const [generatingAll, setGeneratingAll] = useState(false);
+  const [genConfig, setGenConfig] = useState<GenerationConfig>(() => getDefaultConfig(companyData, language));
 
   const currentSection = activeSection ? sections.find(s => s.sectionKey === activeSection) : null;
 
@@ -36,8 +40,8 @@ export function QualityManualDashboard({ companyId }: QualityManualDashboardProp
     setActiveSection(sectionKey);
   }, []);
 
-  const handleGenerateAll = useCallback(async () => {
-    const missing = sections.filter(s => !exclusions.has(s.clause) && (!s.content || s.content.length <= 20));
+  const handleGenerateAll = useCallback(async (config: GenerationConfig) => {
+    const missing = sections.filter(s => !s.content || s.content.length <= 20);
     if (missing.length === 0) {
       toast.info('All applicable sections already have content');
       return;
@@ -46,13 +50,40 @@ export function QualityManualDashboard({ companyId }: QualityManualDashboardProp
     let generated = 0;
     for (const section of missing) {
       try {
-        await generateSection(section.sectionKey);
+        await generateSection(section.sectionKey, {
+          outputLanguage: config.outputLanguage,
+          additionalPrompt: config.additionalInstructions || undefined,
+          detailLevel: config.detailLevel,
+          companySize: config.companySize,
+          regulatoryMaturity: config.regulatoryMaturity,
+        });
         generated++;
       } catch { /* continue */ }
     }
     setGeneratingAll(false);
     toast.success(`Generated ${generated} of ${missing.length} sections`);
   }, [sections, exclusions, generateSection]);
+
+  const handleRegenerateAll = useCallback(async (config: GenerationConfig) => {
+    const allSections = sections;
+    if (allSections.length === 0) return;
+    setGeneratingAll(true);
+    let generated = 0;
+    for (const section of allSections) {
+      try {
+        await generateSection(section.sectionKey, {
+          outputLanguage: config.outputLanguage,
+          additionalPrompt: config.additionalInstructions || undefined,
+          detailLevel: config.detailLevel,
+          companySize: config.companySize,
+          regulatoryMaturity: config.regulatoryMaturity,
+        });
+        generated++;
+      } catch { /* continue */ }
+    }
+    setGeneratingAll(false);
+    toast.success(`Regenerated ${generated} of ${allSections.length} sections`);
+  }, [sections, generateSection]);
 
   if (loading) {
     return (
@@ -79,7 +110,7 @@ export function QualityManualDashboard({ companyId }: QualityManualDashboardProp
           />
         </div>
       ) : (
-        <QualityManualLaunchView
+      <QualityManualLaunchView
           sections={sections}
           exclusions={exclusions}
           onSelectSection={handleSelectSection}
@@ -97,6 +128,15 @@ export function QualityManualDashboard({ companyId }: QualityManualDashboardProp
         activeSection={activeSection}
         onSelectSection={handleSelectSection}
         generating={generating}
+        companyId={companyId}
+        companyName={decodedCompanyName}
+        exclusions={exclusions}
+        onGenerateAll={handleGenerateAll}
+        onRegenerateAll={handleRegenerateAll}
+        generatingAll={generatingAll}
+        genConfig={genConfig}
+        onGenConfigChange={setGenConfig}
+        companyData={companyData}
       />
     </div>
   );

@@ -32,6 +32,7 @@ interface ValueChainViewProps {
   onCategoryChange: (deptId: string, category: 'support' | 'primary' | undefined) => void;
   onReorder: (deptId: string, targetIndex: number, category: 'support' | 'primary' | undefined) => void;
   companyId?: string;
+  readOnly?: boolean;
 }
 
 const SUPPORT_COLORS = [
@@ -54,7 +55,7 @@ const PRIMARY_COLORS = [
   'from-orange-500 to-orange-600',
 ];
 
-export function ValueChainView({ departments, employeesByDept, normalizeDepartmentName, onDepartmentClick, onUserUpdate, onCategoryChange, onReorder, companyId }: ValueChainViewProps) {
+export function ValueChainView({ departments, employeesByDept, normalizeDepartmentName, onDepartmentClick, onUserUpdate, onCategoryChange, onReorder, companyId, readOnly }: ValueChainViewProps) {
   const [dragOverZone, setDragOverZone] = useState<string | null>(null);
   const [dropIndicator, setDropIndicator] = useState<{ deptId: string; position: 'before' | 'after' } | null>(null);
 
@@ -353,8 +354,8 @@ export function ValueChainView({ departments, employeesByDept, normalizeDepartme
         </div>
       </div>
 
-      {/* Unassigned departments */}
-      {(unassignedDepts.length > 0 || dragOverZone === 'unassigned') && (
+      {/* Unassigned departments - hidden in readOnly mode when empty */}
+      {!readOnly && (unassignedDepts.length > 0 || dragOverZone === 'unassigned') && (
         <div
           className={`mt-4 rounded-lg border border-slate-200 overflow-hidden transition-all ${dropZoneClass('unassigned')}`}
           onDragOver={(e) => handleDragOver(e, 'unassigned')}
@@ -378,8 +379,8 @@ export function ValueChainView({ departments, employeesByDept, normalizeDepartme
         </div>
       )}
 
-      {/* Always show unassigned drop zone when dragging */}
-      {unassignedDepts.length === 0 && dragOverZone !== 'unassigned' && (
+      {/* Always show unassigned drop zone when dragging (settings only) */}
+      {!readOnly && unassignedDepts.length === 0 && dragOverZone !== 'unassigned' && (
         <div
           className="mt-4 rounded-lg border-2 border-dashed border-slate-200 p-4 text-center text-sm text-muted-foreground transition-all"
           onDragOver={(e) => handleDragOver(e, 'unassigned')}
@@ -387,6 +388,20 @@ export function ValueChainView({ departments, employeesByDept, normalizeDepartme
           onDrop={(e) => handleDrop(e, undefined)}
         >
           Drag departments here to unassign
+        </div>
+      )}
+
+      {/* In readOnly mode, show unassigned departments without drag UI */}
+      {readOnly && unassignedDepts.length > 0 && (
+        <div className="mt-4 rounded-lg border border-slate-200 overflow-hidden">
+          <div className="bg-slate-100 px-4 py-1.5 border-b border-slate-200">
+            <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest">Unassigned Departments</h3>
+          </div>
+          <div className="p-2 bg-white/50">
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
+              {unassignedDepts.map((dept) => renderUnassignedCard(dept))}
+            </div>
+          </div>
         </div>
       )}
     </div>

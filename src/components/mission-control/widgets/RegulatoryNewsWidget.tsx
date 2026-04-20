@@ -3,9 +3,12 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Newspaper, ExternalLink, X, Loader2, Search } from "lucide-react";
+import { Newspaper, ExternalLink, X, Loader2, Search, RefreshCw } from "lucide-react";
 import { useRegulatoryNews } from "@/hooks/useRegulatoryNews";
 import { formatDistanceToNow } from "date-fns";
+import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
+import { useQueryClient } from "@tanstack/react-query";
 
 const REGIONS = ["All", "EU", "US", "UK", "APAC", "LATAM", "Global"];
 
@@ -33,7 +36,9 @@ interface RegulatoryNewsWidgetProps {
 export function RegulatoryNewsWidget({ onRemove }: RegulatoryNewsWidgetProps) {
   const [selectedRegion, setSelectedRegion] = useState("All");
   const [searchQuery, setSearchQuery] = useState("");
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const { data: newsItems, isLoading } = useRegulatoryNews(selectedRegion);
+  const queryClient = useQueryClient();
 
   const filteredNews = useMemo(() => {
     if (!newsItems || !searchQuery.trim()) return newsItems;
@@ -46,6 +51,23 @@ export function RegulatoryNewsWidget({ onRemove }: RegulatoryNewsWidgetProps) {
     );
   }, [newsItems, searchQuery]);
 
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    try {
+      const { error } = await supabase.functions.invoke("fetch-regulatory-news");
+      if (error) throw error;
+      await queryClient.invalidateQueries({ queryKey: ["regulatory-news"] });
+      toast.success("Regulatory news refreshed");
+    } catch (err: any) {
+      console.error("Failed to fetch regulatory news:", err);
+      toast.error("Failed to refresh news", {
+        description: err?.message || "Please try again later",
+      });
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between pb-2">
@@ -53,11 +75,23 @@ export function RegulatoryNewsWidget({ onRemove }: RegulatoryNewsWidgetProps) {
           <Newspaper className="h-4 w-4" />
           Regulatory News
         </CardTitle>
-        {onRemove && (
-          <Button variant="ghost" size="icon" className="h-6 w-6" onClick={onRemove}>
-            <X className="h-3.5 w-3.5" />
+        <div className="flex items-center gap-1">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-6 w-6"
+            onClick={handleRefresh}
+            disabled={isRefreshing}
+            title="Refresh regulatory news"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${isRefreshing ? "animate-spin" : ""}`} />
           </Button>
-        )}
+          {onRemove && (
+            <Button variant="ghost" size="icon" className="h-6 w-6" onClick={onRemove}>
+              <X className="h-3.5 w-3.5" />
+            </Button>
+          )}
+        </div>
       </CardHeader>
       <CardContent className="space-y-3">
         {/* Region filter chips */}
@@ -93,7 +127,7 @@ export function RegulatoryNewsWidget({ onRemove }: RegulatoryNewsWidgetProps) {
           </div>
         ) : !newsItems?.length ? (
           <p className="text-sm text-muted-foreground text-center py-6">
-            No regulatory news yet. News will appear once the nightly scraper runs.
+            No regulatory news yet. Click the refresh button to fetch the latest news.
           </p>
         ) : !filteredNews?.length ? (
           <p className="text-sm text-muted-foreground text-center py-6">

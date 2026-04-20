@@ -34,7 +34,6 @@ import {
   User,
   Shield,
   ShieldCheck,
-  MessageSquare,
 } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { useAuth } from "@/context/AuthContext";
@@ -44,13 +43,22 @@ import { ReAuthContent } from "@/components/esign/components/ReAuthContent";
 import { ESignService } from "@/components/esign/lib/esign.service";
 import { AuditTrailDrawer } from "@/components/esign/components/AuditTrailDrawer";
 import { useDocumentReviewAssignments } from "@/hooks/useDocumentReviewAssignments";
-import { DocxCommentSidebar } from "@/components/review/DocxCommentSidebar";
 import type { ESignRecord, AuthMethod } from "@/components/esign/lib/esign.types";
 import { DocumentExportService } from "@/services/documentExportService";
 import type { DocumentTemplate, DocumentSection, ProductContext, DocumentControl, RevisionHistory, AssociatedDocument } from "@/types/documentComposer";
 
 const STORAGE_URL = `${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public`;
 const CALLBACK_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/onlyoffice-callback`;
+
+// Preload OnlyOffice SDK script so it's cached before user opens a document
+const ONLYOFFICE_SERVER = import.meta.env.VITE_ONLYOFFICE_SERVER_URL || "";
+if (ONLYOFFICE_SERVER && typeof window !== "undefined") {
+  const link = document.createElement("link");
+  link.rel = "preload";
+  link.as = "script";
+  link.href = `${ONLYOFFICE_SERVER}/web-apps/apps/api/documents/api.js`;
+  document.head.appendChild(link);
+}
 
 const getDocumentUrl = (filePath?: string): string => {
   if (!filePath) return "";
@@ -146,7 +154,6 @@ export function OnlyOfficeReviewViewer({
   const { user } = useAuth();
   const [editorKey, setEditorKey] = useState<string | null>(null);
   const [viewerVisible, setViewerVisible] = useState(true);
-  const [showCommentSidebar, setShowCommentSidebar] = useState(false);
 
   // Active role can switch from 'review' → 'approver' within the same session
   const [activeRole, setActiveRole] = useState(userRole);
@@ -219,7 +226,7 @@ export function OnlyOfficeReviewViewer({
       if (isTemplate) {
         const { data: docRow } = await supabase
           .from('phase_assigned_document_template')
-          .select('file_path, file_name, file_size, file_type, company_id')
+          .select('file_path, file_name, file_size, file_type, company_id, updated_at')
           .eq('id', cleanDocId)
           .single();
         if (docRow?.file_path) {
@@ -230,6 +237,25 @@ export function OnlyOfficeReviewViewer({
             size: docRow.file_size || 0,
             type: docRow.file_type || 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
           });
+
+          // Use a stable key based on file path + updated_at so OnlyOffice can
+          // reuse its cached conversion when the file hasn't changed.
+          // Key format must stay as review-{docId}-{digits} for callback parsing.
+          const keyBase = `${docRow.file_path}-${docRow.updated_at || ''}`;
+          let hash = 0;
+          for (let i = 0; i < keyBase.length; i++) {
+            hash = ((hash << 5) - hash + keyBase.charCodeAt(i)) | 0;
+          }
+          const stableKey = `review-${cleanDocId}-${(Math.abs(hash) + 1000000000000).toString().slice(0, 13)}`;
+
+          // Upsert editor key in parallel — no need to await before setting state
+          supabase.from('document_editor_sessions').upsert({
+            document_id: cleanDocId,
+            editor_key: stableKey,
+            version: 1,
+          }, { onConflict: 'document_id' });
+          setEditorKey(stableKey);
+          return;
         } else if (docRow) {
           // No file attached — try to export draft from document_studio_templates
           const cid = docRow.company_id || companyId;
@@ -292,10 +318,7 @@ export function OnlyOfficeReviewViewer({
         }
       }
 
-      // 2. Generate a new editor key each time the viewer opens.
-      //    This forces the previous OnlyOffice session to close (triggering
-      //    the status-2 callback that saves comments/edits to storage),
-      //    and ensures the viewer loads the latest file from storage.
+      // Fallback: generate a new editor key for non-template docs or draft exports
       const newKey = `review-${cleanDocId}-${Date.now()}`;
 
       await supabase.from('document_editor_sessions').upsert({
@@ -346,8 +369,8 @@ export function OnlyOfficeReviewViewer({
       payload.reviewer_group_ids = [];
       payload.reviewer_user_ids = [];
     }
-    await supabase.from("phase_assigned_document_template").update(payload).eq("id", cleanDocId);
-    await supabase.from("documents").update(payload).eq("id", cleanDocId);
+    await supabase.from("phase_assigned_document_template").update(payload as any).eq("id", cleanDocId);
+    await supabase.from("documents").update(payload as any).eq("id", cleanDocId);
   };
 
   const saveReviewerDecision = async (decision: string, comment?: string) => {
@@ -595,16 +618,6 @@ export function OnlyOfficeReviewViewer({
             </div>
             <div className="flex items-center gap-2 shrink-0">
               <Button
-                variant={showCommentSidebar ? "secondary" : "ghost"}
-                size="sm"
-                className="gap-1.5"
-                onClick={() => setShowCommentSidebar(!showCommentSidebar)}
-                title="Toggle document comments"
-              >
-                <MessageSquare className="h-4 w-4" />
-                <span className="text-xs">Comments</span>
-              </Button>
-              <Button
                 variant="ghost"
                 size="icon"
                 onClick={handleCloseClick}
@@ -684,13 +697,6 @@ export function OnlyOfficeReviewViewer({
               )}
             </div>
 
-            {/* Document Comments Sidebar */}
-            {showCommentSidebar && (
-              <DocxCommentSidebar
-                documentId={documentId.startsWith("template-") ? documentId.replace("template-", "") : documentId}
-                onClose={() => setShowCommentSidebar(false)}
-              />
-            )}
           </div>
         </DialogContent>
       </Dialog>

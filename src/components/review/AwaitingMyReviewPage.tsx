@@ -665,11 +665,15 @@ export function AwaitingMyReviewPage({ companyId, userGroups, companyName, first
                     )}
                     <h3 className="font-semibold text-lg">{doc.name}</h3>
                     {doc.role === 'author' ? (
-                      <Badge className="bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 text-xs">
+                      <Badge className="bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 text-xs hover:bg-blue-200">
                         Author
                       </Badge>
+                    ) : doc.isAlsoApprover ? (
+                      <Badge className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200 text-xs hover:bg-green-200">
+                        Approver
+                      </Badge>
                     ) : (
-                      <Badge className="bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200 text-xs">
+                      <Badge className="bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200 text-xs hover:bg-purple-200">
                         Reviewer
                       </Badge>
                     )}
@@ -790,6 +794,10 @@ export function AwaitingMyReviewPage({ companyId, userGroups, companyName, first
                     {doc.role === 'author' ? (
                       <Badge className="bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 text-xs">
                         Author
+                      </Badge>
+                    ) : doc.isAlsoApprover ? (
+                      <Badge className="bg-pink-100 text-pink-800 dark:bg-pink-900 dark:text-pink-200 text-xs">
+                        Approver
                       </Badge>
                     ) : (
                       <Badge className="bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200 text-xs">
