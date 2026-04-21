@@ -10,6 +10,9 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
 import { create, getNumericDate } from "https://deno.land/x/djwt@v3.0.2/mod.ts";
+import { trackTokenUsage, extractGeminiDetailedUsage, logAiTokenUsage } from "../_shared/token-tracking.ts";
+
+declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void };
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -135,6 +138,15 @@ serve(async (req) => {
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
+    // Extract user ID from auth header
+    let userId: string | undefined;
+    const authHeader = req.headers.get("authorization");
+    if (authHeader) {
+      const token = authHeader.replace("Bearer ", "");
+      const { data: { user } } = await supabase.auth.getUser(token);
+      userId = user?.id;
+    }
+
     // --- Resolve Google Vertex AI credential ---
     let decryptedKey = "";
     let keySource = "none";
@@ -241,6 +253,30 @@ serve(async (req) => {
         JSON.stringify({ error: "AI returned no content" }),
         { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
+    }
+
+    // --- Track token usage (non-blocking) ---
+    if (companyId) {
+      const detailedUsage = extractGeminiDetailedUsage(vertexData);
+      if (detailedUsage) {
+        EdgeRuntime.waitUntil(
+          Promise.all([
+            logAiTokenUsage({
+              companyId,
+              userId,
+              source: 'document_ai_assistant',
+              model: MODEL,
+              usage: detailedUsage,
+              metadata: { documentName: documentName ?? null, documentType: documentType ?? null },
+            }),
+            trackTokenUsage(companyId, 'google_vertex', {
+              promptTokens: detailedUsage.inputTokens,
+              completionTokens: detailedUsage.outputTokens,
+              totalTokens: detailedUsage.totalTokens,
+            }),
+          ])
+        );
+      }
     }
 
     return new Response(

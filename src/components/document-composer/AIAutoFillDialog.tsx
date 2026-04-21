@@ -13,6 +13,8 @@ import { DocumentTemplate } from '@/types/documentComposer';
 import { useReferenceDocuments } from '@/hooks/useReferenceDocuments';
 import { ReferenceDocumentService } from '@/services/referenceDocumentService';
 import { fetchFullAIContext, type AIContextSources } from '@/services/aiContextAggregatorService';
+import { useApiKeyStatus } from '@/hooks/useCompanyApiKeys';
+import { AlertTriangle } from 'lucide-react';
 
 /** Standards that should always be pre-checked */
 const ALWAYS_PRECHECK = ['ISO 13485', 'ISO 14971', 'IEC 62366'];
@@ -59,6 +61,7 @@ export function AIAutoFillDialog({
   const [contextSources, setContextSources] = useState<AIContextSources | null>(null);
   const isMountedRef = useRef(true);
   const { documents: refDocuments } = useReferenceDocuments(companyId);
+  const { googleVertexAvailable, isLoading: isKeyStatusLoading } = useApiKeyStatus(companyId || '');
 
   const isAborted = () => !isMountedRef.current || !!abortControllerRef.current?.signal.aborted;
 
@@ -267,6 +270,7 @@ export function AIAutoFillDialog({
             prompt,
             sectionTitle: section.title,
             currentContent: '',
+            companyId: companyId || undefined,
             referenceContext: referenceContext || undefined,
           },
         }).then((res) => {
@@ -508,6 +512,19 @@ export function AIAutoFillDialog({
           </DialogPrimitive.Close>
 
           <div className="space-y-4">
+            {/* Vertex AI not configured alert */}
+            {!isKeyStatusLoading && !googleVertexAvailable && (
+              <div className="rounded-lg border border-amber-300 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-700 p-3 flex items-start gap-3">
+                <AlertTriangle className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-sm font-medium text-amber-800 dark:text-amber-300">Google Vertex AI not configured</p>
+                  <p className="text-xs text-amber-700 dark:text-amber-400 mt-0.5">
+                    Auto-Fill requires a Google Vertex AI service account key. Please ask your administrator to add a <strong>google_vertex</strong> key in Settings &gt; API Keys.
+                  </p>
+                </div>
+              </div>
+            )}
+
             {/* AI Input Sources Indicator */}
             <div className="rounded-lg border bg-muted/30 p-3">
               <h4 className="text-sm font-medium flex items-center gap-2 mb-2">
@@ -890,7 +907,7 @@ export function AIAutoFillDialog({
                 ) : (
                   <Button
                     onClick={handleGenerate}
-                    disabled={selectedCount === 0}
+                    disabled={selectedCount === 0 || !googleVertexAvailable}
                     className="bg-blue-600 hover:bg-blue-700"
                   >
                     <Wand2 className="w-4 h-4 mr-2" />

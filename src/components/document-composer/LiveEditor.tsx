@@ -29,6 +29,7 @@ import { AIAutoFillDialog } from './AIAutoFillDialog';
 import { AIDocumentValidationDialog } from './AIDocumentValidationDialog';
 import { documentContextStore } from '@/stores/documentContextStore';
 import { DocumentOutlinePanel } from './DocumentOutlinePanel';
+import { LeftRailTabs } from './LeftRailTabs';
 import { RightPanel } from './RightPanel';
 import { useEditor, EditorContent, NodeViewWrapper, NodeViewProps, ReactNodeViewRenderer } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
@@ -974,15 +975,6 @@ export function LiveEditor({ template, className = '', onContentUpdate, companyI
                     <Wand2 className="w-4 h-4 mr-2" />
                     Auto-Fill Sections
                   </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => {
-                    if (showDocumentAIBar) return;
-                    const allContent = unifiedEditor?.getText()?.slice(0, 8000) || '';
-                    setSelectedSection({ title: template?.name || 'Document', content: allContent });
-                    setShowDocumentAIBar(true);
-                  }}>
-                    <Sparkles className="w-4 h-4 mr-2" />
-                    Review Document
-                  </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
               <Tooltip>
@@ -1272,11 +1264,13 @@ export function LiveEditor({ template, className = '', onContentUpdate, companyI
       <div className="flex-1 flex overflow-hidden relative">
         {/* Outline: rendered on desktop when not collapsed; overlay on narrow */}
         {!isNarrow && (
-          <DocumentOutlinePanel
+          <LeftRailTabs
             editorContainerRef={editorContainerRef}
             refreshTrigger={refreshTrigger}
             externalCollapsed={outlineCollapsed}
             onCollapsedChange={setOutlineCollapsed}
+            documentId={editingDocumentId || currentDocumentId}
+            companyId={companyId || activeCompanyRole?.companyId}
           />
         )}
 
@@ -1287,9 +1281,11 @@ export function LiveEditor({ template, className = '', onContentUpdate, companyI
             onClick={() => setNarrowOutlineOpen(false)}
           >
             <div className="bg-background h-full shadow-xl" onClick={(e) => e.stopPropagation()}>
-              <DocumentOutlinePanel
+              <LeftRailTabs
                 editorContainerRef={editorContainerRef}
                 refreshTrigger={refreshTrigger}
+                documentId={editingDocumentId || currentDocumentId}
+                companyId={companyId || activeCompanyRole?.companyId}
               />
             </div>
             <div className="flex-1 bg-black/30" />

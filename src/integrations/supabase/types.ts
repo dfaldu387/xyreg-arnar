@@ -3948,6 +3948,56 @@ export type Database = {
           },
         ]
       }
+      ai_token_usage: {
+        Row: {
+          id: string
+          company_id: string
+          user_id: string | null
+          source: string
+          model: string
+          input_tokens: number
+          output_tokens: number
+          thinking_tokens: number
+          total_tokens: number
+          metadata: Json | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          company_id: string
+          user_id?: string | null
+          source: string
+          model: string
+          input_tokens?: number
+          output_tokens?: number
+          thinking_tokens?: number
+          total_tokens?: number
+          metadata?: Json | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          company_id?: string
+          user_id?: string | null
+          source?: string
+          model?: string
+          input_tokens?: number
+          output_tokens?: number
+          thinking_tokens?: number
+          total_tokens?: number
+          metadata?: Json | null
+          created_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ai_token_usage_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       company_api_keys: {
         Row: {
           company_id: string

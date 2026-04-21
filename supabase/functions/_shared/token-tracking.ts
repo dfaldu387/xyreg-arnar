@@ -93,6 +93,77 @@ export function extractLovableAIUsage(responseData: any): TokenUsage | null {
 /**
  * Extract token usage from direct Gemini API response
  */
+// --- Per-request AI token usage tracking ---
+
+export type AiSource = 'professor_xyreg' | 'document_ai_assistant' | 'auto_fill_section';
+
+interface DetailedTokenUsage {
+  inputTokens: number;
+  outputTokens: number;
+  thinkingTokens: number;
+  totalTokens: number;
+}
+
+/**
+ * Extract detailed token usage from Gemini response including thinking tokens
+ */
+export function extractGeminiDetailedUsage(responseData: any): DetailedTokenUsage | null {
+  try {
+    const usageMetadata = responseData.usageMetadata;
+    if (!usageMetadata) return null;
+
+    return {
+      inputTokens: usageMetadata.promptTokenCount || 0,
+      outputTokens: usageMetadata.candidatesTokenCount || 0,
+      thinkingTokens: usageMetadata.thoughtsTokenCount || 0,
+      totalTokens: usageMetadata.totalTokenCount || 0,
+    };
+  } catch (error) {
+    console.error('[token-tracking] Error extracting Gemini detailed usage:', error);
+    return null;
+  }
+}
+
+interface AiTokenUsageRecord {
+  companyId: string;
+  userId?: string;
+  source: AiSource;
+  model: string;
+  usage: DetailedTokenUsage;
+  metadata?: Record<string, unknown>;
+}
+
+/**
+ * Log a per-request AI token usage row into ai_token_usage table
+ */
+export async function logAiTokenUsage(record: AiTokenUsageRecord): Promise<void> {
+  try {
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+    const { error } = await supabase.from('ai_token_usage').insert({
+      company_id: record.companyId,
+      user_id: record.userId ?? null,
+      source: record.source,
+      model: record.model,
+      input_tokens: record.usage.inputTokens,
+      output_tokens: record.usage.outputTokens,
+      thinking_tokens: record.usage.thinkingTokens,
+      total_tokens: record.usage.totalTokens,
+      metadata: record.metadata ?? {},
+    });
+
+    if (error) {
+      console.error('[token-tracking] Error logging AI token usage:', error);
+    } else {
+      console.log(`[token-tracking] AI usage logged: source=${record.source}, total=${record.usage.totalTokens}`);
+    }
+  } catch (error) {
+    console.error('[token-tracking] Unexpected error logging AI token usage:', error);
+  }
+}
+
 export function extractGeminiUsage(responseData: any): TokenUsage | null {
   try {
     const usageMetadata = responseData.usageMetadata;

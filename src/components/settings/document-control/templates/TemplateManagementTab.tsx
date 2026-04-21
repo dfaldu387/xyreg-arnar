@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { useParams } from 'react-router-dom';
 import { stripDocPrefix } from '@/utils/templateNameUtils';
-import { Plus, FileText, Calendar, User, Download, Trash2, Brain, Eye, Edit, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
+import { Plus, FileText, Calendar, User, Download, Trash2, Brain, Eye, Edit, ArrowUpDown, ArrowUp, ArrowDown, FilePlus2, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 import { useTranslation } from '@/hooks/useTranslation';
@@ -15,6 +16,8 @@ import { SOPTemplatePreviewDialog } from './SOPTemplatePreviewDialog';
 import { Badge } from '@/components/ui/badge';
 import { supabase } from '@/integrations/supabase/client';
 import { useCompanyRole } from '@/context/CompanyRoleContext';
+import { TIER_A_AUTO_SEED } from '@/constants/sopAutoSeedTiers';
+import { seedSingleSopForCompany } from '@/services/sopAutoSeedService';
 import { 
   Table, 
   TableBody, 
@@ -33,6 +36,26 @@ interface TemplateManagementTabProps {
 export function TemplateManagementTab({ companyId, onOpenAiTemplateDialog, onOpenUploadDialog }: TemplateManagementTabProps) {
   const { lang } = useTranslation();
   const { activeCompanyRole } = useCompanyRole();
+  const { companyName: companyNameParam } = useParams<{ companyName: string }>();
+  const companyName = companyNameParam ? decodeURIComponent(companyNameParam) : '';
+  const [seedingSop, setSeedingSop] = useState<string | null>(null);
+
+  // Set of Tier A SOP numbers (e.g. "SOP-001") for quick lookup.
+  const tierASopNumbers = useMemo(
+    () => new Set(TIER_A_AUTO_SEED.map((e) => e.sop)),
+    [],
+  );
+
+  const isTierASop = (templateName: string): boolean => {
+    const match = templateName.match(/SOP-\d{3}/);
+    return !!match && tierASopNumbers.has(match[0]);
+  };
+
+  const extractSopKey = (templateName: string): string | null => {
+    const match = templateName.match(/SOP-\d{3}/);
+    return match ? match[0] : null;
+  };
+
   const [filters, setFilters] = useState<TemplateFilters>({
     search: '',
   });
@@ -67,6 +90,42 @@ export function TemplateManagementTab({ companyId, onOpenAiTemplateDialog, onOpe
       }
     } catch (e) {
       console.error('Error loading draft names:', e);
+    }
+  };
+
+  const handleUseTemplate = async (template: any) => {
+    const sopKey = extractSopKey(template.name);
+    if (!sopKey || !companyId || !companyName) return;
+    try {
+      setSeedingSop(sopKey);
+      const result = await seedSingleSopForCompany(companyId, companyName, sopKey);
+      if (result.inserted > 0) {
+        toast({
+          title: lang('common.success'),
+          description: `${sopKey} draft created and personalized for ${companyName}.`,
+        });
+      } else if (result.skipped > 0) {
+        toast({
+          title: 'Already exists',
+          description: `${sopKey} is already provisioned for this company.`,
+        });
+      } else {
+        toast({
+          title: lang('common.error'),
+          description: result.errors[0] ?? 'Failed to seed SOP.',
+          variant: 'destructive',
+        });
+      }
+      await loadDraftNames();
+    } catch (e) {
+      console.error('Use Template failed:', e);
+      toast({
+        title: lang('common.error'),
+        description: e instanceof Error ? e.message : 'Failed to seed SOP.',
+        variant: 'destructive',
+      });
+    } finally {
+      setSeedingSop(null);
     }
   };
 
@@ -400,6 +459,23 @@ export function TemplateManagementTab({ companyId, onOpenAiTemplateDialog, onOpe
                   </TableCell>
                    <TableCell className="text-right">
                      <div className="flex items-center justify-end gap-1">
+                       {isTierASop(template.name) && !draftTemplateNames.has(template.name) && (
+                         <Button
+                           variant="default"
+                           size="sm"
+                           className="h-8 gap-1.5"
+                           onClick={() => handleUseTemplate(template)}
+                           disabled={seedingSop === extractSopKey(template.name)}
+                           title="Provision this SOP for the company (auto-personalized)"
+                         >
+                           {seedingSop === extractSopKey(template.name) ? (
+                             <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                           ) : (
+                             <FilePlus2 className="h-3.5 w-3.5" />
+                           )}
+                           Use Template
+                         </Button>
+                       )}
                        {draftTemplateNames.has(template.name) && (
                          <Button
                            variant="ghost"
