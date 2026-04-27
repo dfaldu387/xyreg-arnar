@@ -364,6 +364,63 @@ export type Database = {
           },
         ]
       }
+      ai_token_usage: {
+        Row: {
+          company_id: string
+          created_at: string
+          id: string
+          input_tokens: number
+          metadata: Json | null
+          model: string
+          output_tokens: number
+          source: string
+          thinking_tokens: number
+          total_tokens: number
+          user_id: string | null
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          id?: string
+          input_tokens?: number
+          metadata?: Json | null
+          model: string
+          output_tokens?: number
+          source: string
+          thinking_tokens?: number
+          total_tokens?: number
+          user_id?: string | null
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          id?: string
+          input_tokens?: number
+          metadata?: Json | null
+          model?: string
+          output_tokens?: number
+          source?: string
+          thinking_tokens?: number
+          total_tokens?: number
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ai_token_usage_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_token_usage_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "company_dashboard_summary"
+            referencedColumns: ["company_id"]
+          },
+        ]
+      }
       app_notifications: {
         Row: {
           action: string
@@ -3948,56 +4005,6 @@ export type Database = {
           },
         ]
       }
-      ai_token_usage: {
-        Row: {
-          id: string
-          company_id: string
-          user_id: string | null
-          source: string
-          model: string
-          input_tokens: number
-          output_tokens: number
-          thinking_tokens: number
-          total_tokens: number
-          metadata: Json | null
-          created_at: string
-        }
-        Insert: {
-          id?: string
-          company_id: string
-          user_id?: string | null
-          source: string
-          model: string
-          input_tokens?: number
-          output_tokens?: number
-          thinking_tokens?: number
-          total_tokens?: number
-          metadata?: Json | null
-          created_at?: string
-        }
-        Update: {
-          id?: string
-          company_id?: string
-          user_id?: string | null
-          source?: string
-          model?: string
-          input_tokens?: number
-          output_tokens?: number
-          thinking_tokens?: number
-          total_tokens?: number
-          metadata?: Json | null
-          created_at?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "ai_token_usage_company_id_fkey"
-            columns: ["company_id"]
-            isOneToOne: false
-            referencedRelation: "companies"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       company_api_keys: {
         Row: {
           company_id: string
@@ -5808,6 +5815,51 @@ export type Database = {
           },
         ]
       }
+      customer_feature_flags: {
+        Row: {
+          company_id: string
+          created_at: string
+          feature_key: string
+          id: string
+          is_enabled: boolean
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          feature_key: string
+          id?: string
+          is_enabled?: boolean
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          feature_key?: string
+          id?: string
+          is_enabled?: boolean
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "customer_feature_flags_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "customer_feature_flags_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "company_dashboard_summary"
+            referencedColumns: ["company_id"]
+          },
+        ]
+      }
       customer_validation_records: {
         Row: {
           company_id: string
@@ -6435,6 +6487,36 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      demo_seed_registry: {
+        Row: {
+          company_id: string
+          created_at: string
+          created_by: string | null
+          id: string
+          row_id: string
+          seed_id: string
+          table_name: string
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          row_id: string
+          seed_id: string
+          table_name: string
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          row_id?: string
+          seed_id?: string
+          table_name?: string
+        }
+        Relationships: []
       }
       design_change_rationales: {
         Row: {

@@ -44,7 +44,7 @@ import {
   IndividualDocument,
 } from "@/services/ganttPhaseDocumentService";
 import { Badge } from "../ui/badge";
-import { CompanyDocumentEditDialog } from "@/components/documents/CompanyDocumentEditDialog";
+import { DocumentDraftDrawer } from "@/components/product/documents/DocumentDraftDrawer";
 
 // Add CSS for smooth Gantt chart animations
 const ganttAnimationStyles = `
@@ -269,9 +269,8 @@ export function CompanyMilestonesOfficial({ companyName }: CompanyMilestonesProp
   const [enterpriseLinks, setEnterpriseLinks] = useState<any[]>([]);
   const enterpriseLinksRef = useRef<any[]>([]);
 
-  // Enterprise document edit dialog state
-  const [editDialogOpen, setEditDialogOpen] = useState(false);
-  const [editDialogDocument, setEditDialogDocument] = useState<EnterpriseDocument | null>(null);
+  // Enterprise document draft drawer state
+  const [draftDrawerDocument, setDraftDrawerDocument] = useState<EnterpriseDocument | null>(null);
   // Ref to always access latest enterpriseDocuments in Gantt event handlers (avoids stale closure)
   const enterpriseDocumentsRef = useRef<EnterpriseDocument[]>([]);
 
@@ -750,13 +749,12 @@ export function CompanyMilestonesOfficial({ companyName }: CompanyMilestonesProp
           navigate(`/app/product/${productId}/milestones?tab=gantt`);
         }
 
-        // Document click → open side edit dialog (use ref to get latest data)
+        // Document click → open draft drawer (use ref to get latest data)
         if (taskId.startsWith('ent-doc-')) {
           const docId = taskId.replace('ent-doc-', '');
           const doc = enterpriseDocumentsRef.current.find(d => d.id === docId);
           if (doc) {
-            setEditDialogDocument(doc);
-            setEditDialogOpen(true);
+            setDraftDrawerDocument(doc);
           } else {
             console.warn('[Enterprise Gantt] Document not found in state for id:', docId);
           }
@@ -1730,37 +1728,31 @@ export function CompanyMilestonesOfficial({ companyName }: CompanyMilestonesProp
         </CardContent>
       </Card>
 
-      {editDialogDocument && (
-        <CompanyDocumentEditDialog
-          open={editDialogOpen}
-          onOpenChange={(open) => {
-            setEditDialogOpen(open);
-            if (!open) {
-              setEditDialogDocument(null);
-            }
-          }}
-          companyId={activeCompanyRole?.companyId}
-          document={{
-            id: editDialogDocument.id,
-            name: editDialogDocument.name,
-            document_type: editDialogDocument.document_type || '',
-            status: editDialogDocument.status,
-            start_date: editDialogDocument.start_date || undefined,
-            date: editDialogDocument.date || undefined,
-            due_date: editDialogDocument.due_date || undefined,
-            phase_id: editDialogDocument.phase_id || undefined,
-            source_table: editDialogDocument.source_table,
-          }}
-          onDocumentUpdated={() => {
+      <DocumentDraftDrawer
+        open={!!draftDrawerDocument}
+        onOpenChange={(open) => {
+          if (!open) {
             // Clear cached drag dates so fresh DB values are used
-            const docId = editDialogDocument.id;
-            delete draggedDocDatesRef.current[docId];
-            setEditDialogOpen(false);
-            setEditDialogDocument(null);
-            refreshEnterpriseDocuments(docId);
-          }}
-        />
-      )}
+            if (draftDrawerDocument) {
+              delete draggedDocDatesRef.current[draftDrawerDocument.id];
+              refreshEnterpriseDocuments(draftDrawerDocument.id);
+            }
+            setDraftDrawerDocument(null);
+          }
+        }}
+        documentId={draftDrawerDocument?.id || ''}
+        documentName={draftDrawerDocument?.name || ''}
+        documentType={draftDrawerDocument?.document_type || ''}
+        companyId={activeCompanyRole?.companyId || ''}
+        onDocumentSaved={() => {
+          if (draftDrawerDocument) {
+            delete draggedDocDatesRef.current[draftDrawerDocument.id];
+            refreshEnterpriseDocuments(draftDrawerDocument.id);
+          }
+          setDraftDrawerDocument(null);
+        }}
+        disableSopMentions
+      />
     </div>
   );
 }

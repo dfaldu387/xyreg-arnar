@@ -1,35 +1,73 @@
+## Problem
 
+Two issues are blocking the Edit-to-side-drawer flow:
 
-## Issue
-For Class I devices the dropdown only offers **"Self-Declaration (Annex IV)"**. Per EU MDR, the self-declaration route for Class I is more accurately described as **"Conformity Assessment based on Annex II and Annex III"** (Annex II = technical documentation, Annex III = PMS technical documentation). Annex IV is the *Declaration of Conformity template*, not the assessment procedure itself. The label is misleading and the more correct phrasing is missing entirely.
+1. **Vite build error** — `src/components/gantt-chart/src/index.js` imports from `@svar-ui/gantt-store` and `@svar-ui/react-editor`, but only `@svar-ui/react-gantt` is installed. This breaks the whole app preview, which is why the Edit button appears not to work.
+2. **Edit button on templates list** opens a small modal for non-SOP templates instead of the side drawer (DocumentDraftDrawer). SOPs already route to the drawer; non-SOP templates do not.
 
-## Fix (single source — propagates to both dropdowns)
+## Changes
 
-**File:** `src/utils/conformityRouteUtils.ts`
+### 1. Fix Gantt import (`src/components/gantt-chart/src/index.js`)
 
-1. **Add** a new option as the canonical Class I self-declaration route:
-   ```
-   { value: 'Self-Declaration (Annex II + III)',
-     label: 'Conformity Assessment based on Annex II and Annex III (Self-Declaration, Class I)',
-     forClasses: ['I'] }
-   ```
-2. **Keep** `Self-Declaration (Annex IV)` in `CONFORMITY_ROUTES` so existing product records that already store this value still render and don't break — but mark its label as `Self-Declaration (Annex IV — DoC template, legacy)` so users picking from scratch are steered to the new option.
-3. **Update** `getSuggestedConformityRoute('I')` to return the new value `'Self-Declaration (Annex II + III)'`.
-4. **Add** `CONFORMITY_ROUTE_DESCRIPTIONS['Self-Declaration (Annex II + III)']` with: *"Class I devices (non-sterile, non-measuring, non-reusable surgical). Manufacturer demonstrates conformity per Annex II (Technical Documentation) and Annex III (PMS Technical Documentation), then issues an EU Declaration of Conformity. No Notified Body involvement."*
-5. **Update** `getConformityRouteHelpContent()` first bullet accordingly.
+`@svar-ui/react-gantt` re-exports everything from `@svar-ui/gantt-store` plus `registerEditorItem` from `@svar-ui/react-editor`. Replace the two broken imports with a single import from the installed package:
 
-## Where it shows up
-- `src/components/product/device/AutopopulatedEUDAMEDSection.tsx` (the dropdown in the screenshot) — currently hard-codes the items as `<SelectItem>` literals. **Refactor** the dropdown there to map over `CONFORMITY_ROUTES` so it picks up the new option automatically. Same edit in `EUDAMEDRegistrationSection.tsx`.
+```js
+export {
+  defaultEditorItems,
+  defaultToolbarButtons,
+  defaultMenuOptions,
+  defaultColumns,
+  defaultTaskTypes,
+  registerScaleUnit,
+  registerEditorItem,
+} from '@svar-ui/react-gantt';
+```
 
-## Files touched
-- `src/utils/conformityRouteUtils.ts` — add option, update suggestion + descriptions + help text
-- `src/components/product/device/AutopopulatedEUDAMEDSection.tsx` — render from `CONFORMITY_ROUTES`
-- `src/components/product/device/EUDAMEDRegistrationSection.tsx` — render from `CONFORMITY_ROUTES`
+### 2. Route Edit button to side drawer for all templates (`src/components/settings/document-control/templates/TemplateManagementTab.tsx`)
 
-## Out of scope
-- No DB migration — values stored in DB are free-text strings; both old and new values render fine.
-- No change to other markets' routes (FDA 510(k) etc.).
+Update `handleEdit` so non-SOP templates also open in the `DocumentDraftDrawer`. Add a small helper that looks up the existing studio draft by name and opens the drawer; if no draft exists, fall back to the current metadata edit modal.
 
-## Expected result
-On the Market & Regulatory dropdown, Class I devices now see **"Conformity Assessment based on Annex II and Annex III (Self-Declaration, Class I)"** at the top of the list, and it becomes the auto-suggested route for Class I.
+```tsx
+const handleEdit = (template: any) => {
+  setSelectedTemplate(template);
+  if (isSOP(template.name)) {
+    void openSopEditor(template);
+  } else {
+    void openNonSopEditor(template);
+  }
+};
 
+const openNonSopEditor = async (template: any) => {
+  try {
+    const { data, error } = await supabase
+      .from('document_studio_templates')
+      .select('id, name, type')
+      .eq('company_id', companyId)
+      .eq('name', template.name)
+      .maybeSingle();
+    if (error) throw error;
+    if (data) {
+      setDraftDrawerDoc({
+        id: data.id,
+        name: data.name,
+        type: (data as any).type || template.document_type || 'Template',
+      });
+    } else {
+      setEditDialogOpen(true); // fallback: no draft yet
+    }
+  } catch (e) {
+    console.error('Error opening template draft drawer:', e);
+    setEditDialogOpen(true);
+  }
+};
+```
+
+No other files change. The existing `DocumentDraftDrawer` mount at the bottom of the component is reused.
+
+## Result
+
+- The Vite import error is gone; the preview loads again.
+- Clicking the Edit (pencil) icon on any template row in `Documents → Enterprise Templates` opens the side drawer:
+  - SOPs: existing seeding-then-drawer flow (unchanged).
+  - Non-SOP templates with a studio draft: drawer opens directly on that draft.
+  - Non-SOP templates without a draft: metadata edit modal opens (current behavior, fallback only).

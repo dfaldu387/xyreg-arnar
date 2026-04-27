@@ -10,7 +10,7 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
 import { create, getNumericDate } from "https://deno.land/x/djwt@v3.0.2/mod.ts";
-import { trackTokenUsage, extractGeminiDetailedUsage, logAiTokenUsage } from "../_shared/token-tracking.ts";
+import { trackTokenUsage, extractGeminiDetailedUsage, logAiTokenUsage, checkAiCredits } from "../_shared/token-tracking.ts";
 
 declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void };
 
@@ -132,6 +132,23 @@ serve(async (req) => {
         JSON.stringify({ error: "Missing messages or systemPrompt" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
+    }
+
+    // Check AI credits before processing
+    if (companyId) {
+      const creditCheck = await checkAiCredits(companyId);
+      if (!creditCheck.allowed) {
+        return new Response(
+          JSON.stringify({
+            success: false,
+            error: "NO_CREDITS",
+            message: "No AI credits remaining. Purchase an AI Booster Pack to continue.",
+            used: creditCheck.used,
+            limit: creditCheck.limit,
+          }),
+          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
     }
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;

@@ -16,8 +16,12 @@ import { SOPTemplatePreviewDialog } from './SOPTemplatePreviewDialog';
 import { Badge } from '@/components/ui/badge';
 import { supabase } from '@/integrations/supabase/client';
 import { useCompanyRole } from '@/context/CompanyRoleContext';
-import { TIER_A_AUTO_SEED } from '@/constants/sopAutoSeedTiers';
+import { TIER_A_AUTO_SEED, getSopTier } from '@/constants/sopAutoSeedTiers';
+import { formatSopDisplayName } from '@/constants/sopAutoSeedTiers';
 import { seedSingleSopForCompany } from '@/services/sopAutoSeedService';
+import { SopAutoSeedStatus } from '@/components/settings/document-control/SopAutoSeedStatus';
+import { TierBadge } from '@/components/documents/TierBadge';
+import { DocumentDraftDrawer } from '@/components/product/documents/DocumentDraftDrawer';
 import { 
   Table, 
   TableBody, 
@@ -72,6 +76,7 @@ export function TemplateManagementTab({ companyId, onOpenAiTemplateDialog, onOpe
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
   const [sopPreviewOpen, setSopPreviewOpen] = useState(false);
   const [draftTemplateNames, setDraftTemplateNames] = useState<Set<string>>(new Set());
+  const [draftDrawerDoc, setDraftDrawerDoc] = useState<{ id: string; name: string; type: string } | null>(null);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -200,20 +205,96 @@ export function TemplateManagementTab({ companyId, onOpenAiTemplateDialog, onOpe
     }
   };
 
+  const isSOP = (name: string) => /^SOP-\d{3}/.test(name);
+
+  // Eye-icon routing: real draft → TemplateViewDialog; SOP w/o draft →
+  // read-only SOPTemplatePreviewDialog (boilerplate); other → TemplateViewDialog.
   const handleView = (template: any) => {
     setSelectedTemplate(template);
-    setViewDialogOpen(true);
+    const hasDraft = draftTemplateNames.has(template.name);
+    if (!hasDraft && isSOP(template.name)) {
+      setSopPreviewOpen(true);
+    } else {
+      setViewDialogOpen(true);
+    }
   };
-
-  const isSOP = (name: string) => /^SOP-\d{3}/.test(name);
 
   const handleEdit = (template: any) => {
     setSelectedTemplate(template);
     if (isSOP(template.name)) {
-      setSopPreviewOpen(true);
+      void openSopEditor(template);
     } else {
+      void openNonSopEditor(template);
+    }
+  };
+
+  // For non-SOP templates: try to open the existing studio draft in the side drawer.
+  // Falls back to the metadata edit modal if no draft exists yet.
+  const openNonSopEditor = async (template: any) => {
+    try {
+      const { data, error } = await supabase
+        .from('document_studio_templates')
+        .select('id, name, type')
+        .eq('company_id', companyId)
+        .eq('name', template.name)
+        .maybeSingle();
+      if (error) throw error;
+      if (data) {
+        setDraftDrawerDoc({ id: data.id, name: data.name, type: (data as any).type || template.document_type || 'Template' });
+      } else {
+        setEditDialogOpen(true);
+      }
+    } catch (e) {
+      console.error('Error opening template draft drawer:', e);
       setEditDialogOpen(true);
     }
+  };
+
+  const openDrawerForTemplateName = async (name: string) => {
+    try {
+      // SOP names may differ between SaaS catalog and seeded studio draft (e.g.
+      // "SOP-014 Post-Market Surveillance (PMS)" vs "SOP-014 Clinical Evaluation").
+      // Match by SOP key (e.g. "SOP-014") when present, exact name otherwise.
+      const sopKeyMatch = name.match(/SOP-\d{3}/i);
+      let query = supabase
+        .from('document_studio_templates')
+        .select('id, name, type')
+        .eq('company_id', companyId);
+      query = sopKeyMatch
+        ? query.ilike('name', `${sopKeyMatch[0]}%`)
+        : query.eq('name', name);
+      const { data, error } = await query.limit(1).maybeSingle();
+      if (error) throw error;
+      if (data) {
+        setDraftDrawerDoc({ id: data.id, name: data.name, type: (data as any).type || 'SOP' });
+      } else {
+        toast({
+          title: lang('common.error'),
+          description: 'Could not locate the draft for this SOP.',
+          variant: 'destructive',
+        });
+      }
+    } catch (e) {
+      console.error('Error opening draft drawer:', e);
+      toast({
+        title: lang('common.error'),
+        description: e instanceof Error ? e.message : 'Failed to open editor.',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const openSopEditor = async (template: any) => {
+    // Detect existing draft by SOP key (names may differ between SaaS catalog
+    // and the seeded studio draft).
+    const sopKey = extractSopKey(template.name);
+    const hasDraft = sopKey
+      ? Array.from(draftTemplateNames).some((n) => n.startsWith(`${sopKey} `) || n === sopKey)
+      : draftTemplateNames.has(template.name);
+    if (!hasDraft) {
+      await handleUseTemplate(template);
+    }
+    await openDrawerForTemplateName(template.name);
   };
 
   const handleUpdateTemplate = async (updatedTemplate: any) => {
@@ -337,6 +418,13 @@ export function TemplateManagementTab({ companyId, onOpenAiTemplateDialog, onOpe
           case 'name': aVal = a.name || ''; bVal = b.name || ''; break;
           case 'description': aVal = a.description || ''; bVal = b.description || ''; break;
           case 'type': aVal = a.document_type || ''; bVal = b.document_type || ''; break;
+          case 'tier': {
+            // Order: A → B → C → none. Sort key uses '4' for non-SOPs to push them to the end.
+            const order: Record<string, string> = { A: '1', B: '2', C: '3' };
+            aVal = order[getSopTier(a.name) ?? ''] ?? '4';
+            bVal = order[getSopTier(b.name) ?? ''] ?? '4';
+            break;
+          }
           case 'category': aVal = a.category || ''; bVal = b.category || ''; break;
           case 'scope': aVal = a.scope || ''; bVal = b.scope || ''; break;
           case 'created': aVal = a.created_at || ''; bVal = b.created_at || ''; break;
@@ -379,6 +467,13 @@ export function TemplateManagementTab({ companyId, onOpenAiTemplateDialog, onOpe
         </Button>
       </div>
 
+      {/* Foundation SOP auto-seed status — one-click recovery for missing Tier A SOPs */}
+      <SopAutoSeedStatus
+        companyId={companyId}
+        companyName={activeCompanyRole?.companyName || companyName}
+        onSeeded={() => { loadTemplates(); loadDraftNames(); }}
+      />
+
       {/* Filters */}
       <TemplateFilterControls
         filters={filters}
@@ -400,6 +495,9 @@ export function TemplateManagementTab({ companyId, onOpenAiTemplateDialog, onOpe
                <TableHead className="cursor-pointer select-none" onClick={() => handleSort('type')}>
                  <span className="flex items-center">{lang('templates.library.headers.type')}<SortIcon column="type" /></span>
                </TableHead>
+               <TableHead className="cursor-pointer select-none" onClick={() => handleSort('tier')}>
+                 <span className="flex items-center">Tier<SortIcon column="tier" /></span>
+               </TableHead>
                <TableHead className="cursor-pointer select-none" onClick={() => handleSort('category')}>
                  <span className="flex items-center">{lang('templates.library.headers.category')}<SortIcon column="category" /></span>
                </TableHead>
@@ -415,7 +513,7 @@ export function TemplateManagementTab({ companyId, onOpenAiTemplateDialog, onOpe
           <TableBody>
              {filteredTemplates.length === 0 ? (
                <TableRow>
-                 <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
+                 <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
                    {lang('templates.library.noTemplates')}
                  </TableCell>
                </TableRow>
@@ -426,7 +524,7 @@ export function TemplateManagementTab({ companyId, onOpenAiTemplateDialog, onOpe
                     <FileText className="h-4 w-4 text-muted-foreground" />
                   </TableCell>
                   <TableCell className="font-medium">
-                    {stripDocPrefix(template.name)}
+                    {stripDocPrefix(formatSopDisplayName(template.name))}
                   </TableCell>
                   <TableCell className="text-muted-foreground">
                     {template.description || lang('templates.library.noDescription')}
@@ -436,6 +534,9 @@ export function TemplateManagementTab({ companyId, onOpenAiTemplateDialog, onOpe
                       {template.document_type || '-'}
                     </Badge>
                   </TableCell>
+                  <TableCell>
+                    <TierBadge source={template.name} />
+                  </TableCell>
                    <TableCell>
                      <Badge variant="outline" className="text-xs">
                        {template.category || lang('templates.library.general')}
@@ -443,8 +544,8 @@ export function TemplateManagementTab({ companyId, onOpenAiTemplateDialog, onOpe
                    </TableCell>
                    <TableCell>
                      <Badge
-                       variant={template.scope === 'company' ? 'default' : template.scope === 'both' ? 'secondary' : 'outline'}
-                       className="text-xs"
+                        variant="outline"
+                        className="text-xs"
                      >
                        {template.scope === 'company' ? lang('templates.library.scopes.companyWide') :
                         template.scope === 'product' ? lang('templates.library.scopes.productSpecific') :
@@ -459,48 +560,38 @@ export function TemplateManagementTab({ companyId, onOpenAiTemplateDialog, onOpe
                   </TableCell>
                    <TableCell className="text-right">
                      <div className="flex items-center justify-end gap-1">
-                       {isTierASop(template.name) && !draftTemplateNames.has(template.name) && (
-                         <Button
-                           variant="default"
-                           size="sm"
-                           className="h-8 gap-1.5"
-                           onClick={() => handleUseTemplate(template)}
-                           disabled={seedingSop === extractSopKey(template.name)}
-                           title="Provision this SOP for the company (auto-personalized)"
-                         >
-                           {seedingSop === extractSopKey(template.name) ? (
-                             <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                           ) : (
-                             <FilePlus2 className="h-3.5 w-3.5" />
-                           )}
-                           Use Template
-                         </Button>
-                       )}
-                       {draftTemplateNames.has(template.name) && (
-                         <Button
-                           variant="ghost"
-                           size="sm"
-                           className="h-8 w-8 p-0"
-                           onClick={() => handleView(template)}
-                           title="View draft"
-                         >
-                           <Eye className="h-4 w-4" />
-                         </Button>
-                       )}
                        <Button
                          variant="ghost"
-                         size="sm"
-                         className="h-8 w-8 p-0"
-                         onClick={() => handleEdit(template)}
-                         title="Edit template"
+                         size="icon"
+                         className="h-8 w-8"
+                         onClick={() => handleView(template)}
+                         title={draftTemplateNames.has(template.name) ? 'View draft' : 'Preview template'}
                        >
-                         <Edit className="h-4 w-4" />
+                         <Eye className="h-4 w-4" />
+                       </Button>
+                       <Button
+                         variant="ghost"
+                         size="icon"
+                         className="h-8 w-8"
+                         onClick={() => handleEdit(template)}
+                         disabled={seedingSop === extractSopKey(template.name)}
+                         title={
+                           isTierASop(template.name) && !draftTemplateNames.has(template.name)
+                             ? 'Provision this SOP for the company (auto-personalized) and open editor'
+                             : 'Edit template'
+                         }
+                       >
+                         {seedingSop === extractSopKey(template.name) ? (
+                           <Loader2 className="h-4 w-4 animate-spin" />
+                         ) : (
+                           <Edit className="h-4 w-4" />
+                         )}
                        </Button>
                        {template.file_path && (
                          <Button
                            variant="ghost"
-                           size="sm"
-                           className="h-8 w-8 p-0"
+                           size="icon"
+                           className="h-8 w-8"
                            onClick={() => handleDownload(template)}
                            title="Download template"
                          >
@@ -510,8 +601,8 @@ export function TemplateManagementTab({ companyId, onOpenAiTemplateDialog, onOpe
                        {template.source === 'company' && (
                          <Button
                            variant="ghost"
-                           size="sm"
-                           className="h-8 w-8 p-0 text-destructive hover:text-destructive"
+                           size="icon"
+                           className="h-8 w-8 text-destructive hover:text-destructive"
                            onClick={() => handleDelete(template.id)}
                            title="Delete template"
                          >
@@ -568,6 +659,19 @@ export function TemplateManagementTab({ companyId, onOpenAiTemplateDialog, onOpe
         onDraftCreated={() => loadDraftNames()}
         companyId={companyId}
         companyName={activeCompanyRole?.companyName || ''}
+        viewOnly={!!selectedTemplate && !draftTemplateNames.has(selectedTemplate.name)}
+      />
+
+      {/* Document Draft Side Drawer (SOP authoring) */}
+      <DocumentDraftDrawer
+        open={!!draftDrawerDoc}
+        onOpenChange={(open) => { if (!open) setDraftDrawerDoc(null); }}
+        documentId={draftDrawerDoc?.id || ''}
+        documentName={draftDrawerDoc?.name || ''}
+        documentType={draftDrawerDoc?.type || 'SOP'}
+        companyId={companyId}
+        companyName={activeCompanyRole?.companyName || companyName}
+        onDocumentSaved={() => loadDraftNames()}
       />
     </div>
   );
