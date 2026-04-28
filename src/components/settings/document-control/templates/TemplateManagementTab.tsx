@@ -8,7 +8,7 @@ import { useTranslation } from '@/hooks/useTranslation';
 import { DocumentTemplateFileService } from '@/services/documentTemplateFileService';
 import { TemplateFilters, TemplateUploadData } from '@/types/templateManagement';
 import { TemplateManagementService } from '@/services/templateManagementService';
-import { TemplateFilterControls } from './TemplateFilterControls';
+import { TemplateFilterBar } from './TemplateFilterBar';
 import { EnhancedTemplateUploadDialog } from './EnhancedTemplateUploadDialog';
 import { TemplateViewDialog } from './TemplateViewDialog';
 import { TemplateEditDialog } from './TemplateEditDialog';
@@ -79,9 +79,13 @@ export function TemplateManagementTab({ companyId, onOpenAiTemplateDialog, onOpe
   const [draftDrawerDoc, setDraftDrawerDoc] = useState<{ id: string; name: string; type: string } | null>(null);
   const { toast } = useToast();
 
+  // Only reload templates when the company changes — filters are applied
+  // client-side via the `filteredTemplates` useMemo below. Reloading on every
+  // keystroke would trigger the loading spinner and unmount the search input,
+  // causing focus loss after the first character.
   useEffect(() => {
     loadTemplates();
-  }, [companyId, filters]);
+  }, [companyId]);
 
   // Load draft names to know which templates have CI docs
   const loadDraftNames = async () => {
@@ -416,6 +420,55 @@ export function TemplateManagementTab({ companyId, onOpenAiTemplateDialog, onOpe
       );
     }
 
+    // Scope filter (Company-wide / Product-specific)
+    if (filters.scope && (filters.scope as string) !== 'all') {
+      templates = templates.filter(template => template.scope === filters.scope);
+    }
+
+    // Multi-select scopes (new TemplateFilterBar). Treat legacy 'company' / 'product'
+    // values as equivalent to 'company-wide' / 'product-specific'.
+    if (filters.scopes && filters.scopes.length > 0) {
+      const allowed = new Set<string>(filters.scopes);
+      templates = templates.filter(template => {
+        const s = template.scope;
+        if (s === 'company' || s === 'company-wide') return allowed.has('company-wide');
+        if (s === 'product' || s === 'product-specific') return allowed.has('product-specific');
+        return false;
+      });
+    }
+
+    // Multi-select document types.
+    if (filters.documentTypes && filters.documentTypes.length > 0) {
+      const allowed = new Set(filters.documentTypes);
+      templates = templates.filter(template =>
+        template.document_type && allowed.has(template.document_type)
+      );
+    }
+
+    // Multi-select classification (Generic / Pathway / Device-specific).
+    if (filters.tiers && filters.tiers.length > 0) {
+      const allowed = new Set(filters.tiers);
+      templates = templates.filter(template => {
+        const tier = getSopTier(template.name);
+        return tier !== null && allowed.has(tier);
+      });
+    }
+
+    // Search filter — match name OR description, but rank name hits first.
+    const searchTerm = (filters.search || '').trim().toLowerCase();
+    let nameMatchSet: Set<any> | null = null;
+    if (searchTerm) {
+      nameMatchSet = new Set();
+      templates = templates.filter(template => {
+        const name = (template.name || '').toLowerCase();
+        const desc = (template.description || '').toLowerCase();
+        const nameHit = name.includes(searchTerm);
+        const descHit = desc.includes(searchTerm);
+        if (nameHit) nameMatchSet!.add(template);
+        return nameHit || descHit;
+      });
+    }
+
     // Apply sorting
     if (sortColumn) {
       templates.sort((a, b) => {
@@ -441,6 +494,13 @@ export function TemplateManagementTab({ companyId, onOpenAiTemplateDialog, onOpe
         const cmp = aVal.localeCompare(bVal, undefined, { sensitivity: 'base' });
         return sortDirection === 'asc' ? cmp : -cmp;
       });
+    } else if (nameMatchSet) {
+      // No explicit sort — promote name matches above description-only matches,
+      // preserving original order within each group (stable sort).
+      templates = [
+        ...templates.filter(t => nameMatchSet!.has(t)),
+        ...templates.filter(t => !nameMatchSet!.has(t)),
+      ];
     }
     
     return templates;
@@ -482,8 +542,8 @@ export function TemplateManagementTab({ companyId, onOpenAiTemplateDialog, onOpe
         onSeeded={() => { loadTemplates(); loadDraftNames(); }}
       />
 
-      {/* Filters */}
-      <TemplateFilterControls
+      {/* Filters — Documents-style search + popover */}
+      <TemplateFilterBar
         filters={filters}
         onFiltersChange={setFilters}
       />
@@ -504,7 +564,7 @@ export function TemplateManagementTab({ companyId, onOpenAiTemplateDialog, onOpe
                  <span className="flex items-center">{lang('templates.library.headers.type')}<SortIcon column="type" /></span>
                </TableHead>
                <TableHead className="cursor-pointer select-none" onClick={() => handleSort('tier')}>
-                 <span className="flex items-center">Tier<SortIcon column="tier" /></span>
+                  <span className="flex items-center">Tier<SortIcon column="tier" /></span>
                </TableHead>
                <TableHead className="cursor-pointer select-none" onClick={() => handleSort('category')}>
                  <span className="flex items-center">{lang('templates.library.headers.category')}<SortIcon column="category" /></span>

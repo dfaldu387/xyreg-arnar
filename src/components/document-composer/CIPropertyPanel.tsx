@@ -23,6 +23,7 @@ import { useReviewerGroups } from '@/hooks/useReviewerGroups';
 import { useExistingTags } from '@/hooks/useExistingTags';
 import { Settings2, Check, Loader2, BookOpen, X } from 'lucide-react';
 import { toast } from 'sonner';
+import { SOP_FUNCTIONAL_SUBPREFIX } from '@/constants/sopAutoSeedTiers';
 
 interface CIPropertyPanelProps {
   documentId: string;
@@ -131,13 +132,27 @@ export function CIPropertyPanel({
     }
   }, [documentNumber]);
 
-  // Parse sub-prefix from existing document number on mount
+  // Parse sub-prefix from existing document number on mount.
+  // Storage uses canonical SOP-NNN form, but the UI shows a functional sub-prefix
+  // (e.g. SOP-QA-002) derived from the SOP key mapping. When the documentNumber
+  // doesn't already contain a sub-prefix token, fall back to that mapping so the
+  // dropdown reflects what the rest of the app displays.
   useEffect(() => {
     if (!documentNumber || !documentType || subPrefixes.length === 0) return;
     const withoutPrefix = documentNumber.replace(`${documentType}-`, '');
     const subMatch = subPrefixes.find(sp => withoutPrefix.startsWith(`${sp.code}-`));
-    if (subMatch && selectedSubPrefix !== subMatch.code) {
-      setSelectedSubPrefix(subMatch.code);
+    if (subMatch) {
+      if (selectedSubPrefix !== subMatch.code) setSelectedSubPrefix(subMatch.code);
+      return;
+    }
+    // Fallback: map canonical SOP-NNN → functional sub-prefix (display-only)
+    if (documentType.toUpperCase() === 'SOP') {
+      const canonical = `SOP-${withoutPrefix}`.toUpperCase();
+      const functionalSub = SOP_FUNCTIONAL_SUBPREFIX[canonical];
+      if (functionalSub && selectedSubPrefix !== functionalSub
+          && subPrefixes.some(sp => sp.code === functionalSub)) {
+        setSelectedSubPrefix(functionalSub);
+      }
     }
   }, [documentNumber, documentType, subPrefixes]);
 

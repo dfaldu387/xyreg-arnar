@@ -11,11 +11,20 @@ import { DevCompanySwitcher } from "@/components/dev/DevCompanySwitcher";
 // HelpButton removed — all help now lives in GlobalHelpSidebar
 import { FloatingAdvisoryBot } from "@/components/advisory/FloatingAdvisoryBot";
 import { useHelpMode } from "@/context/HelpModeContext";
+import { useCustomerFeatureFlag } from "@/hooks/useCustomerFeatureFlag";
 
 function ConditionalAdvisoryBot() {
   const { isAdvisoryBoardVisible } = useHelpMode();
+  const featureEnabled = useCustomerFeatureFlag("professor-xyreg");
   if (!isAdvisoryBoardVisible) return null;
+  if (!featureEnabled) return null;
   return <FloatingAdvisoryBot />;
+}
+
+function ConditionalLanguageSwitcher() {
+  const featureEnabled = useCustomerFeatureFlag("multi-language-translation");
+  if (!featureEnabled) return null;
+  return <LanguageSwitcher />;
 }
 import { EnhancedOnboardingTour } from "@/components/help/EnhancedOnboardingTour";
 import { ContextualHelp } from "@/components/help/ContextualHelp";
@@ -964,7 +973,7 @@ export default function AppLayout() {
               >
                 <BookOpen className="h-4 w-4" />
               </Button>
-              <LanguageSwitcher />
+              <ConditionalLanguageSwitcher />
               <NotificationBell />
               <UserNav />
             </div>

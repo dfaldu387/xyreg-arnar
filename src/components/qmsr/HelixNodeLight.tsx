@@ -26,6 +26,7 @@ import {
 import type { HelixNodeStatus, HelixLevel, HelixTrack } from '@/config/helixNodeConfig';
 import { TRACK_COLORS, STATUS_COLORS } from '@/config/helixNodeConfig';
 import { NODE_SOP_RECOMMENDATIONS, type SOPRecommendation } from '@/data/nodeSOPRecommendations';
+import { formatSopDisplayId } from '@/constants/sopAutoSeedTiers';
 import { useTranslation } from '@/hooks/useTranslation';
 
 export interface HelixNodeLightData {
@@ -104,12 +105,13 @@ function NodeSOPChips({ nodeId, linkedSOPs, sopStatus, sopCounts, onIndicatorCli
   const recommendations = NODE_SOP_RECOMMENDATIONS[nodeId] || [];
   const hasLinkedSOPs = linkedSOPs && linkedSOPs.length > 0;
   
-  // Get SOPs to display (max 3, then show "+N more")
-  const linkedToShow = hasLinkedSOPs ? linkedSOPs.slice(0, 3) : [];
-  const recommendationsToShow = !hasLinkedSOPs ? recommendations.slice(0, 3) : [];
+  // Get SOPs to display. Design Control has 8 chips by design; cap others at 6.
+  const maxChips = nodeId === 'design-control' ? 8 : 6;
+  const linkedToShow = hasLinkedSOPs ? linkedSOPs.slice(0, maxChips) : [];
+  const recommendationsToShow = !hasLinkedSOPs ? recommendations.slice(0, maxChips) : [];
   const remainingCount = hasLinkedSOPs 
-    ? Math.max(0, linkedSOPs.length - 3)
-    : Math.max(0, recommendations.length - 3);
+    ? Math.max(0, linkedSOPs.length - maxChips)
+    : Math.max(0, recommendations.length - maxChips);
 
   if (linkedToShow.length === 0 && recommendationsToShow.length === 0) {
     // No recommendations for this node
@@ -132,7 +134,14 @@ function NodeSOPChips({ nodeId, linkedSOPs, sopStatus, sopCounts, onIndicatorCli
       />
       
       {/* SOP chips row */}
-      <div className="flex flex-wrap gap-1 max-w-[200px]">
+      <div
+        className={cn(
+          'gap-1.5',
+          nodeId === 'design-control'
+            ? 'grid grid-cols-4 max-w-[460px]'
+            : 'flex flex-wrap max-w-[200px]'
+        )}
+      >
         {hasLinkedSOPs ? (
           // Show actual linked SOPs from database
           linkedToShow.map((sop) => (
@@ -155,9 +164,9 @@ function NodeSOPChips({ nodeId, linkedSOPs, sopStatus, sopCounts, onIndicatorCli
             <span
               key={rec.sopNumber}
               className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-medium bg-slate-50 text-slate-500 border border-dashed border-slate-300"
-              title={`${rec.sopNumber}: ${rec.sopName}`}
+              title={`${rec.sopNumber} — ${rec.clauseDescription}`}
             >
-              {rec.sopNumber}
+              {formatSopDisplayId(rec.sopNumber)}
             </span>
           ))
         )}
@@ -238,6 +247,7 @@ function HelixNodeLightComponent({ data }: NodeProps) {
             className={cn(
               'relative rounded-lg border bg-white p-3 shadow-sm',
               'min-w-[200px] max-w-[220px]',
+              nodeData.id === 'design-control' && 'max-w-[480px] min-w-[480px]',
               'transition-all duration-300',
               'hover:shadow-md',
               statusStyle.border

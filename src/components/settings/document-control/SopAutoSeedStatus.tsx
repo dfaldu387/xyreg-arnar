@@ -125,7 +125,7 @@ export function SopAutoSeedStatus({ companyId, companyName, onSeeded }: SopAutoS
             ) : (
               <>
                 <ChevronDown className="h-3 w-3" />
-                View Tier A breakdown
+                View generic SOP breakdown
               </>
             )}
           </button>
@@ -144,7 +144,7 @@ export function SopAutoSeedStatus({ companyId, companyName, onSeeded }: SopAutoS
                   Seeding…
                 </>
               ) : (
-                `Seed ${total - (count ?? 0)} missing Tier A SOP${total - (count ?? 0) === 1 ? '' : 's'}`
+                `Seed ${total - (count ?? 0)} missing generic SOP${total - (count ?? 0) === 1 ? '' : 's'}`
               )}
             </Button>
           )}
@@ -160,7 +160,7 @@ export function SopAutoSeedStatus({ companyId, companyName, onSeeded }: SopAutoS
                 Seeding…
               </>
             ) : (
-              'Seed Tier B (pathway-conditional)'
+              'Seed pathway-conditional SOPs'
             )}
           </Button>
         </div>

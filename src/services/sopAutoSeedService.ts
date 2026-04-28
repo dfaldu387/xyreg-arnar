@@ -132,6 +132,7 @@ async function seedSopsForCompany(
           company_id: companyId,
           phase_id: phaseId,
           document_type: 'SOP',
+          document_number: content.sopNumber,
           document_scope: 'company_document',
           status: 'Draft',
           version: '1.0',
@@ -161,6 +162,7 @@ async function seedSopsForCompany(
         sections: personalized as unknown as Json,
         metadata: {
           sopNumber: content.sopNumber,
+          document_number: content.sopNumber,
           seededFrom: 'tier-a-auto-seed',
           seededAt: new Date().toISOString(),
         } as unknown as Json,

@@ -29,6 +29,12 @@ export interface TemplateFilters {
   category?: TemplateCategory | 'all';
   documentType?: string | 'all';
   search?: string;
+  /** Multi-select scopes (used by the new TemplateFilterBar). */
+  scopes?: TemplateScope[];
+  /** Multi-select document types. */
+  documentTypes?: string[];
+  /** Multi-select SOP tiers (A=Generic, B=Pathway, C=Device-specific). */
+  tiers?: Array<'A' | 'B' | 'C'>;
 }
 
 export type TemplateScope = 'company-wide' | 'product-specific';

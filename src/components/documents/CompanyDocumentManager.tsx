@@ -28,6 +28,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { CompanyDocumentCreationDialog } from "./CompanyDocumentCreationDialog";
 import { CompanyDocumentEditDialog } from "./CompanyDocumentEditDialog";
+import { formatSopDisplayId, formatSopDisplayName } from '@/constants/sopAutoSeedTiers';
 import { CompanyDocumentViewer } from "./CompanyDocumentViewer";
 import { CompanyDocumentCard } from "./CompanyDocumentCard";
 import { CompanyDocumentListView } from "./CompanyDocumentListView";
@@ -56,6 +57,7 @@ const URL_PARAM_KEYS = {
   SECTIONS: 'sections',
   TAGS: 'tags',
   REF_TAGS: 'refTags',
+  DOC_TYPES: 'docTypes',
   SORT_BY_DATE: 'sortByDate',
   LAYOUT: 'layout',
   SEARCH: 'q',
@@ -83,6 +85,7 @@ export function CompanyDocumentManager({ companyId, disabled = false }: CompanyD
   const [sectionFilter, setSectionFilterState] = useState<string[]>(() => parseArrayParam(searchParams.get(URL_PARAM_KEYS.SECTIONS)));
   const [tagFilter, setTagFilterState] = useState<string[]>(() => parseArrayParam(searchParams.get(URL_PARAM_KEYS.TAGS)));
   const [refTagFilter, setRefTagFilterState] = useState<string[]>(() => parseArrayParam(searchParams.get(URL_PARAM_KEYS.REF_TAGS)));
+  const [docTypeFilter, setDocTypeFilterState] = useState<string[]>(() => parseArrayParam(searchParams.get(URL_PARAM_KEYS.DOC_TYPES)));
   const [sortByDate, setSortByDateState] = useState<SortByDateOption>(() => (searchParams.get(URL_PARAM_KEYS.SORT_BY_DATE) as SortByDateOption) || 'none');
   const [viewMode, setViewModeState] = useState<'card' | 'list'>(() => (searchParams.get(URL_PARAM_KEYS.LAYOUT) as 'card' | 'list') || 'list');
 
@@ -162,6 +165,7 @@ export function CompanyDocumentManager({ companyId, disabled = false }: CompanyD
     const urlSections = parseArrayParam(searchParams.get(URL_PARAM_KEYS.SECTIONS));
     const urlTags = parseArrayParam(searchParams.get(URL_PARAM_KEYS.TAGS));
     const urlRefTags = parseArrayParam(searchParams.get(URL_PARAM_KEYS.REF_TAGS));
+    const urlDocTypes = parseArrayParam(searchParams.get(URL_PARAM_KEYS.DOC_TYPES));
     const urlSort = (searchParams.get(URL_PARAM_KEYS.SORT_BY_DATE) as SortByDateOption) || 'none';
     const urlLayout = (searchParams.get(URL_PARAM_KEYS.LAYOUT) as 'card' | 'list') || 'list';
 
@@ -171,6 +175,7 @@ export function CompanyDocumentManager({ companyId, disabled = false }: CompanyD
     if (JSON.stringify(urlSections) !== JSON.stringify(sectionFilter)) setSectionFilterState(urlSections);
     if (JSON.stringify(urlTags) !== JSON.stringify(tagFilter)) setTagFilterState(urlTags);
     if (JSON.stringify(urlRefTags) !== JSON.stringify(refTagFilter)) setRefTagFilterState(urlRefTags);
+    if (JSON.stringify(urlDocTypes) !== JSON.stringify(docTypeFilter)) setDocTypeFilterState(urlDocTypes);
     if (urlSort !== sortByDate) setSortByDateState(urlSort);
     if (urlLayout !== viewMode) setViewModeState(urlLayout);
   }, [searchParams]);
@@ -205,6 +210,11 @@ export function CompanyDocumentManager({ companyId, disabled = false }: CompanyD
   const setRefTagFilter = useCallback((value: string[]) => {
     setRefTagFilterState(value);
     updateUrlParams({ [URL_PARAM_KEYS.REF_TAGS]: serializeArrayParam(value) });
+  }, [updateUrlParams]);
+
+  const setDocTypeFilter = useCallback((value: string[]) => {
+    setDocTypeFilterState(value);
+    updateUrlParams({ [URL_PARAM_KEYS.DOC_TYPES]: serializeArrayParam(value) });
   }, [updateUrlParams]);
 
   const setSortByDate = useCallback((value: SortByDateOption) => {
@@ -311,6 +321,15 @@ export function CompanyDocumentManager({ companyId, disabled = false }: CompanyD
       }
     });
     return Array.from(tagSet).sort();
+  }, [documents]);
+
+  // Get available document types from documents (drives the "Type" filter category)
+  const availableDocTypes = useMemo(() => {
+    const typeSet = new Set<string>();
+    documents.forEach(doc => {
+      if (doc.document_type) typeSet.add(doc.document_type);
+    });
+    return Array.from(typeSet).sort();
   }, [documents]);
 
   // Fetch reference document tags for ref tag filter
@@ -627,10 +646,15 @@ export function CompanyDocumentManager({ companyId, disabled = false }: CompanyD
   const filteredDocuments = useMemo(() => {
     let result = documents.filter(doc => {
       // Search filter
+      const term = searchTerm.toLowerCase();
+      const displayNumber = doc.document_number ? formatSopDisplayId(doc.document_number).toLowerCase() : '';
+      const displayName = formatSopDisplayName(doc.name).toLowerCase();
       const matchesSearch = !searchTerm ||
-        doc.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        doc.description?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        doc.document_number?.toLowerCase().includes(searchTerm.toLowerCase());
+        doc.name.toLowerCase().includes(term) ||
+        doc.description?.toLowerCase().includes(term) ||
+        doc.document_number?.toLowerCase().includes(term) ||
+        displayNumber.includes(term) ||
+        displayName.includes(term);
 
       // Status filter
       const matchesStatus = statusFilter.length === 0 ||
@@ -655,7 +679,11 @@ export function CompanyDocumentManager({ companyId, disabled = false }: CompanyD
           return refTagFilter.some(tag => refTags.includes(tag));
         }));
 
-      return matchesSearch && matchesStatus && matchesAuthor && matchesSection && matchesTag && matchesRefTag;
+      // Document type filter (Type column: SOP / POL / WI / FORM / …)
+      const matchesDocType = docTypeFilter.length === 0 ||
+        (doc.document_type && docTypeFilter.includes(doc.document_type));
+
+      return matchesSearch && matchesStatus && matchesAuthor && matchesSection && matchesTag && matchesRefTag && matchesDocType;
     });
 
     // Apply sorting
@@ -742,7 +770,7 @@ export function CompanyDocumentManager({ companyId, disabled = false }: CompanyD
     }
 
     return result;
-  }, [documents, searchTerm, statusFilter, authorFilter, sectionFilter, tagFilter, refTagFilter, sortByDate, refDocTagMap, allAuthorsMap]);
+  }, [documents, searchTerm, statusFilter, authorFilter, sectionFilter, tagFilter, refTagFilter, docTypeFilter, sortByDate, refDocTagMap, allAuthorsMap]);
 
   // Handler for status filter toggle
   const handleStatusFilterChange = useCallback((status: string) => {
@@ -792,6 +820,14 @@ export function CompanyDocumentManager({ companyId, disabled = false }: CompanyD
     setRefTagFilter(newTags);
   }, [refTagFilter, setRefTagFilter]);
 
+  // Handler for document type filter toggle
+  const handleDocTypeFilterChange = useCallback((docType: string) => {
+    const newTypes = docTypeFilter.includes(docType)
+      ? docTypeFilter.filter(t => t !== docType)
+      : [...docTypeFilter, docType];
+    setDocTypeFilter(newTypes);
+  }, [docTypeFilter, setDocTypeFilter]);
+
   // Clear all filters (also clears URL params)
   const clearAllFilters = useCallback(() => {
     setSearchTermState('');
@@ -800,6 +836,7 @@ export function CompanyDocumentManager({ companyId, disabled = false }: CompanyD
     setSectionFilterState([]);
     setTagFilterState([]);
     setRefTagFilterState([]);
+    setDocTypeFilterState([]);
     setSortByDateState('none');
     updateUrlParams({
       [URL_PARAM_KEYS.SEARCH]: null,
@@ -808,6 +845,7 @@ export function CompanyDocumentManager({ companyId, disabled = false }: CompanyD
       [URL_PARAM_KEYS.SECTIONS]: null,
       [URL_PARAM_KEYS.TAGS]: null,
       [URL_PARAM_KEYS.REF_TAGS]: null,
+      [URL_PARAM_KEYS.DOC_TYPES]: null,
       [URL_PARAM_KEYS.SORT_BY_DATE]: null,
     });
   }, [updateUrlParams]);
@@ -857,6 +895,9 @@ export function CompanyDocumentManager({ companyId, disabled = false }: CompanyD
             refTagFilter={refTagFilter}
             onRefTagFilterChange={handleRefTagFilterChange}
             availableRefTags={availableRefTags}
+            docTypeFilter={docTypeFilter}
+            onDocTypeFilterChange={handleDocTypeFilterChange}
+            availableDocTypes={availableDocTypes}
             sortByDate={sortByDate}
             onSortByDateChange={setSortByDate}
             clearAllFilters={clearAllFilters}

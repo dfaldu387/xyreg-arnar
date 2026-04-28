@@ -22457,6 +22457,65 @@ export type Database = {
           },
         ]
       }
+      qms_sop_manual_links: {
+        Row: {
+          company_id: string
+          created_at: string
+          created_by: string | null
+          document_id: string
+          id: string
+          sop_number: string
+          updated_at: string
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          created_by?: string | null
+          document_id: string
+          id?: string
+          sop_number: string
+          updated_at?: string
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          created_by?: string | null
+          document_id?: string
+          id?: string
+          sop_number?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "qms_sop_manual_links_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "qms_sop_manual_links_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "company_dashboard_summary"
+            referencedColumns: ["company_id"]
+          },
+          {
+            foreignKeyName: "qms_sop_manual_links_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "qms_sop_manual_links_document_id_fkey"
+            columns: ["document_id"]
+            isOneToOne: false
+            referencedRelation: "phase_assigned_document_template"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       quick_messages: {
         Row: {
           company_id: string | null

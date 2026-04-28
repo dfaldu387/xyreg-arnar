@@ -51,6 +51,7 @@ export const TIER_A_AUTO_SEED: readonly TierASop[] = [
   { sop: 'SOP-006', reason: 'Process-only — defines how design inputs are captured, not what they are' },
   { sop: 'SOP-007', reason: 'Process-only — defines how design outputs are captured' },
   { sop: 'SOP-008', reason: 'Process-only — generic design review procedure' },
+  { sop: 'SOP-009', reason: 'Generic design V&V framework (§7.3.6–7.3.7) — applies to all medical devices' },
   { sop: 'SOP-011', reason: 'Process-only — generic design change control' },
   { sop: 'SOP-012', reason: 'Structure-only — DHF/Technical Documentation index template' },
   { sop: 'SOP-016', reason: 'Generic supplier evaluation & control workflow (§7.4)' },
@@ -77,7 +78,6 @@ export const TIER_A_AUTO_SEED: readonly TierASop[] = [
  * Document Control once the relevant regulatory framework is enabled.
  */
 export const TIER_B_CONDITIONAL: readonly TierBSop[] = [
-  { sop: 'SOP-009', trigger: 'always', reason: 'Design V&V applies to all medical devices' },
   { sop: 'SOP-010', trigger: 'manufacturing', reason: 'Design Transfer requires manufacturing scope' },
   { sop: 'SOP-013', trigger: 'eu_mdr', reason: 'GSPR — EU MDR Annex I' },
   { sop: 'SOP-014', trigger: 'eu_clinical', reason: 'Clinical Evaluation — EU MDR clinical pathway' },

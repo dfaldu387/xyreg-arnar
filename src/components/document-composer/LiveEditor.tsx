@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { FileText, Download, Share, History, Sparkles, StickyNote, Wand2, GitBranch, MoreHorizontal, ArrowUpFromLine, Eye, EyeOff, Pencil, ShieldCheck, Bold, Italic, Strikethrough, Link2, List, ListOrdered, Type, ImagePlus, Undo, Redo, Heading1, Heading2, Heading3, Quote, AlignJustify, MessageSquare, MessageSquarePlus, ZoomIn, ZoomOut, PanelRight, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
+import { FileText, Download, Share, History, Sparkles, StickyNote, Wand2, GitBranch, MoreHorizontal, ArrowUpFromLine, Eye, EyeOff, Pencil, ShieldCheck, Bold, Italic, Strikethrough, Link2, List, ListOrdered, Type, ImagePlus, Undo, Redo, Heading1, Heading2, Heading3, Quote, AlignJustify, MessageSquare, MessageSquarePlus, ZoomIn, ZoomOut, PanelRight, Loader2, CheckCircle2, AlertCircle, Minus, Table as TableIcon } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -10,6 +10,7 @@ import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
 import { AIInlineEditBar } from './AIInlineEditBar';
 import { HighlightedContent } from './HighlightedContent';
@@ -29,6 +30,7 @@ import { AIContentRecommendationService } from '@/services/aiContentRecommendati
 import { AISuggestionService } from '@/services/aiSuggestionService';
 import { DocumentStudioPersistenceService } from '@/services/documentStudioPersistenceService';
 import { AIAutoFillDialog } from './AIAutoFillDialog';
+import { useCustomerFeatureFlag } from '@/hooks/useCustomerFeatureFlag';
 import { AIDocumentValidationDialog } from './AIDocumentValidationDialog';
 import { DraftEmptyStateModal } from './DraftEmptyStateModal';
 import { SOPPickerModal } from './SOPPickerModal';
@@ -46,9 +48,10 @@ import { Decoration, DecorationSet } from '@tiptap/pm/view';
 import StarterKit from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
 import { TextStyle } from '@tiptap/extension-text-style';
-import { Extension, Mark, mergeAttributes } from '@tiptap/core';
+import { Extension, Mark, Node, mergeAttributes } from '@tiptap/core';
 import Image from '@tiptap/extension-image';
 import Link from '@tiptap/extension-link';
+import { TableKit } from '@tiptap/extension-table';
 import { Trash2 } from 'lucide-react';
 import { useCompanyDocumentMentions } from '@/hooks/useCompanyDocumentMentions';
 import { useCompanyUsers } from '@/hooks/useCompanyUsers';
@@ -56,6 +59,8 @@ import { EditorMentionPopup, MentionItem, MentionSection } from './EditorMention
 import { DocMentionHoverCard, DocMentionHoverData } from './DocMentionHoverCard';
 import { PersonMentionHoverCard, PersonMentionHoverData } from './PersonMentionHoverCard';
 import { LinkHoverCard, LinkHoverData } from './LinkHoverCard';
+import { CreateReferenceDocDialog } from './CreateReferenceDocDialog';
+import { REFERENCE_PREFIXES } from '@/services/createReferenceDocument';
 
 /**
  * Strip redundant leading headings from content that duplicate the section title.
@@ -282,6 +287,65 @@ const SmartChipMark = Mark.create({
   },
 });
 
+// Atomic inline node for auto-detected document references like "SOP-008" or
+// "TEMP-005 Design Plan Template". Two visual states:
+//   - data-state="linked"  → blue solid chip; click opens existing doc.
+//   - data-state="missing" → amber dashed chip with pencil-plus affordance;
+//                            click opens CreateReferenceDocDialog.
+// Implemented as an atom Node (not a Mark) so the chip behaves as a single
+// unit — backspace deletes the whole chip, the cursor jumps over it, and the
+// CSS ::after pencil affordance renders reliably. A Mark would be silently
+// stripped inside list items by ProseMirror's schema in some contexts.
+const DocReferenceNode = Node.create({
+  name: 'docReference',
+  group: 'inline',
+  inline: true,
+  atom: true,
+  selectable: true,
+  draggable: false,
+  addAttributes() {
+    return {
+      state: {
+        default: 'missing',
+        parseHTML: (el) => (el as HTMLElement).getAttribute('data-state') || 'missing',
+        renderHTML: (attrs) => (attrs.state ? { 'data-state': attrs.state } : {}),
+      },
+      refCode: {
+        default: null,
+        parseHTML: (el) => (el as HTMLElement).getAttribute('data-ref-code'),
+        renderHTML: (attrs) => (attrs.refCode ? { 'data-ref-code': attrs.refCode } : {}),
+      },
+      refTitle: {
+        default: null,
+        parseHTML: (el) => (el as HTMLElement).getAttribute('data-ref-title'),
+        renderHTML: (attrs) => (attrs.refTitle ? { 'data-ref-title': attrs.refTitle } : {}),
+      },
+      id: {
+        default: null,
+        parseHTML: (el) => (el as HTMLElement).getAttribute('data-id'),
+        renderHTML: (attrs) => (attrs.id ? { 'data-id': attrs.id } : {}),
+      },
+    };
+  },
+  parseHTML() {
+    return [{ tag: 'span[data-doc-ref]' }];
+  },
+  renderHTML({ node, HTMLAttributes }) {
+    const refCode = (node.attrs.refCode as string) || '';
+    const refTitle = (node.attrs.refTitle as string) || '';
+    const display = refTitle ? `${refCode} ${refTitle}` : refCode;
+    return [
+      'span',
+      mergeAttributes(HTMLAttributes, {
+        'data-doc-ref': '',
+        class: 'xyreg-doc-ref',
+        contenteditable: 'false',
+      }),
+      display,
+    ];
+  },
+});
+
 // FontSize extension for inline text sizing (reused from EditableContent)
 const FontSize = Extension.create({
   name: 'fontSize',
@@ -405,6 +469,34 @@ function mergeSectionsToHtml(sections: any[], companyName: string, numbered: boo
       const prefix = numbered ? `${sectionNum}.0 ` : '';
       const sectionHeading = `<h2 id="section-${section.id}">${prefix}${title}</h2>`;
 
+      // Revision History recovery: if this section was previously saved with
+      // table HTML stripped (e.g. by an editor build that lacked TipTap table
+      // support), the content collapses into a single line like
+      // "VersionDateDescriptionAuthor1.0[Effective Date]Initial release...".
+      // Detect that case and rebuild the canonical 4-column table so the
+      // section becomes editable again.
+      const isRevisionHistory =
+        section.id === 'revision-history' ||
+        /revision\s*history/i.test(String(title || ''));
+      if (isRevisionHistory) {
+        const joined = (Array.isArray(section.content) ? section.content : [])
+          .map((it: any) => String(it?.content || ''))
+          .join('')
+          .trim();
+        const looksHealthy =
+          joined.startsWith('<table') ||
+          /\|\s*Version\s*\|/i.test(joined) ||
+          looksLikePipeTable(joined);
+        if (!looksHealthy) {
+          const fallbackTable = pipeTableToHtml(
+            '| Version | Date | Description | Author |\n' +
+            '|---------|------|-------------|--------|\n' +
+            '| 1.0 | [Effective Date] | Initial release | Quality Manager |',
+          );
+          return sectionHeading + fallbackTable;
+        }
+      }
+
       const contentItems = (Array.isArray(section.content) ? section.content : [])
         .map((item: any) => {
           if (item.type === 'heading') return `<h3>${item.content}</h3>`;
@@ -416,6 +508,19 @@ function mergeSectionsToHtml(sections: any[], companyName: string, numbered: boo
             // If there are no pipes, fall through to paragraph handling so we
             // don't break free-text content that was mis-tagged as 'table'.
             if (raw.includes('|')) return pipeTableToHtml(raw);
+          }
+          // Auto-detect pipe-style markdown tables even when the seed didn't
+          // tag the item as 'table' (e.g. the "8.0 Revision History" sections
+          // shipped as plain content with leading "| Version | Date | …").
+          {
+            const raw = (item.content || '').trim();
+            if (
+              raw &&
+              !raw.startsWith('<table') &&
+              looksLikePipeTable(raw)
+            ) {
+              return pipeTableToHtml(raw);
+            }
           }
           let processed = item.content || '';
           // Skip empty/placeholder content
@@ -454,10 +559,167 @@ function mergeSectionsToHtml(sections: any[], companyName: string, numbered: boo
 }
 
 /**
+ * Wrap reference codes like "SOP-008", "TEMP-005 Design Plan Template" with a
+ * smart chip span. If a matching company document exists in `knownRefs`, the
+ * chip is rendered as a regular doc-mention (blue underline, click-to-open).
+ * Otherwise it gets the amber "missing" state with a pencil-plus affordance
+ * that triggers the CreateReferenceDocDialog.
+ *
+ * The pass deliberately skips matches that already live inside an anchor,
+ * mention chip, or attribute value, so it is safe to run on already-styled
+ * content and on round-trips back from the editor.
+ */
+export function annotateDocumentReferences(
+  html: string,
+  knownRefs: Map<string, { id: string; name: string }>,
+): string {
+  if (!html) return html;
+  const prefixGroup = REFERENCE_PREFIXES.join('|');
+  // Match REF-CODE optionally followed by a short readable title (stops at
+  // punctuation or tag boundary so we don't swallow whole sentences).
+  const re = new RegExp(
+    `\\b(${prefixGroup})-(\\d{2,4})(?:\\s*[:\\-]?\\s*([A-Z][^<\\n,;]{0,80}?))?(?=$|[\\s<,;.)\\]])`,
+    'g',
+  );
+
+  // Skip text inside tags (between < and >) and inside known chip/anchor wrappers.
+  // Simple state machine: walk the string, keep depth of opened tags, and only
+  // run the regex on text segments outside of tags.
+  let out = '';
+  let i = 0;
+  const len = html.length;
+  while (i < len) {
+    const lt = html.indexOf('<', i);
+    const textChunk = lt === -1 ? html.slice(i) : html.slice(i, lt);
+    // Substitute references in this text segment.
+    out += textChunk.replace(re, (_m, prefix, num, tail) => {
+      const refCode = `${prefix}-${num}`;
+      const title = (tail || '').trim();
+      const display = title ? `${refCode} ${title}` : refCode;
+      const known = knownRefs.get(refCode.toLowerCase()) || (title ? knownRefs.get(`${refCode} ${title}`.toLowerCase()) : undefined);
+      const titleAttr = title.replace(/"/g, '&quot;');
+      if (known) {
+        // Linked → blue chip; existing delegated click handler opens the doc.
+        return `<span data-doc-ref data-state="linked" data-id="${known.id}" data-ref-code="${refCode}" data-ref-title="${titleAttr}" class="xyreg-doc-ref" contenteditable="false">${display}</span>`;
+      }
+      return `<span data-doc-ref data-state="missing" data-ref-code="${refCode}" data-ref-title="${titleAttr}" class="xyreg-doc-ref" contenteditable="false">${display}</span>`;
+    });
+    if (lt === -1) break;
+    // Copy the tag verbatim until matching '>'.
+    const gt = html.indexOf('>', lt);
+    if (gt === -1) {
+      out += html.slice(lt);
+      break;
+    }
+    out += html.slice(lt, gt + 1);
+    i = gt + 1;
+  }
+  return out;
+}
+
+/**
  * Convert a pipe-delimited table (markdown-style, no separator row required)
  * into a clean HTML <table> with <thead>/<tbody>. Used to render seeded
  * "Revision History" content (and similar) as actual editable tables.
  */
+function looksLikePipeTable(raw: string): boolean {
+  const lines = raw.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  if (lines.length < 2) return false;
+  // First two non-empty lines must look like table rows (contain a '|') and
+  // the second one must be the markdown separator (---|--- pattern).
+  const isRow = (l: string) => l.includes('|');
+  const isSeparator = (l: string) =>
+    /^\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)+\|?$/.test(l);
+  return isRow(lines[0]) && isSeparator(lines[1]);
+}
+
+/**
+ * Apply a heading (H1/H2/H3) to the current Tiptap selection.
+ *
+ * Tiptap's `toggleHeading` is block-level — it converts the entire paragraph
+ * the selection sits in. When the user highlights only part of a paragraph
+ * (e.g. just "6.1 Clinical Evaluation Plan" inside a multi-line block),
+ * we want the heading to apply ONLY to the highlighted run, leaving the
+ * surrounding text untouched as a normal paragraph.
+ *
+ * Strategy:
+ *  - Empty selection → behave like vanilla `toggleHeading` on the current block.
+ *  - Non-empty selection that already covers a full block → vanilla toggle
+ *    (so toggling off a heading still works).
+ *  - Otherwise → delete the selected run and insert a fresh heading node
+ *    containing exactly that text. The remaining paragraph text stays put.
+ */
+function applyHeadingToSelection(editor: any, level: 1 | 2 | 3): void {
+  if (!editor) return;
+  const { state } = editor;
+  const { from, to, empty, $from, $to } = state.selection;
+
+  // Empty caret: toggle the current block (preserves toggle-off behavior).
+  if (empty) {
+    editor.chain().focus().toggleHeading({ level }).run();
+    return;
+  }
+
+  // Selection spans a full block (or multiple full blocks): use plain toggle
+  // so re-clicking H3 on a full heading flips it back to a paragraph.
+  const atBlockStart = $from.parentOffset === 0;
+  const atBlockEnd = $to.parentOffset === $to.parent.content.size;
+  if (atBlockStart && atBlockEnd) {
+    editor.chain().focus().toggleHeading({ level }).run();
+    return;
+  }
+
+  // Partial selection inside a block: extract the selected text into its
+  // own heading node, leaving surrounding text in the original paragraph.
+  const selectedText = state.doc.textBetween(from, to, '\n', '\n').trim();
+  if (!selectedText) {
+    editor.chain().focus().toggleHeading({ level }).run();
+    return;
+  }
+
+  // Selection must live inside a single text block for the surgical replace.
+  // If it spans block boundaries, fall back to plain toggle.
+  if (!$from.sameParent($to)) {
+    editor.chain().focus().toggleHeading({ level }).run();
+    return;
+  }
+
+  // Split the parent block into [before | selected | after] text runs and
+  // emit only the non-empty pieces. This avoids any leftover empty paragraph
+  // (which `splitBlock` would otherwise create when the selection sits at
+  // the very start or end of the block).
+  const parent = $from.parent;
+  const blockStart = $from.before();
+  const blockEnd = $from.after();
+  const beforeText = parent.textBetween(0, $from.parentOffset, '\n', '\n');
+  const afterText = parent.textBetween($to.parentOffset, parent.content.size, '\n', '\n');
+
+  const nodes: any[] = [];
+  if (beforeText.trim().length > 0) {
+    nodes.push({
+      type: 'paragraph',
+      content: [{ type: 'text', text: beforeText }],
+    });
+  }
+  nodes.push({
+    type: 'heading',
+    attrs: { level },
+    content: [{ type: 'text', text: selectedText }],
+  });
+  if (afterText.trim().length > 0) {
+    nodes.push({
+      type: 'paragraph',
+      content: [{ type: 'text', text: afterText }],
+    });
+  }
+
+  editor
+    .chain()
+    .focus()
+    .insertContentAt({ from: blockStart, to: blockEnd }, nodes)
+    .run();
+}
+
 function pipeTableToHtml(raw: string): string {
   const escape = (s: string) =>
     s
@@ -618,6 +880,8 @@ interface LiveEditorProps {
 
 export function LiveEditor({ template, className = '', onContentUpdate, companyId, onDocumentSaved, isEditingExistingDocument = false, editingDocumentId = null, docxSourceDocumentId = null, onAIGenerate, onAddAutoNote, currentNotes = [], isUploadedDocument = false, uploadedDocumentSaved = false, onUploadedDocumentSaved, disabled = false, selectedScope = 'company', selectedProductId, uploadedFileInfo, onDocumentControlChange, companyLogoUrl, onPushToDeviceFields, onCustomSave, isRecord = false, recordId, nextReviewDate, documentNumber, hideVersioning = false, isEditing: isEditingProp, showSectionNumbers = false, onShowSectionNumbersChange, onIsRecordChange , disableSopMentions = false }: LiveEditorProps) {
   const { activeCompanyRole } = useCompanyRole();
+  const aiAutoFillEnabled = useCustomerFeatureFlag('ai-auto-fill');
+  const aiInlineSuggestionsEnabled = useCustomerFeatureFlag('ai-inline-suggestions');
   const [showVersionModal, setShowVersionModal] = useState(false);
   const [showSaveVersionDialog, setShowSaveVersionDialog] = useState(false);
   const [currentDocumentId, setCurrentDocumentId] = useState<string | null>(null);
@@ -661,6 +925,14 @@ export function LiveEditor({ template, className = '', onContentUpdate, companyI
   const [inlineEditSectionId, setInlineEditSectionId] = useState<string | null>(null);
   const [aiTargetContentId, setAiTargetContentId] = useState<string | null>(null);
   const [zoom, setZoom] = useState(100);
+  // Table-picker dropdown state. `hover` is the current hovered cell (1-indexed)
+  // used to preview how many rows/cols will be inserted, Google-Docs-style.
+  const [tablePickerOpen, setTablePickerOpen] = useState(false);
+  const [tablePickerHover, setTablePickerHover] = useState<{ rows: number; cols: number }>({ rows: 0, cols: 0 });
+  // Snapshot of the editor selection at the moment the picker opened — opening
+  // the popover blurs the editor, so we restore this before inserting so the
+  // table lands at the caret instead of falling through to the document end.
+  const tablePickerSelectionRef = useRef<{ from: number; to: number } | null>(null);
   const [isNarrow, setIsNarrow] = useState<boolean>(() =>
     typeof window !== 'undefined' ? window.innerWidth < 900 : false
   );
@@ -706,10 +978,37 @@ export function LiveEditor({ template, className = '', onContentUpdate, companyI
 
   // Merge all sections into a single HTML string for the unified editor
   const companyName = activeCompanyRole?.companyName || '';
-  const mergedHtml = useMemo(
-    () => mergeSectionsToHtml(template?.sections || [], companyName, showSectionNumbers),
-    [template?.sections, companyName, showSectionNumbers]
+  // We need the company-document mention list to resolve "SOP-008"-style refs
+  // to existing rows. The hook is also called below for the @mention popup;
+  // calling it twice is fine — both call sites get the same memoized result.
+  const refDocItems = useCompanyDocumentMentions(
+    companyId || activeCompanyRole?.companyId,
+    !disableSopMentions,
   );
+  const knownRefs = useMemo(() => {
+    const m = new Map<string, { id: string; name: string }>();
+    for (const it of refDocItems) {
+      const ref = (it as any).hint?.match?.(/\b([A-Z]{2,5}-\d{2,4})\b/)?.[1]
+        || it.label?.match?.(/\b([A-Z]{2,5}-\d{2,4})\b/)?.[1];
+      if (ref) m.set(ref.toLowerCase(), { id: it.id, name: it.name });
+      if (it.label) m.set(it.label.toLowerCase(), { id: it.id, name: it.name });
+    }
+    return m;
+  }, [refDocItems]);
+  const mergedHtml = useMemo(
+    () => annotateDocumentReferences(
+      mergeSectionsToHtml(template?.sections || [], companyName, showSectionNumbers),
+      knownRefs,
+    ),
+    [template?.sections, companyName, showSectionNumbers, knownRefs]
+  );
+
+  // State for the "create reference document" mini-dialog.
+  const [createRefDialog, setCreateRefDialog] = useState<{
+    open: boolean;
+    refCode: string;
+    title: string;
+  }>({ open: false, refCode: '', title: '' });
 
   // Ref to access the editor from callbacks defined before useEditor
   const editorInstanceRef = useRef<any>(null);
@@ -754,14 +1053,24 @@ export function LiveEditor({ template, className = '', onContentUpdate, companyI
   const unifiedEditor = useEditor({
     immediatelyRender: false,
     extensions: [
-      StarterKit,
+      StarterKit.configure({
+        hardBreak: {
+          HTMLAttributes: { class: 'xyreg-line-break' },
+        },
+      }),
       TextStyle,
       FontSize,
       AIEditHighlightExtension,
       ImageWithDelete.configure({ inline: false, allowBase64: true }),
+      // TableKit bundles Table + TableRow + TableHeader + TableCell.
+      // resizable: true gives Google-Docs-style drag-to-resize columns.
+      TableKit.configure({
+        table: { resizable: true, HTMLAttributes: { class: 'xyreg-doc-table' } },
+      }),
       MentionMark,
       PersonMentionMark,
       SmartChipMark,
+      DocReferenceNode,
       Link.configure({
         // openOnClick is false because we handle clicks ourselves (new-tab on
         // plain click, like Google Docs). autolink wires URLs as the user types.
@@ -783,7 +1092,7 @@ export function LiveEditor({ template, className = '', onContentUpdate, companyI
     content: mergedHtml || '<p></p>',
     editorProps: {
       attributes: {
-        class: 'prose prose-sm max-w-none focus:outline-none min-h-[500px] p-6 prose-headings:text-gray-800 prose-p:text-gray-700 prose-strong:text-gray-800 prose-h2:text-xl prose-h2:font-bold prose-h2:border-b prose-h2:border-border prose-h2:pb-2 prose-h2:mt-8 prose-h2:mb-4 prose-h3:text-lg prose-h3:font-semibold prose-h3:mt-4 prose-ul:list-disc prose-ul:pl-6 prose-ol:list-decimal prose-ol:pl-6 prose-li:my-1',
+        class: 'prose prose-sm max-w-none focus:outline-none min-h-[500px] p-6 prose-headings:text-gray-800 prose-p:text-gray-700 prose-strong:text-gray-800 prose-h1:text-2xl prose-h1:font-bold prose-h1:border-b prose-h1:border-border prose-h1:pb-2 prose-h1:mt-8 prose-h1:mb-4 prose-h2:text-xl prose-h2:font-bold prose-h2:border-b prose-h2:border-border prose-h2:pb-2 prose-h2:mt-8 prose-h2:mb-4 prose-h3:text-lg prose-h3:font-semibold prose-h3:mt-4 prose-ul:list-disc prose-ul:pl-6 prose-ol:list-decimal prose-ol:pl-6 prose-li:my-1',
       },
       handleDrop: (view, event, slice, moved) => {
         if (!moved && event.dataTransfer?.files?.length) {
@@ -822,6 +1131,26 @@ export function LiveEditor({ template, className = '', onContentUpdate, companyI
       if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
       autosaveTimerRef.current = setTimeout(() => {
         if (isSavingRef.current) return;
+        // Re-run reference detection on the freshly edited HTML so that
+        // newly typed tokens like "SOP-019 Calibration" flip into chips.
+        // We diff before re-injecting to avoid a setContent → onUpdate loop.
+        try {
+          const ed = editorInstanceRef.current;
+          if (ed) {
+            const currentHtml = ed.getHTML();
+            const annotated = annotateDocumentReferences(currentHtml, knownRefs);
+            if (annotated !== currentHtml) {
+              programmaticUpdateRef.current = true;
+              const { from, to } = ed.state.selection;
+              ed.commands.setContent(annotated);
+              // Restore caret position best-effort.
+              try { ed.commands.setTextSelection({ from, to }); } catch { /* noop */ }
+              programmaticUpdateRef.current = false;
+            }
+          }
+        } catch (err) {
+          console.warn('[LiveEditor] live ref-annotation failed', err);
+        }
         handleSaveRef.current?.(true);
       }, 1500);
     },
@@ -1209,6 +1538,29 @@ export function LiveEditor({ template, className = '', onContentUpdate, companyI
     };
 
     const handleClick = (e: MouseEvent) => {
+      // Missing reference chip → open create dialog (intercept before doc-mention).
+      const missing = (e.target as HTMLElement | null)?.closest?.(
+        '[data-doc-ref][data-state="missing"]',
+      ) as HTMLElement | null;
+      if (missing) {
+        e.preventDefault();
+        e.stopPropagation();
+        const refCode = missing.getAttribute('data-ref-code') || '';
+        const fullText = (missing.textContent || '').trim();
+        const title = fullText.replace(refCode, '').replace(/^[\s:\-]+/, '').trim();
+        setCreateRefDialog({ open: true, refCode, title });
+        return;
+      }
+      // Linked reference chip → open the existing document.
+      const linked = (e.target as HTMLElement | null)?.closest?.(
+        '[data-doc-ref][data-state="linked"]',
+      ) as HTMLElement | null;
+      if (linked) {
+        e.preventDefault();
+        e.stopPropagation();
+        navigateToDoc(linked.textContent || '');
+        return;
+      }
       const target = (e.target as HTMLElement | null)?.closest?.('[data-doc-mention]') as HTMLElement | null;
       if (!target) return;
       e.preventDefault();
@@ -1512,7 +1864,8 @@ export function LiveEditor({ template, className = '', onContentUpdate, companyI
   useEffect(() => {
     if (!unifiedEditor) return;
 
-    const newHtml = mergeSectionsToHtml(template?.sections || [], companyName, showSectionNumbers);
+    const rawHtml = mergeSectionsToHtml(template?.sections || [], companyName, showSectionNumbers);
+    const newHtml = annotateDocumentReferences(rawHtml, knownRefs);
     // Build a lightweight fingerprint of sections content to detect external changes
     const sectionsJson = JSON.stringify(
       (template?.sections || []).map((s: any) => ({
@@ -1542,7 +1895,29 @@ export function LiveEditor({ template, className = '', onContentUpdate, companyI
       setTimeout(() => { programmaticUpdateRef.current = false; }, 0);
       setRefreshTrigger(prev => prev + 1);
     }
-  }, [template?.id, template?.sections, companyName, unifiedEditor, showSectionNumbers]);
+  }, [template?.id, template?.sections, companyName, unifiedEditor, showSectionNumbers, knownRefs]);
+
+  // One-shot re-annotation pass: if a draft was saved before reference chips
+  // existed, its stored HTML is plain text. Once the editor has hydrated and
+  // knownRefs is resolved, scan the current HTML for `PREFIX-NNN` patterns
+  // and upgrade them to chips in-place — no re-typing required.
+  const refAnnotationDoneRef = useRef(false);
+  useEffect(() => {
+    if (!unifiedEditor || refAnnotationDoneRef.current) return;
+    if (!editorInitializedRef.current) return;
+    try {
+      const currentHtml = unifiedEditor.getHTML();
+      const annotated = annotateDocumentReferences(currentHtml, knownRefs);
+      if (annotated !== currentHtml) {
+        programmaticUpdateRef.current = true;
+        unifiedEditor.commands.setContent(annotated);
+        setTimeout(() => { programmaticUpdateRef.current = false; }, 0);
+      }
+      refAnnotationDoneRef.current = true;
+    } catch (err) {
+      console.warn('[LiveEditor] one-shot ref-annotation failed', err);
+    }
+  }, [unifiedEditor, knownRefs, refreshTrigger]);
 
   // Auto-open the draft empty-state modal (Generate Manually / Auto-fill by AI
   // / Copy from SOP) when the draft has no filled sections. Fires once per
@@ -1634,6 +2009,7 @@ export function LiveEditor({ template, className = '', onContentUpdate, companyI
   // even if the DOM selection was collapsed by the button click. Falls back
   // to coordsAtPos when the button rect isn't provided.
   const handleOpenInlineAIEdit = useCallback((buttonRect?: DOMRect) => {
+    if (!aiInlineSuggestionsEnabled) return;
     const editor = editorInstanceRef.current;
     if (!editor) {
       toast.error('Editor not ready');
@@ -1674,7 +2050,7 @@ export function LiveEditor({ template, className = '', onContentUpdate, companyI
       to,
       anchorRect: rect,
     });
-  }, []);
+  }, [aiInlineSuggestionsEnabled]);
 
   // Check for existing document ID when template changes
   useEffect(() => {
@@ -1782,6 +2158,7 @@ export function LiveEditor({ template, className = '', onContentUpdate, companyI
 
 
   const openAutoFillSafely = () => {
+    if (!aiAutoFillEnabled) return;
     setShowDocumentAIBar(false);
 
     if (autoFillOpenTimeoutRef.current) {
@@ -2088,32 +2465,34 @@ export function LiveEditor({ template, className = '', onContentUpdate, companyI
 
           <div className="flex items-center gap-2">
             <TooltipProvider>
-              <DropdownMenu open={aiMenuOpen} onOpenChange={setAiMenuOpen} modal={false}>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    variant="outline"
-                    size="icon"
-                    className="border-amber-300 text-amber-400 hover:bg-amber-50 hover:text-amber-500 h-8 w-8"
-                  >
-                    <Sparkles className="w-4 h-4 " />
-                  </Button>
-                </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" onCloseAutoFocus={(e) => {
-                    if (autoFillPendingRef.current) {
-                      e.preventDefault();
-                      autoFillPendingRef.current = false;
-                    }
-                  }}>
-                  <DropdownMenuItem onSelect={() => {
-                    autoFillPendingRef.current = true;
-                    setAiMenuOpen(false);
-                    openAutoFillSafely();
-                  }}>
-                    <Wand2 className="w-4 h-4 mr-2" />
-                    Auto-Fill Sections
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
+              {aiAutoFillEnabled && (
+                <DropdownMenu open={aiMenuOpen} onOpenChange={setAiMenuOpen} modal={false}>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      className="border-amber-300 text-amber-400 hover:bg-amber-50 hover:text-amber-500 h-8 w-8"
+                    >
+                      <Sparkles className="w-4 h-4 " />
+                    </Button>
+                  </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" onCloseAutoFocus={(e) => {
+                      if (autoFillPendingRef.current) {
+                        e.preventDefault();
+                        autoFillPendingRef.current = false;
+                      }
+                    }}>
+                    <DropdownMenuItem onSelect={() => {
+                      autoFillPendingRef.current = true;
+                      setAiMenuOpen(false);
+                      openAutoFillSafely();
+                    }}>
+                      <Wand2 className="w-4 h-4 mr-2" />
+                      Auto-Fill Sections
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
@@ -2237,7 +2616,7 @@ export function LiveEditor({ template, className = '', onContentUpdate, companyI
           <Button
             variant={unifiedEditor.isActive('heading', { level: 1 }) ? 'default' : 'ghost'}
             size="sm"
-            onClick={() => unifiedEditor.chain().focus().toggleHeading({ level: 1 }).run()}
+            onClick={() => applyHeadingToSelection(unifiedEditor, 1)}
             className="h-7 w-7 p-0"
             title="Heading 1"
           >
@@ -2246,7 +2625,7 @@ export function LiveEditor({ template, className = '', onContentUpdate, companyI
           <Button
             variant={unifiedEditor.isActive('heading', { level: 2 }) ? 'default' : 'ghost'}
             size="sm"
-            onClick={() => unifiedEditor.chain().focus().toggleHeading({ level: 2 }).run()}
+            onClick={() => applyHeadingToSelection(unifiedEditor, 2)}
             className="h-7 w-7 p-0"
             title="Heading 2"
           >
@@ -2255,7 +2634,7 @@ export function LiveEditor({ template, className = '', onContentUpdate, companyI
           <Button
             variant={unifiedEditor.isActive('heading', { level: 3 }) ? 'default' : 'ghost'}
             size="sm"
-            onClick={() => unifiedEditor.chain().focus().toggleHeading({ level: 3 }).run()}
+            onClick={() => applyHeadingToSelection(unifiedEditor, 3)}
             className="h-7 w-7 p-0"
             title="Heading 3"
           >
@@ -2339,6 +2718,91 @@ export function LiveEditor({ template, className = '', onContentUpdate, companyI
               }
             }}
           />
+
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => unifiedEditor.chain().focus().setHorizontalRule().run()}
+            className="h-7 w-7 p-0"
+            title="Horizontal line"
+          >
+            <Minus className="w-3.5 h-3.5" />
+          </Button>
+
+          <Popover
+            open={tablePickerOpen}
+            onOpenChange={(open) => {
+              if (open && unifiedEditor) {
+                const { from, to } = unifiedEditor.state.selection;
+                tablePickerSelectionRef.current = { from, to };
+              }
+              setTablePickerOpen(open);
+              if (!open) {
+                setTablePickerHover({ rows: 0, cols: 0 });
+                tablePickerSelectionRef.current = null;
+              }
+            }}
+          >
+            <PopoverTrigger asChild>
+              <Button
+                variant={unifiedEditor.isActive('table') ? 'default' : 'ghost'}
+                size="sm"
+                className="h-7 w-7 p-0"
+                title="Insert table"
+              >
+                <TableIcon className="w-3.5 h-3.5" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent align="start" className="w-auto p-2">
+              {(() => {
+                const MAX_ROWS = 8;
+                const MAX_COLS = 10;
+                const { rows: hoverRows, cols: hoverCols } = tablePickerHover;
+                return (
+                  <div className="flex flex-col gap-1.5">
+                    <div
+                      className="grid gap-0.5"
+                      style={{ gridTemplateColumns: `repeat(${MAX_COLS}, 16px)` }}
+                      onMouseLeave={() => setTablePickerHover({ rows: 0, cols: 0 })}
+                    >
+                      {Array.from({ length: MAX_ROWS * MAX_COLS }).map((_, i) => {
+                        const r = Math.floor(i / MAX_COLS) + 1;
+                        const c = (i % MAX_COLS) + 1;
+                        const active = r <= hoverRows && c <= hoverCols;
+                        return (
+                          <button
+                            key={i}
+                            type="button"
+                            onMouseEnter={() => setTablePickerHover({ rows: r, cols: c })}
+                            onClick={() => {
+                              const saved = tablePickerSelectionRef.current;
+                              const chain = unifiedEditor.chain().focus();
+                              if (saved) chain.setTextSelection(saved);
+                              chain
+                                .insertTable({ rows: r, cols: c, withHeaderRow: true })
+                                .run();
+                              setTablePickerOpen(false);
+                              setTablePickerHover({ rows: 0, cols: 0 });
+                              tablePickerSelectionRef.current = null;
+                            }}
+                            className={cn(
+                              'w-4 h-4 border rounded-[2px] transition-colors',
+                              active
+                                ? 'bg-primary/20 border-primary'
+                                : 'bg-background border-border hover:border-primary/50'
+                            )}
+                          />
+                        );
+                      })}
+                    </div>
+                    <div className="text-xs text-muted-foreground text-center tabular-nums">
+                      {hoverRows > 0 ? `${hoverCols} × ${hoverRows}` : 'Select size'}
+                    </div>
+                  </div>
+                );
+              })()}
+            </PopoverContent>
+          </Popover>
 
           <Separator orientation="vertical" className="h-5 mx-1" />
 
@@ -2535,7 +2999,7 @@ export function LiveEditor({ template, className = '', onContentUpdate, companyI
                     <Button
                       variant={unifiedEditor.isActive('heading', { level: 1 }) ? 'default' : 'ghost'}
                       size="sm"
-                      onClick={() => unifiedEditor.chain().focus().toggleHeading({ level: 1 }).run()}
+                      onClick={() => applyHeadingToSelection(unifiedEditor, 1)}
                       className="h-7 w-7 p-0"
                       title="Heading 1"
                     >
@@ -2544,7 +3008,7 @@ export function LiveEditor({ template, className = '', onContentUpdate, companyI
                     <Button
                       variant={unifiedEditor.isActive('heading', { level: 2 }) ? 'default' : 'ghost'}
                       size="sm"
-                      onClick={() => unifiedEditor.chain().focus().toggleHeading({ level: 2 }).run()}
+                      onClick={() => applyHeadingToSelection(unifiedEditor, 2)}
                       className="h-7 w-7 p-0"
                       title="Heading 2"
                     >
@@ -2553,28 +3017,32 @@ export function LiveEditor({ template, className = '', onContentUpdate, companyI
                     <Button
                       variant={unifiedEditor.isActive('heading', { level: 3 }) ? 'default' : 'ghost'}
                       size="sm"
-                      onClick={() => unifiedEditor.chain().focus().toggleHeading({ level: 3 }).run()}
+                      onClick={() => applyHeadingToSelection(unifiedEditor, 3)}
                       className="h-7 w-7 p-0"
                       title="Heading 3"
                     >
                       <Heading3 className="w-3.5 h-3.5" />
                     </Button>
-                    <Separator orientation="vertical" className="h-5 mx-1" />
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onMouseDown={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                        handleOpenInlineAIEdit(rect);
-                      }}
-                      className="h-7 px-2 gap-1 text-primary hover:bg-primary/10"
-                      title="Edit with AI"
-                    >
-                      <Sparkles className="w-3.5 h-3.5" />
-                      <span className="text-xs font-medium">Edit</span>
-                    </Button>
+                    {aiInlineSuggestionsEnabled && (
+                      <>
+                        <Separator orientation="vertical" className="h-5 mx-1" />
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                            handleOpenInlineAIEdit(rect);
+                          }}
+                          className="h-7 px-2 gap-1 text-primary hover:bg-primary/10"
+                          title="Edit with AI"
+                        >
+                          <Sparkles className="w-3.5 h-3.5" />
+                          <span className="text-xs font-medium">Edit</span>
+                        </Button>
+                      </>
+                    )}
                     <Button
                       variant="ghost"
                       size="sm"
@@ -2612,6 +3080,13 @@ export function LiveEditor({ template, className = '', onContentUpdate, companyI
                 onMouseEnter={cancelHoverClose}
                 onMouseLeave={scheduleHoverClose}
                 onOpen={navigateToDoc}
+              />
+              <CreateReferenceDocDialog
+                open={createRefDialog.open}
+                companyId={companyId || activeCompanyRole?.companyId}
+                initialRefCode={createRefDialog.refCode}
+                initialTitle={createRefDialog.title}
+                onClose={() => setCreateRefDialog({ open: false, refCode: '', title: '' })}
               />
               <PersonMentionHoverCard
                 data={personHover}
@@ -2816,6 +3291,8 @@ export function LiveEditor({ template, className = '', onContentUpdate, companyI
           anchorRect={inlineAIEdit.anchorRect}
           sectionTitle={template?.name}
           companyId={companyId || activeCompanyRole?.companyId}
+          scope={selectedScope}
+          productId={selectedProductId}
           onClose={() => setInlineAIEdit(null)}
         />
       )}

@@ -15,6 +15,7 @@ import { NewCommunicationDialog } from "@/components/communications/NewCommunica
 import { CommunicationThread } from "@/types/communications";
 import { ErrorBoundary } from "@/components/error/ErrorBoundary";
 import { useCommunicationThreads } from "@/hooks/useCommunicationThreads";
+import { useCustomerFeatureFlag } from "@/hooks/useCustomerFeatureFlag";
 
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
@@ -32,6 +33,7 @@ interface CommunicationHubProps {
 }
 
 export function CommunicationHub({ scope, companyId, productId }: CommunicationHubProps) {
+  const communicationsEnabled = useCustomerFeatureFlag('communications-threads');
   const [newMessage, setNewMessage] = useState('');
   const [selectedRecipient, setSelectedRecipient] = useState('');
   const [isExpanded, setIsExpanded] = useState(false);
@@ -115,6 +117,7 @@ export function CommunicationHub({ scope, companyId, productId }: CommunicationH
   // Recent threads for collapsed view (max 5)
   const recentThreads = threads.slice(0, 5);
 
+  if (!communicationsEnabled) return null;
 
   if (isLoading) {
     return (

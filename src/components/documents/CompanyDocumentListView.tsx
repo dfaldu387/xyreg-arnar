@@ -25,7 +25,8 @@ import { useDocumentAuthors } from "@/hooks/useDocumentAuthors";
 import { useCompanyDateFormat } from "@/hooks/useCompanyDateFormat";
 import { useNavigate } from "react-router-dom";
 import { useCompanyRole } from "@/context/CompanyRoleContext";
-import { formatSopDisplayId, formatSopDisplayName } from '@/constants/sopAutoSeedTiers';
+import { formatSopDisplayId, formatSopDisplayName, getSopTier } from '@/constants/sopAutoSeedTiers';
+import { TierBadge } from './TierBadge';
 
 // URL param keys for table state
 const TABLE_URL_PARAMS = {
@@ -455,6 +456,27 @@ export function CompanyDocumentListView({
             )}
           </div>
         );
+      },
+    },
+    {
+      id: "tier",
+      accessorFn: (row) => getSopTier(row.name) ?? "",
+      header: ({ column }) => {
+        return (
+          <Button
+            variant="ghost"
+            onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
+            className="p-0 hover:bg-transparent"
+          >
+            Tier
+            <ArrowUpDown className="ml-2 h-4 w-4" />
+          </Button>
+        );
+      },
+      cell: ({ row }) => {
+        const tier = getSopTier(row.original.name);
+        if (!tier) return <span className="text-muted-foreground">-</span>;
+        return <TierBadge tier={tier} className="w-fit" />;
       },
     },
     {
