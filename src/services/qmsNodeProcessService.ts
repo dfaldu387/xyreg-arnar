@@ -13,6 +13,8 @@ export interface QmsNodeProcess {
   node_id: string;
   process_description: string | null;
   process_steps: ProcessStep[] | null;
+  inputs: string[] | null;
+  outputs: string[] | null;
   updated_at: string;
   updated_by: string | null;
 }
@@ -105,6 +107,8 @@ export class QmsNodeProcessService {
       return {
         ...data,
         process_steps: data.process_steps as ProcessStep[] | null,
+        inputs: (data as any).inputs as string[] | null,
+        outputs: (data as any).outputs as string[] | null,
       };
     } catch (error) {
       console.error('[QmsNodeProcessService] Error in getNodeProcess:', error);
@@ -119,21 +123,27 @@ export class QmsNodeProcessService {
     companyId: string,
     nodeId: string,
     processDescription: string,
-    processSteps?: ProcessStep[]
+    processSteps?: ProcessStep[],
+    inputs?: string[] | null,
+    outputs?: string[] | null,
   ): Promise<boolean> {
     try {
       const { data: user } = await supabase.auth.getUser();
-      
+
+      const payload: Record<string, unknown> = {
+        company_id: companyId,
+        node_id: nodeId,
+        process_description: processDescription,
+        process_steps: processSteps ? JSON.stringify(processSteps) : null,
+        updated_at: new Date().toISOString(),
+        updated_by: user?.user?.id || null,
+      };
+      if (inputs !== undefined) payload.inputs = inputs ? JSON.stringify(inputs) : null;
+      if (outputs !== undefined) payload.outputs = outputs ? JSON.stringify(outputs) : null;
+
       const { error } = await supabase
         .from('qms_node_internal_processes')
-        .upsert({
-          company_id: companyId,
-          node_id: nodeId,
-          process_description: processDescription,
-          process_steps: processSteps ? JSON.stringify(processSteps) : null,
-          updated_at: new Date().toISOString(),
-          updated_by: user?.user?.id || null,
-        }, {
+        .upsert(payload as any, {
           onConflict: 'company_id,node_id'
         });
 

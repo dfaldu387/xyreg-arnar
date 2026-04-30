@@ -35,6 +35,8 @@ export interface TemplateFilters {
   documentTypes?: string[];
   /** Multi-select SOP tiers (A=Generic, B=Pathway, C=Device-specific). */
   tiers?: Array<'A' | 'B' | 'C'>;
+  /** Multi-select functional sub-prefixes (QA, DE, RM, CL, RA, MF, SC). */
+  subPrefixes?: string[];
 }
 
 export type TemplateScope = 'company-wide' | 'product-specific';

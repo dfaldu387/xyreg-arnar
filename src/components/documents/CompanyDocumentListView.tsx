@@ -12,20 +12,20 @@ import {
   type SortingState,
   type VisibilityState,
 } from "@tanstack/react-table";
-import { ArrowUpDown, ChevronLeft, ChevronRight, FileEdit, Trash2, Eye, Send, Pencil, MoreHorizontal, Copy, FileDown, Loader2 } from "lucide-react";
+import { ArrowUpDown, ChevronLeft, ChevronRight, FileEdit, Trash2, Eye, Pencil, MoreHorizontal, Copy, FileDown, Loader2, Languages } from "lucide-react";
 import { DocumentStarButton } from './DocumentStarButton';
 import { DocumentPdfPreviewService } from '@/services/documentPdfPreviewService';
 import { toast } from 'sonner';
 import { Checkbox } from "@/components/ui/checkbox";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { SendToReviewGroupDialog } from './SendToReviewGroupDialog';
 import { CopyDocumentDialog } from '@/components/product/documents/CopyDocumentDialog';
+import { TranslateDocumentDialog } from '@/components/documents/TranslateDocumentDialog';
 import { CompanyDocument } from '@/hooks/useCompanyDocuments';
 import { useDocumentAuthors } from "@/hooks/useDocumentAuthors";
 import { useCompanyDateFormat } from "@/hooks/useCompanyDateFormat";
 import { useNavigate } from "react-router-dom";
 import { useCompanyRole } from "@/context/CompanyRoleContext";
-import { formatSopDisplayId, formatSopDisplayName, getSopTier } from '@/constants/sopAutoSeedTiers';
+import { formatSopDisplayId, formatSopDisplayName, getSopTier, compareSopDocuments } from '@/constants/sopAutoSeedTiers';
 import { TierBadge } from './TierBadge';
 
 // URL param keys for table state
@@ -76,6 +76,7 @@ interface CompanyDocumentListViewProps {
   onEdit?: (document: CompanyDocument) => void;
   onDelete?: (document: CompanyDocument) => void;
   onCopy?: (document: CompanyDocument) => void;
+  onTranslate?: (document: CompanyDocument, langCode: string) => Promise<void> | void;
   onCreateInStudio?: (document: CompanyDocument) => void;
   isDeleting?: boolean;
   disabled?: boolean;
@@ -120,6 +121,7 @@ export function CompanyDocumentListView({
   onEdit,
   onDelete,
   onCopy,
+  onTranslate,
   onCreateInStudio,
   isDeleting = false,
   disabled = false,
@@ -134,7 +136,8 @@ export function CompanyDocumentListView({
   const [searchParams, setSearchParams] = useSearchParams();
   const [pendingDeleteDoc, setPendingDeleteDoc] = React.useState<CompanyDocument | null>(null);
   const [pendingCopyDoc, setPendingCopyDoc] = React.useState<CompanyDocument | null>(null);
-  const [sendReviewDoc, setSendReviewDoc] = React.useState<CompanyDocument | null>(null);
+  const [pendingTranslateDoc, setPendingTranslateDoc] = React.useState<CompanyDocument | null>(null);
+  const [isTranslating, setIsTranslating] = React.useState(false);
   const [pdfLoadingDocId, setPdfLoadingDocId] = React.useState<string | null>(null);
   // Initialize sorting from URL params
   const [sorting, setSortingState] = React.useState<SortingState>(() => {
@@ -295,6 +298,14 @@ export function CompanyDocumentListView({
         return formatSopDisplayName(name);
       },
       id: "name",
+      // Plain alphabetical sort on the displayed name (prefix + title).
+      // Previously used `compareSopDocuments`, which forced canonical SOP
+      // numeric order (SOP-QA-001 always first) regardless of sort direction.
+      sortingFn: (rowA, rowB) => {
+        const nameA = `${rowA.original.document_number ?? ''} ${rowA.original.name ?? ''}`.trim();
+        const nameB = `${rowB.original.document_number ?? ''} ${rowB.original.name ?? ''}`.trim();
+        return nameA.localeCompare(nameB, undefined, { sensitivity: 'base', numeric: true });
+      },
       header: ({ column }) => {
         return (
           <Button
@@ -310,6 +321,7 @@ export function CompanyDocumentListView({
       cell: ({ row }) => {
         const doc = row.original;
         const docNumber = doc.document_number;
+        const langCode = (doc as any).language_code as string | null | undefined;
         // Strip the document number prefix from the name if it already starts with it
         let cleanName = doc.name;
         if (docNumber && cleanName.startsWith(docNumber)) {
@@ -335,6 +347,14 @@ export function CompanyDocumentListView({
                     <span className="text-muted-foreground font-mono text-xs mr-1.5">{displayDocNumber}</span>
                   )}
                   {displayCleanName}
+                  {langCode && (
+                    <Badge
+                      variant="outline"
+                      className="ml-2 text-[10px] bg-purple-50 text-purple-700 border-purple-200 font-mono"
+                    >
+                      {langCode}
+                    </Badge>
+                  )}
                 </span>
               </TooltipTrigger>
               <TooltipContent>
@@ -474,7 +494,7 @@ export function CompanyDocumentListView({
         );
       },
       cell: ({ row }) => {
-        const tier = getSopTier(row.original.name);
+        const tier = getSopTier(row.original.name, row.original.document_number);
         if (!tier) return <span className="text-muted-foreground">-</span>;
         return <TierBadge tier={tier} className="w-fit" />;
       },
@@ -681,20 +701,8 @@ export function CompanyDocumentListView({
                 <Eye className="h-4 w-4" />
               </Button>
             )}
-            {/* Send for Review */}
-            {companyId && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setSendReviewDoc(doc)}
-                disabled={isDeleting || disabled}
-                title="Send for Review"
-              >
-                <Send className="h-4 w-4 text-primary" />
-              </Button>
-            )}
-            {/* 3-dot menu: Edit, Copy, Delete, Preview PDF */}
-            {(onEdit || onCopy || onDelete || companyId) && (
+            {/* 3-dot menu: Edit, Copy, Delete, Translate, Preview PDF */}
+            {(onEdit || onCopy || onDelete || onTranslate || companyId) && (
               <DropdownMenu modal={false}>
                 <DropdownMenuTrigger asChild>
                   <Button variant="ghost" size="sm" disabled={isDeleting || disabled}>
@@ -746,6 +754,12 @@ export function CompanyDocumentListView({
                       Copy
                     </DropdownMenuItem>
                   )}
+                  {onTranslate && !((doc as any).is_translation) && !/-[A-Z]{2}$/.test(doc.document_number || "") && (
+                    <DropdownMenuItem onSelect={() => { setTimeout(() => setPendingTranslateDoc(doc), 0); }}>
+                      <Languages className="h-4 w-4 mr-2" />
+                      Translate copy…
+                    </DropdownMenuItem>
+                  )}
                 </DropdownMenuContent>
               </DropdownMenu>
             )}
@@ -753,7 +767,7 @@ export function CompanyDocumentListView({
         );
       },
     },
-  ], [onView, onEdit, onDelete, onCopy, isDeleting, disabled, getAuthorById, authorsLoading, formatDate, navigate, activeCompanyRole, bulkMode, bulkSelectedDocs, onToggleBulkDoc, companyId, pdfLoadingDocId]);
+  ], [onView, onEdit, onDelete, onCopy, onTranslate, isDeleting, disabled, getAuthorById, authorsLoading, formatDate, navigate, activeCompanyRole, bulkMode, bulkSelectedDocs, onToggleBulkDoc, companyId, pdfLoadingDocId]);
 
   const table = useReactTable({
     data: documents,
@@ -925,16 +939,31 @@ export function CompanyDocumentListView({
       }}
     />
 
-    {sendReviewDoc && companyId && (
-      <SendToReviewGroupDialog
-        open={!!sendReviewDoc}
-        onOpenChange={(open) => { if (!open) setSendReviewDoc(null); }}
-        documentId={sendReviewDoc.id}
-        documentName={sendReviewDoc.name}
-        companyId={companyId}
-        existingGroupIds={sendReviewDoc.reviewer_group_ids || []}
-      />
-    )}
+    {/* Translate Copy Dialog */}
+    <TranslateDocumentDialog
+      open={!!pendingTranslateDoc}
+      onOpenChange={(open) => { if (!open && !isTranslating) setPendingTranslateDoc(null); }}
+      documentName={(() => {
+        const n = pendingTranslateDoc?.name || '';
+        return n.replace(/^\s*[A-Z]{2,5}(?:-[A-Z0-9]+){1,3}\s+/i, '').trim() || n;
+      })()}
+      documentNumber={(() => {
+        const raw = pendingTranslateDoc?.document_number || '';
+        const key = (raw.match(/^SOP-\d{1,3}$/i) ? raw.toUpperCase() : null);
+        return key ? formatSopDisplayId(key) : raw;
+      })()}
+      isTranslating={isTranslating}
+      onConfirm={async (langCode) => {
+        if (!onTranslate || !pendingTranslateDoc) return;
+        try {
+          setIsTranslating(true);
+          await onTranslate(pendingTranslateDoc, langCode);
+          setPendingTranslateDoc(null);
+        } finally {
+          setIsTranslating(false);
+        }
+      }}
+    />
     </>
   );
 }

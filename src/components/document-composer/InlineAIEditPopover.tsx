@@ -70,16 +70,20 @@ export function InlineAIEditPopover({
   }, []);
 
   useEffect(() => {
-    if (scope === 'product' && productId) {
-      deviceContextPromiseRef.current = fetchFullAIContext(productId, companyId)
-        .then((res) => res.text)
-        .catch((err) => {
-          console.warn('[InlineAIEditPopover] device context fetch failed', err);
-          return '';
-        });
-    } else {
+    // Always fetch context so company name/country is available even in
+    // company-scoped docs. The aggregator no-ops on missing ids, so passing
+    // an undefined productId in company scope just yields company-only context.
+    const effectiveProductId = scope === 'product' ? productId : undefined;
+    if (!companyId && !effectiveProductId) {
       deviceContextPromiseRef.current = Promise.resolve('');
+      return;
     }
+    deviceContextPromiseRef.current = fetchFullAIContext(effectiveProductId, companyId)
+      .then((res) => res.text)
+      .catch((err) => {
+        console.warn('[InlineAIEditPopover] context fetch failed', err);
+        return '';
+      });
   }, [scope, productId, companyId]);
 
   useEffect(() => {

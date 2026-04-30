@@ -80,6 +80,7 @@ export function DocumentComposer({ disabled = false }: DocumentComposerProps) {
   const [recordId, setRecordId] = useState<string | null>(null);
   const [nextReviewDate, setNextReviewDate] = useState<string | null>(null);
   const [documentNumber, setDocumentNumber] = useState<string | null>(null);
+  const [changeControlRef, setChangeControlRef] = useState<string | null>(null);
   const [showAddDocumentDialog, setShowAddDocumentDialog] = useState(false);
   const [showCIDocumentSearch, setShowCIDocumentSearch] = useState(false);
   const [ciDocuments, setCIDocuments] = useState<any[]>([]);
@@ -1234,6 +1235,7 @@ export function DocumentComposer({ disabled = false }: DocumentComposerProps) {
               onRecordIdChange={setRecordId}
               onNextReviewDateChange={setNextReviewDate}
               onDocumentNumberChange={setDocumentNumber}
+              onChangeControlRefChange={setChangeControlRef}
               showSectionNumbers={(generatedTemplate || template)?.formatOptions?.showSectionNumbers}
               onShowSectionNumbersChange={(show) => {
                 const currentTemplate = generatedTemplate || template;
@@ -1343,6 +1345,7 @@ export function DocumentComposer({ disabled = false }: DocumentComposerProps) {
                         recordId={recordId || undefined}
                         nextReviewDate={nextReviewDate || undefined}
                         documentNumber={documentNumber || undefined}
+                        changeControlRef={changeControlRef || undefined}
                         onIsRecordChange={setIsRecord}
                         showSectionNumbers={(generatedTemplate || template)?.formatOptions?.showSectionNumbers}
                         onShowSectionNumbersChange={(show) => {

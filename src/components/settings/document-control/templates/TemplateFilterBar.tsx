@@ -10,13 +10,14 @@ import {
 } from '@/components/ui/popover';
 import { TemplateFilters } from '@/types/templateManagement';
 import { cn } from '@/lib/utils';
+import { DEFAULT_SUB_PREFIXES } from '@/types/documentCategories';
 
 interface TemplateFilterBarProps {
   filters: TemplateFilters;
   onFiltersChange: (filters: TemplateFilters) => void;
 }
 
-type Category = 'scope' | 'docType' | 'classification';
+type Category = 'scope' | 'docType' | 'classification' | 'subPrefix';
 
 const SCOPE_OPTIONS: Array<{ value: 'company-wide' | 'product-specific'; label: string }> = [
   { value: 'company-wide', label: 'Company-wide' },
@@ -26,7 +27,7 @@ const SCOPE_OPTIONS: Array<{ value: 'company-wide' | 'product-specific'; label: 
 const TYPE_OPTIONS: string[] = ['SOP', 'Form', 'List', 'Certificate'];
 
 const TIER_OPTIONS: Array<{ value: 'A' | 'B' | 'C'; label: string }> = [
-  { value: 'A', label: 'Generic' },
+  { value: 'A', label: 'Foundation' },
   { value: 'B', label: 'Pathway' },
   { value: 'C', label: 'Device-specific' },
 ];
@@ -35,6 +36,7 @@ const CATEGORIES: Array<{ key: Category; label: string }> = [
   { key: 'scope', label: 'Scope' },
   { key: 'docType', label: 'Document type' },
   { key: 'classification', label: 'Tier' },
+  { key: 'subPrefix', label: 'Sub-prefix' },
 ];
 
 /**
@@ -50,8 +52,9 @@ export function TemplateFilterBar({ filters, onFiltersChange }: TemplateFilterBa
   const scopes = filters.scopes ?? [];
   const types = filters.documentTypes ?? [];
   const tiers = filters.tiers ?? [];
+  const subPrefixes = filters.subPrefixes ?? [];
 
-  const totalActive = scopes.length + types.length + tiers.length;
+  const totalActive = scopes.length + types.length + tiers.length + subPrefixes.length;
   const hasAny = totalActive > 0 || !!filters.search;
 
   const toggle = <T,>(arr: T[], value: T): T[] =>
@@ -63,6 +66,8 @@ export function TemplateFilterBar({ filters, onFiltersChange }: TemplateFilterBa
     onFiltersChange({ ...filters, documentTypes: next.length ? next : undefined });
   const setTiers = (next: typeof tiers) =>
     onFiltersChange({ ...filters, tiers: next.length ? next : undefined });
+  const setSubPrefixes = (next: typeof subPrefixes) =>
+    onFiltersChange({ ...filters, subPrefixes: next.length ? next : undefined });
 
   const clearAll = () =>
     onFiltersChange({
@@ -71,6 +76,7 @@ export function TemplateFilterBar({ filters, onFiltersChange }: TemplateFilterBa
       scopes: undefined,
       documentTypes: undefined,
       tiers: undefined,
+      subPrefixes: undefined,
     });
 
   const filteredCategories = CATEGORIES.filter((c) =>
@@ -146,15 +152,34 @@ export function TemplateFilterBar({ filters, onFiltersChange }: TemplateFilterBa
       );
     }
 
-    // classification
-    const opts = TIER_OPTIONS.filter((o) =>
-      o.label.toLowerCase().includes(categorySearch.toLowerCase())
+    if (activeCategory === 'classification') {
+      const opts = TIER_OPTIONS.filter((o) =>
+        o.label.toLowerCase().includes(categorySearch.toLowerCase())
+      );
+      return (
+        <div className="space-y-1">
+          {opts.map((o) =>
+            renderCheckRow(o.value, o.label, tiers.includes(o.value), () =>
+              setTiers(toggle(tiers, o.value))
+            )
+          )}
+        </div>
+      );
+    }
+
+    // subPrefix
+    const q = categorySearch.toLowerCase();
+    const spOpts = DEFAULT_SUB_PREFIXES.filter(
+      (sp) => sp.code.toLowerCase().includes(q) || sp.label.toLowerCase().includes(q)
     );
     return (
       <div className="space-y-1">
-        {opts.map((o) =>
-          renderCheckRow(o.value, o.label, tiers.includes(o.value), () =>
-            setTiers(toggle(tiers, o.value))
+        {spOpts.map((sp) =>
+          renderCheckRow(
+            sp.code,
+            `${sp.code} — ${sp.label}`,
+            subPrefixes.includes(sp.code),
+            () => setSubPrefixes(toggle(subPrefixes, sp.code))
           )
         )}
       </div>
@@ -265,6 +290,22 @@ export function TemplateFilterBar({ filters, onFiltersChange }: TemplateFilterBa
                 onClick={() => setTiers(tiers.filter((x) => x !== tier))}
                 className="rounded hover:bg-background/60 p-0.5"
                 aria-label={`Remove ${opt?.label} filter`}
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </Badge>
+          );
+        })}
+        {subPrefixes.map((sp) => {
+          const opt = DEFAULT_SUB_PREFIXES.find((o) => o.code === sp);
+          return (
+            <Badge key={`sp-${sp}`} variant="secondary" className="gap-1 pr-1">
+              Sub-prefix: {opt?.label ?? sp}
+              <button
+                type="button"
+                onClick={() => setSubPrefixes(subPrefixes.filter((x) => x !== sp))}
+                className="rounded hover:bg-background/60 p-0.5"
+                aria-label={`Remove ${opt?.label ?? sp} filter`}
               >
                 <X className="h-3 w-3" />
               </button>

@@ -126,6 +126,7 @@ export function DocumentDraftDrawer({
   const [recordId, setRecordId] = useState<string | null>(null);
   const [nextReviewDate, setNextReviewDate] = useState<string | null>(null);
   const [documentNumber, setDocumentNumber] = useState<string | null>(null);
+  const [changeControlRef, setChangeControlRef] = useState<string | null>(null);
   const [showSendForReview, setShowSendForReview] = useState(false);
   const [existingReviewerGroupIds, setExistingReviewerGroupIds] = useState<string[]>([]);
   const [showSaveCIDialog, setShowSaveCIDialog] = useState(false);
@@ -301,6 +302,9 @@ export function DocumentDraftDrawer({
   useEffect(() => {
     if (ciMetadata) setDocumentNumber(ciMetadata.document_number ?? null);
   }, [ciMetadata?.document_number]);
+  useEffect(() => {
+    if (ciMetadata) setChangeControlRef(ciMetadata.change_control_ref ?? null);
+  }, [ciMetadata?.change_control_ref]);
 
   // Fetch document status for stepper (skip for new unsaved documents)
   useEffect(() => {
@@ -1331,6 +1335,7 @@ export function DocumentDraftDrawer({
               onRecordIdChange={setRecordId}
               onNextReviewDateChange={setNextReviewDate}
               onDocumentNumberChange={setDocumentNumber}
+              onChangeControlRefChange={setChangeControlRef}
               isEditing={isEditingContent}
               onEditModeChange={setIsEditingContent}
               showSectionNumbers={showSectionNumbers}
@@ -2257,6 +2262,7 @@ export function DocumentDraftDrawer({
                   recordId={recordId || undefined}
                   nextReviewDate={nextReviewDate || undefined}
                   documentNumber={documentNumber || undefined}
+                  changeControlRef={changeControlRef || undefined}
                   companyLogoUrl={companyLogoUrl}
                   hideVersioning
                   onIsRecordChange={setIsRecord}

@@ -28,7 +28,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { CompanyDocumentCreationDialog } from "./CompanyDocumentCreationDialog";
 import { CompanyDocumentEditDialog } from "./CompanyDocumentEditDialog";
-import { formatSopDisplayId, formatSopDisplayName } from '@/constants/sopAutoSeedTiers';
+import { formatSopDisplayId, formatSopDisplayName, getSopTier } from '@/constants/sopAutoSeedTiers';
 import { CompanyDocumentViewer } from "./CompanyDocumentViewer";
 import { CompanyDocumentCard } from "./CompanyDocumentCard";
 import { CompanyDocumentListView } from "./CompanyDocumentListView";
@@ -43,7 +43,12 @@ import { useQuery } from '@tanstack/react-query';
 import { useBulkOperationProgress } from '@/hooks/useBulkOperationProgress';
 import { CompanyDocumentStatusSummary } from './CompanyDocumentStatusSummary';
 import { BulkDocumentValidationDialog, BulkValidationFinding } from './BulkDocumentValidationDialog';
+import { CCRCreateDialog, type CCRPrefill } from '@/components/change-control/CCRCreateDialog';
+import { BulkCCRChooserDialog } from '@/components/change-control/BulkCCRChooserDialog';
 import { DocumentValidationService } from '@/services/documentValidationService';
+import { appendLanguageSuffix } from '@/utils/documentNumbering';
+import { NoPhaseService } from '@/services/noPhaseService';
+import { parseSopNumber } from '@/constants/sopAutoSeedTiers';
 
 interface CompanyDocumentManagerProps {
   companyId: string;
@@ -58,6 +63,7 @@ const URL_PARAM_KEYS = {
   TAGS: 'tags',
   REF_TAGS: 'refTags',
   DOC_TYPES: 'docTypes',
+  TIERS: 'tiers',
   SORT_BY_DATE: 'sortByDate',
   LAYOUT: 'layout',
   SEARCH: 'q',
@@ -86,6 +92,7 @@ export function CompanyDocumentManager({ companyId, disabled = false }: CompanyD
   const [tagFilter, setTagFilterState] = useState<string[]>(() => parseArrayParam(searchParams.get(URL_PARAM_KEYS.TAGS)));
   const [refTagFilter, setRefTagFilterState] = useState<string[]>(() => parseArrayParam(searchParams.get(URL_PARAM_KEYS.REF_TAGS)));
   const [docTypeFilter, setDocTypeFilterState] = useState<string[]>(() => parseArrayParam(searchParams.get(URL_PARAM_KEYS.DOC_TYPES)));
+  const [tierFilter, setTierFilterState] = useState<string[]>(() => parseArrayParam(searchParams.get(URL_PARAM_KEYS.TIERS)));
   const [sortByDate, setSortByDateState] = useState<SortByDateOption>(() => (searchParams.get(URL_PARAM_KEYS.SORT_BY_DATE) as SortByDateOption) || 'none');
   const [viewMode, setViewModeState] = useState<'card' | 'list'>(() => (searchParams.get(URL_PARAM_KEYS.LAYOUT) as 'card' | 'list') || 'list');
 
@@ -138,6 +145,12 @@ export function CompanyDocumentManager({ companyId, disabled = false }: CompanyD
   const [bulkValidationFindings, setBulkValidationFindings] = useState<any[]>([]);
   const [bulkValidationDocCount, setBulkValidationDocCount] = useState(0);
 
+  // Bulk Create CCR state
+  const [bulkCcrDialogOpen, setBulkCcrDialogOpen] = useState(false);
+  const [bulkCcrPrefill, setBulkCcrPrefill] = useState<CCRPrefill | undefined>(undefined);
+  const [bulkCcrChooserOpen, setBulkCcrChooserOpen] = useState(false);
+  const [bulkCcrChooserDocIds, setBulkCcrChooserDocIds] = useState<string[]>([]);
+
   const documentCategories = ['Standard', 'Template', 'Record', 'Form', 'Report', 'Policy', 'Procedure', 'Work Instruction', 'SOP', 'Other'];
 
   const { progress: bulkProgress, startOperation, updateProgress: updateBulkProgress, completeOperation } = useBulkOperationProgress();
@@ -166,6 +179,7 @@ export function CompanyDocumentManager({ companyId, disabled = false }: CompanyD
     const urlTags = parseArrayParam(searchParams.get(URL_PARAM_KEYS.TAGS));
     const urlRefTags = parseArrayParam(searchParams.get(URL_PARAM_KEYS.REF_TAGS));
     const urlDocTypes = parseArrayParam(searchParams.get(URL_PARAM_KEYS.DOC_TYPES));
+    const urlTiers = parseArrayParam(searchParams.get(URL_PARAM_KEYS.TIERS));
     const urlSort = (searchParams.get(URL_PARAM_KEYS.SORT_BY_DATE) as SortByDateOption) || 'none';
     const urlLayout = (searchParams.get(URL_PARAM_KEYS.LAYOUT) as 'card' | 'list') || 'list';
 
@@ -176,6 +190,7 @@ export function CompanyDocumentManager({ companyId, disabled = false }: CompanyD
     if (JSON.stringify(urlTags) !== JSON.stringify(tagFilter)) setTagFilterState(urlTags);
     if (JSON.stringify(urlRefTags) !== JSON.stringify(refTagFilter)) setRefTagFilterState(urlRefTags);
     if (JSON.stringify(urlDocTypes) !== JSON.stringify(docTypeFilter)) setDocTypeFilterState(urlDocTypes);
+    if (JSON.stringify(urlTiers) !== JSON.stringify(tierFilter)) setTierFilterState(urlTiers);
     if (urlSort !== sortByDate) setSortByDateState(urlSort);
     if (urlLayout !== viewMode) setViewModeState(urlLayout);
   }, [searchParams]);
@@ -215,6 +230,11 @@ export function CompanyDocumentManager({ companyId, disabled = false }: CompanyD
   const setDocTypeFilter = useCallback((value: string[]) => {
     setDocTypeFilterState(value);
     updateUrlParams({ [URL_PARAM_KEYS.DOC_TYPES]: serializeArrayParam(value) });
+  }, [updateUrlParams]);
+
+  const setTierFilter = useCallback((value: string[]) => {
+    setTierFilterState(value);
+    updateUrlParams({ [URL_PARAM_KEYS.TIERS]: serializeArrayParam(value) });
   }, [updateUrlParams]);
 
   const setSortByDate = useCallback((value: SortByDateOption) => {
@@ -535,6 +555,208 @@ export function CompanyDocumentManager({ companyId, disabled = false }: CompanyD
     }
   };
 
+  const handleTranslateDocument = async (document: CompanyDocument, langCode: string) => {
+    if (!companyId) {
+      toast.error('Cannot translate: missing company context');
+      return;
+    }
+    const code = langCode.toUpperCase();
+    try {
+      // Resolve the source studio draft (sections live there).
+      let sourceStudio: any = null;
+      if (document.source_table === 'document_studio_templates') {
+        const { data, error } = await supabase
+          .from('document_studio_templates')
+          .select('*')
+          .eq('id', document.id)
+          .maybeSingle();
+        if (error) throw error;
+        sourceStudio = data;
+      } else {
+        const { data } = await supabase
+          .from('document_studio_templates')
+          .select('*')
+          .eq('template_id', document.id)
+          .maybeSingle();
+        sourceStudio = data || null;
+      }
+
+      const rawBase = document.document_number
+        || (sourceStudio?.document_control as any)?.document_number
+        || (sourceStudio?.metadata as any)?.document_number
+        || '';
+      // For seeded SOPs, upgrade canonical SOP-NNN to the displayed SOP-XX-NNN
+      // form so the translated number preserves the functional sub-prefix.
+      const sopKey = parseSopNumber(rawBase) || parseSopNumber(document.name);
+      const baseNumber = sopKey ? formatSopDisplayId(sopKey) : rawBase;
+      const translatedNumber = appendLanguageSuffix(baseNumber, code);
+
+      // Build the translated display name: keep the source title (without its
+      // own prefix) and prepend the new translated number so the list shows
+      // e.g. "SOP-QA-002-NO Document Control (NO)" — matching the prefix
+      // convention used by every other row.
+      const rawName = document.name || '';
+      const cleanTitle =
+        rawName.replace(/^\s*[A-Z]{2,5}(?:-[A-Z0-9]+){1,3}\s+/i, '').trim() || rawName;
+      const translatedName = translatedNumber
+        ? `${translatedNumber} ${cleanTitle} (${code})`
+        : `${cleanTitle} (${code})`;
+
+      // Resolve the CI (phase_assigned_document_template) id of the source so
+      // we can store source_document_id on the translated copy. When the user
+      // triggered translate from a studio row, the CI id lives on
+      // sourceStudio.template_id; otherwise document.id IS the CI id.
+      const sourceCiId =
+        document.source_table === 'document_studio_templates'
+          ? (sourceStudio?.template_id ?? null)
+          : document.id;
+
+      // Guard: prevent duplicate translations of the same source into the same language.
+      if (sourceCiId) {
+        const { data: existing } = await supabase
+          .from('phase_assigned_document_template')
+          .select('id, name')
+          .eq('company_id', companyId)
+          .eq('source_document_id', sourceCiId)
+          .eq('language_code', code)
+          .maybeSingle();
+        if (existing?.id) {
+          toast.info(`A ${code} translation of this document already exists.`);
+          refetch();
+          return;
+        }
+      }
+
+      // Translate sections if any
+      let translatedSections: any = sourceStudio?.sections ?? [];
+      const sectionsArray = Array.isArray(sourceStudio?.sections) ? sourceStudio.sections : [];
+      if (sectionsArray.length > 0) {
+        const payloadSections = sectionsArray.map((s: any, idx: number) => ({
+          id: String(s.id ?? idx),
+          title: s.title ?? s.heading ?? '',
+          content: s.content ?? s.html ?? '',
+        }));
+        const { data: tData, error: tError } = await supabase.functions.invoke('translate-document-sections', {
+          body: { sections: payloadSections, targetLanguage: code, sourceLanguage: 'EN' },
+        });
+        if (tError) {
+          const status = (tError as any)?.context?.status;
+          if (status === 429) toast.error('Rate limit reached — please try again shortly.');
+          else if (status === 402) toast.error('AI credits exhausted — add credits to continue.');
+          else toast.error('Translation failed');
+          throw tError;
+        }
+        const returned: any[] = (tData as any)?.sections || [];
+        const byId = new Map(returned.map((s: any) => [String(s.id), s.content]));
+        translatedSections = sectionsArray.map((s: any, idx: number) => {
+          const newContent = byId.get(String(s.id ?? idx));
+          if (newContent === undefined) return s;
+          if ('content' in s) return { ...s, content: newContent };
+          if ('html' in s) return { ...s, html: newContent };
+          return { ...s, content: newContent };
+        });
+      }
+
+      // 1) Create a new CI document so the translated copy is a controlled doc.
+      const phaseId = await NoPhaseService.getNoPhaseId(companyId);
+      if (!phaseId) {
+        toast.error('Could not resolve "No Phase" for this company');
+        return;
+      }
+      const { data: newCI, error: ciError } = await supabase
+        .from('phase_assigned_document_template')
+        .insert({
+          company_id: companyId,
+          phase_id: phaseId,
+          name: translatedName,
+          document_type: document.document_type || 'Document',
+          document_number: translatedNumber,
+          document_reference: translatedNumber,
+          document_scope: 'company_document' as const,
+          status: 'Draft',
+          version: '1.0',
+          is_excluded: false,
+          is_record: false,
+          product_id: null,
+          language_code: code,
+          source_document_id: sourceCiId,
+          description: `Translation (${code}) of ${document.name}. The English master is the authoritative version.`,
+        })
+        .select('id')
+        .single();
+      if (ciError || !newCI) throw ciError || new Error('Failed to create translated document record');
+
+      // 2) Build & insert the studio draft anchored to the new CI UUID.
+      const baseStudio = sourceStudio || {
+        company_id: companyId,
+        type: document.document_type || 'Document',
+        sections: [],
+        product_context: {},
+        document_control: {},
+        revision_history: [],
+        associated_documents: [],
+        metadata: {},
+        smart_data: {},
+        role_mappings: {},
+        notes: {},
+      };
+      const {
+        id: _id,
+        created_at: _c,
+        updated_at: _u,
+        template_id: _t,
+        product_id: _p,
+        company_id: _co,
+        ...studioRest
+      } = baseStudio;
+
+      const newMetadata = {
+        ...(typeof baseStudio.metadata === 'object' && baseStudio.metadata !== null ? baseStudio.metadata : {}),
+        status: 'Draft',
+        document_number: translatedNumber,
+        is_translation: true,
+        translation_of_document_id: document.id,
+        translation_of_number: baseNumber || null,
+        translation_language: code,
+      };
+      const newDocControl = {
+        ...(typeof baseStudio.document_control === 'object' && baseStudio.document_control !== null ? baseStudio.document_control : {}),
+        document_number: translatedNumber,
+      };
+
+      const { data: newStudio, error: insertError } = await supabase
+        .from('document_studio_templates')
+        .insert({
+          ...studioRest,
+          company_id: companyId,
+          product_id: null,
+          template_id: newCI.id,
+          name: translatedName,
+          type: document.document_type || baseStudio.type || 'Document',
+          sections: translatedSections,
+          metadata: newMetadata,
+          document_control: newDocControl,
+        })
+        .select('id')
+        .single();
+      if (insertError) throw insertError;
+
+      // 3) Link CI document_reference -> studio draft for drawer/open-draft flows.
+      if (newStudio?.id) {
+        await supabase
+          .from('phase_assigned_document_template')
+          .update({ document_reference: `DS-${newStudio.id}` })
+          .eq('id', newCI.id);
+      }
+
+      toast.success(`Created translated copy: ${translatedName}`);
+      refetch();
+    } catch (error) {
+      console.error('Error translating document:', error);
+      if (!(error as any)?.context) toast.error('Failed to create translated copy');
+    }
+  };
+
   const handleCreateInStudio = useCallback((doc: CompanyDocument) => {
     setDraftDrawerDocument(doc);
   }, []);
@@ -683,7 +905,14 @@ export function CompanyDocumentManager({ companyId, disabled = false }: CompanyD
       const matchesDocType = docTypeFilter.length === 0 ||
         (doc.document_type && docTypeFilter.includes(doc.document_type));
 
-      return matchesSearch && matchesStatus && matchesAuthor && matchesSection && matchesTag && matchesRefTag && matchesDocType;
+      // Tier filter (derived from SOP id: A=Foundation, B=Pathway, C=Device-specific)
+      const matchesTier = (() => {
+        if (tierFilter.length === 0) return true;
+        const t = getSopTier(doc.name, doc.document_number);
+        return t ? tierFilter.includes(t) : false;
+      })();
+
+      return matchesSearch && matchesStatus && matchesAuthor && matchesSection && matchesTag && matchesRefTag && matchesDocType && matchesTier;
     });
 
     // Apply sorting
@@ -770,7 +999,7 @@ export function CompanyDocumentManager({ companyId, disabled = false }: CompanyD
     }
 
     return result;
-  }, [documents, searchTerm, statusFilter, authorFilter, sectionFilter, tagFilter, refTagFilter, docTypeFilter, sortByDate, refDocTagMap, allAuthorsMap]);
+  }, [documents, searchTerm, statusFilter, authorFilter, sectionFilter, tagFilter, refTagFilter, docTypeFilter, tierFilter, sortByDate, refDocTagMap, allAuthorsMap]);
 
   // Handler for status filter toggle
   const handleStatusFilterChange = useCallback((status: string) => {
@@ -828,6 +1057,14 @@ export function CompanyDocumentManager({ companyId, disabled = false }: CompanyD
     setDocTypeFilter(newTypes);
   }, [docTypeFilter, setDocTypeFilter]);
 
+  // Handler for tier filter toggle
+  const handleTierFilterChange = useCallback((tier: string) => {
+    const newTiers = tierFilter.includes(tier)
+      ? tierFilter.filter(t => t !== tier)
+      : [...tierFilter, tier];
+    setTierFilter(newTiers);
+  }, [tierFilter, setTierFilter]);
+
   // Clear all filters (also clears URL params)
   const clearAllFilters = useCallback(() => {
     setSearchTermState('');
@@ -837,6 +1074,7 @@ export function CompanyDocumentManager({ companyId, disabled = false }: CompanyD
     setTagFilterState([]);
     setRefTagFilterState([]);
     setDocTypeFilterState([]);
+    setTierFilterState([]);
     setSortByDateState('none');
     updateUrlParams({
       [URL_PARAM_KEYS.SEARCH]: null,
@@ -846,6 +1084,7 @@ export function CompanyDocumentManager({ companyId, disabled = false }: CompanyD
       [URL_PARAM_KEYS.TAGS]: null,
       [URL_PARAM_KEYS.REF_TAGS]: null,
       [URL_PARAM_KEYS.DOC_TYPES]: null,
+      [URL_PARAM_KEYS.TIERS]: null,
       [URL_PARAM_KEYS.SORT_BY_DATE]: null,
     });
   }, [updateUrlParams]);
@@ -898,6 +1137,8 @@ export function CompanyDocumentManager({ companyId, disabled = false }: CompanyD
             docTypeFilter={docTypeFilter}
             onDocTypeFilterChange={handleDocTypeFilterChange}
             availableDocTypes={availableDocTypes}
+            tierFilter={tierFilter as Array<'A' | 'B' | 'C'>}
+            onTierFilterChange={handleTierFilterChange as (t: 'A' | 'B' | 'C') => void}
             sortByDate={sortByDate}
             onSortByDateChange={setSortByDate}
             clearAllFilters={clearAllFilters}
@@ -996,6 +1237,7 @@ export function CompanyDocumentManager({ companyId, disabled = false }: CompanyD
                       <SelectItem value="authors">Set Authors</SelectItem>
                       <SelectItem value="due_date">Set Due Date</SelectItem>
                       <SelectItem value="ai_summary">AI Summary</SelectItem>
+                      <SelectItem value="create_ccr">Create CCR</SelectItem>
                       <SelectItem value="delete">Delete</SelectItem>
                     </SelectContent>
                   </Select>
@@ -1119,6 +1361,28 @@ export function CompanyDocumentManager({ companyId, disabled = false }: CompanyD
                     >
                       <Sparkles className="h-3 w-3" /> Summarize
                     </Button>
+                  ) : selectedBulkAction === 'create_ccr' ? (
+                    <Button
+                      size="sm"
+                      disabled={bulkSelectedDocs.size === 0}
+                      onClick={() => {
+                        const ids = Array.from(bulkSelectedDocs);
+                        const names = documents
+                          .filter(d => bulkSelectedDocs.has(d.id))
+                          .map(d => d.name);
+                        setBulkCcrPrefill({
+                          affectedDocumentIds: ids,
+                          affectedDocumentNames: names,
+                          changeType: 'document',
+                          sourceType: 'other',
+                        });
+                        setBulkCcrChooserDocIds(ids);
+                        setBulkCcrChooserOpen(true);
+                      }}
+                      className="h-8 text-xs gap-1"
+                    >
+                      Add to CCR…
+                    </Button>
                   ) : selectedBulkAction && (
                     <Button
                       size="sm"
@@ -1148,6 +1412,7 @@ export function CompanyDocumentManager({ companyId, disabled = false }: CompanyD
                   onEdit={handleEditDocument}
                   onDelete={handleDeleteDocument}
                   onCopy={handleCopyDocument}
+                  onTranslate={handleTranslateDocument}
                   onCreateInStudio={handleCreateInStudio}
                   isDeleting={isDeleting}
                   disabled={disabled}
@@ -1347,6 +1612,43 @@ export function CompanyDocumentManager({ companyId, disabled = false }: CompanyD
         findings={bulkValidationFindings}
         documentCount={bulkValidationDocCount}
       />
+
+      {/* Bulk Create CCR Dialog */}
+      {companyId && (
+        <CCRCreateDialog
+          open={bulkCcrDialogOpen}
+          onOpenChange={(o) => {
+            setBulkCcrDialogOpen(o);
+            if (!o) {
+              setBulkCcrPrefill(undefined);
+              setBulkSelectedDocs(new Set());
+              setSelectedBulkAction("");
+            }
+          }}
+          companyId={companyId}
+          prefill={bulkCcrPrefill}
+        />
+      )}
+
+      {/* Bulk CCR Chooser Dialog (create new vs attach to existing) */}
+      {companyId && (
+        <BulkCCRChooserDialog
+          open={bulkCcrChooserOpen}
+          onOpenChange={setBulkCcrChooserOpen}
+          companyId={companyId}
+          documentIds={bulkCcrChooserDocIds}
+          documentCount={bulkCcrChooserDocIds.length}
+          onCreateNew={() => {
+            setBulkCcrDialogOpen(true);
+          }}
+          onAttached={() => {
+            setBulkSelectedDocs(new Set());
+            setSelectedBulkAction("");
+            setBulkCcrPrefill(undefined);
+            setBulkCcrChooserDocIds([]);
+          }}
+        />
+      )}
     </>
   );
 }

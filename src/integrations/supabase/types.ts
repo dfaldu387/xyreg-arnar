@@ -2527,11 +2527,13 @@ export type Database = {
           quality_approved: boolean | null
           quality_approved_at: string | null
           quality_approved_by: string | null
+          quality_reviewer_id: string | null
           regulatory_approved: boolean | null
           regulatory_approved_at: string | null
           regulatory_approved_by: string | null
           regulatory_impact: boolean | null
           regulatory_impact_description: string | null
+          regulatory_reviewer_id: string | null
           risk_impact: string | null
           source_capa_id: string | null
           source_reference: string | null
@@ -2543,6 +2545,7 @@ export type Database = {
           technical_approved: boolean | null
           technical_approved_at: string | null
           technical_approved_by: string | null
+          technical_reviewer_id: string | null
           title: string
           updated_at: string | null
           verification_evidence: string | null
@@ -2574,11 +2577,13 @@ export type Database = {
           quality_approved?: boolean | null
           quality_approved_at?: string | null
           quality_approved_by?: string | null
+          quality_reviewer_id?: string | null
           regulatory_approved?: boolean | null
           regulatory_approved_at?: string | null
           regulatory_approved_by?: string | null
           regulatory_impact?: boolean | null
           regulatory_impact_description?: string | null
+          regulatory_reviewer_id?: string | null
           risk_impact?: string | null
           source_capa_id?: string | null
           source_reference?: string | null
@@ -2590,6 +2595,7 @@ export type Database = {
           technical_approved?: boolean | null
           technical_approved_at?: string | null
           technical_approved_by?: string | null
+          technical_reviewer_id?: string | null
           title: string
           updated_at?: string | null
           verification_evidence?: string | null
@@ -2621,11 +2627,13 @@ export type Database = {
           quality_approved?: boolean | null
           quality_approved_at?: string | null
           quality_approved_by?: string | null
+          quality_reviewer_id?: string | null
           regulatory_approved?: boolean | null
           regulatory_approved_at?: string | null
           regulatory_approved_by?: string | null
           regulatory_impact?: boolean | null
           regulatory_impact_description?: string | null
+          regulatory_reviewer_id?: string | null
           risk_impact?: string | null
           source_capa_id?: string | null
           source_reference?: string | null
@@ -2637,6 +2645,7 @@ export type Database = {
           technical_approved?: boolean | null
           technical_approved_at?: string | null
           technical_approved_by?: string | null
+          technical_reviewer_id?: string | null
           title?: string
           updated_at?: string | null
           verification_evidence?: string | null
@@ -2684,7 +2693,7 @@ export type Database = {
             foreignKeyName: "change_control_requests_owner_id_fkey"
             columns: ["owner_id"]
             isOneToOne: false
-            referencedRelation: "profiles"
+            referencedRelation: "user_profiles"
             referencedColumns: ["id"]
           },
           {
@@ -15720,6 +15729,7 @@ export type Database = {
           author: string | null
           authors_ids: Json | null
           brief_summary: string | null
+          change_control_ref: string | null
           classes: Json[] | null
           classes_by_market: Json | null
           company_id: string | null
@@ -15744,6 +15754,7 @@ export type Database = {
           is_excluded: boolean | null
           is_predefined_core_template: boolean | null
           is_record: boolean | null
+          language_code: string | null
           markets: Json | null
           milestone_due_date: string | null
           name: string
@@ -15762,6 +15773,7 @@ export type Database = {
           reviewer_user_ids: string[] | null
           reviewers: Json | null
           section_ids: string[] | null
+          source_document_id: string | null
           start_date: string | null
           status: string | null
           sub_section: string | null
@@ -15782,6 +15794,7 @@ export type Database = {
           author?: string | null
           authors_ids?: Json | null
           brief_summary?: string | null
+          change_control_ref?: string | null
           classes?: Json[] | null
           classes_by_market?: Json | null
           company_id?: string | null
@@ -15806,6 +15819,7 @@ export type Database = {
           is_excluded?: boolean | null
           is_predefined_core_template?: boolean | null
           is_record?: boolean | null
+          language_code?: string | null
           markets?: Json | null
           milestone_due_date?: string | null
           name: string
@@ -15824,6 +15838,7 @@ export type Database = {
           reviewer_user_ids?: string[] | null
           reviewers?: Json | null
           section_ids?: string[] | null
+          source_document_id?: string | null
           start_date?: string | null
           status?: string | null
           sub_section?: string | null
@@ -15844,6 +15859,7 @@ export type Database = {
           author?: string | null
           authors_ids?: Json | null
           brief_summary?: string | null
+          change_control_ref?: string | null
           classes?: Json[] | null
           classes_by_market?: Json | null
           company_id?: string | null
@@ -15868,6 +15884,7 @@ export type Database = {
           is_excluded?: boolean | null
           is_predefined_core_template?: boolean | null
           is_record?: boolean | null
+          language_code?: string | null
           markets?: Json | null
           milestone_due_date?: string | null
           name?: string
@@ -15886,6 +15903,7 @@ export type Database = {
           reviewer_user_ids?: string[] | null
           reviewers?: Json | null
           section_ids?: string[] | null
+          source_document_id?: string | null
           start_date?: string | null
           status?: string | null
           sub_section?: string | null
@@ -15909,6 +15927,13 @@ export type Database = {
             columns: ["phase_id"]
             isOneToOne: false
             referencedRelation: "company_phases"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "phase_assigned_document_template_source_document_id_fkey"
+            columns: ["source_document_id"]
+            isOneToOne: false
+            referencedRelation: "phase_assigned_document_template"
             referencedColumns: ["id"]
           },
         ]
@@ -22353,7 +22378,9 @@ export type Database = {
         Row: {
           company_id: string
           id: string
+          inputs: Json | null
           node_id: string
+          outputs: Json | null
           process_description: string | null
           process_steps: Json | null
           updated_at: string | null
@@ -22362,7 +22389,9 @@ export type Database = {
         Insert: {
           company_id: string
           id?: string
+          inputs?: Json | null
           node_id: string
+          outputs?: Json | null
           process_description?: string | null
           process_steps?: Json | null
           updated_at?: string | null
@@ -22371,7 +22400,9 @@ export type Database = {
         Update: {
           company_id?: string
           id?: string
+          inputs?: Json | null
           node_id?: string
+          outputs?: Json | null
           process_description?: string | null
           process_steps?: Json | null
           updated_at?: string | null
@@ -28873,6 +28904,7 @@ export type Database = {
           success: boolean
         }[]
       }
+      rewrite_sop_tokens: { Args: { input: string }; Returns: string }
       safe_delete_phase: { Args: { phase_id: string }; Returns: Json }
       safe_reorder_company_phases: {
         Args: { phase_ids: string[]; target_company_id: string }

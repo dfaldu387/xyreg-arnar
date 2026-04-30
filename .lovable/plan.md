@@ -1,27 +1,57 @@
-## What went wrong
+## Why seeding "isn't working"
 
-You're right — I overcomplicated it. Two concrete mistakes:
+It actually is — but the UI lies. Here's what's happening for Actiweight Labs AS:
 
-1. **Trigger button is black.** I used `variant="default"` in `TemplateFilterBar.tsx`. The Documents filter (`EnhancedDocumentFilters.tsx` line 804) uses `variant="outline" + bg-background` → white. Mine should match.
-2. **I split "Tier" into "Category" + "Classification".** There is only one concept here: **Tier** (Generic / Pathway / Device-specific). I confused myself by renaming the table column to "Classification" and adding a "Classification" entry in the filter popover, while a stale `filters.category` branch still exists in the filtering code. None of that should be there.
+1. The badge says **Foundation 27/28 → "Seed 1 missing"**.
+2. You click it → toast says **"All foundation SOPs already present"** and nothing is inserted.
+3. The badge stays at 27/28 forever, looking broken.
 
-## Fix (one component + one header line)
+### Root cause
 
-### 1. `src/components/settings/document-control/templates/TemplateFilterBar.tsx`
-- Change trigger to `variant="outline"` + `bg-background` so it's white, matching Documents.
-- Rename the third filter category from **"Classification"** back to **"Tier"** in the popover list.
-- Keep the three options as labels only: **Generic, Pathway, Device-specific** (these are the values of Tier — same nomenclature shown in the badge column).
-- Active chip prefix becomes `Tier: Generic` etc. (instead of bare label).
+The DB has all 28 Tier A SOPs. The 28th one (**SOP-004**) is a legacy row named `"Personnel and Training"` (no `SOP-004 ` prefix), with `document_number = 'SOP-004'`.
 
-### 2. `src/components/settings/document-control/templates/TemplateManagementTab.tsx`
-- Revert the table column header (line 572) from **"Classification"** back to **"Tier"**.
-- Remove the dead `filters.category` filter branch (lines ~428–431) — it's unused and was part of the confusion.
+Two pieces of code disagree on how to detect duplicates:
 
-## Result
+| Function | Matches by | Result for SOP-004 |
+|---|---|---|
+| `seedSopsForCompany` (the seeder) | `document_number` **OR** name | Found → skip |
+| `countTierASopsPresent` (the badge counter) | name only | Not found → counts as missing |
 
-- One white "Search and filter" button, identical to Documents.
-- Popover drill-down: **Scope → Document type → Tier**.
-- Tier sub-view shows checkboxes for **Generic / Pathway / Device-specific** — same words as the Tier column badges.
-- Table column stays **Tier**. No "Category", no "Classification" anywhere.
+So the seeder correctly skips it, but the counter under-reports → badge stays red and never reconciles. Same bug exists in `countTierBSopsPresent`.
 
-No other files touched. No data model changes.
+The DB itself is fine. No data loss. Just a UI/counter bug.
+
+## Fix (one file, ~20 lines)
+
+**`src/services/sopAutoSeedService.ts`** — make the two count functions use the same three-way match the seeder uses (document_number, full name, bare title):
+
+```ts
+// Pseudocode for both countTierA / countTierB:
+const { data } = await supabase
+  .from('phase_assigned_document_template')
+  .select('name, document_number')
+  .eq('company_id', companyId)
+  .eq('document_type', 'SOP');
+
+const numbers = new Set((data ?? []).map(r => (r.document_number ?? '').toUpperCase().trim()).filter(Boolean));
+const names   = new Set((data ?? []).map(r => normalizeTitle(r.name ?? '')));
+
+let count = 0;
+for (const entry of TIER_A_AUTO_SEED) {
+  const c = SOP_FULL_CONTENT[entry.sop];
+  if (!c) continue;
+  const num = c.sopNumber.toUpperCase().trim();
+  const full = normalizeTitle(`${c.sopNumber} ${c.title}`);
+  const bare = normalizeTitle(c.title);
+  if (numbers.has(num) || names.has(full) || names.has(bare)) count++;
+}
+```
+
+After this:
+- Actiweight Labs AS will correctly show **Foundation 28/28** (green, no "Seed missing" button).
+- Any other company with legacy bare-title SOPs (the second screenshot suggests there are several with `document_number = NULL` and just the canonical title) will also reconcile properly.
+
+## Out of scope (intentionally)
+
+- I am **not** renaming the legacy `"Personnel and Training"` row to add the `SOP-004` prefix, and **not** backfilling missing `document_number` values. Those are cosmetic data tweaks separate from the seeding bug. Happy to do them as a follow-up if you want consistent naming in the list.
+- No template content changes. SOP-QA-002 / Document Control template is untouched.

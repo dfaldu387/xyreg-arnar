@@ -4,7 +4,8 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import {
   Sparkles, Wand2, Lightbulb, MessageCircle, Languages,
-  Building2, Cloud, Loader2, Check, Search, Plus, X
+  Building2, Cloud, Loader2, Check, Search, Plus, X,
+  LayoutGrid, Compass
 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
@@ -52,6 +53,20 @@ const FEATURES: Feature[] = [
     description: 'Google Translate widget',
     icon: <Languages className="w-4 h-4" />,
     iconBg: 'bg-rose-100 text-rose-700',
+  },
+  {
+    key: 'strategic-blueprint',
+    name: 'Strategic Blueprint',
+    description: 'Company strategic planning',
+    icon: <Compass className="w-4 h-4" />,
+    iconBg: 'bg-orange-100 text-orange-700',
+  },
+  {
+    key: 'business-canvas',
+    name: 'Business Canvas',
+    description: 'Business model canvas tool',
+    icon: <LayoutGrid className="w-4 h-4" />,
+    iconBg: 'bg-orange-100 text-orange-700',
   },
 ];
 
@@ -380,7 +395,7 @@ export default function SuperAdminCustomerFeatureFlags() {
           </div>
         ) : (
           <div className="rounded-2xl border-2 border-slate-200 bg-white shadow-sm overflow-hidden">
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto scrollbar-hide">
               <table className="w-full border-collapse">
                 <thead>
                   <tr className="bg-slate-50 border-b border-slate-200">

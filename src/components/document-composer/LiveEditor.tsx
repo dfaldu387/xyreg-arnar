@@ -457,6 +457,65 @@ function renumberSubHeadings(html: string, sectionNum: number): string {
   });
 }
 
+/**
+ * Promote subsection lines like "6.1 Document Creation" into real <h3>
+ * blocks. Templates often store these as plain paragraph text or as <h2>
+ * elements, both of which break the heading hierarchy and the outline.
+ *
+ * Rules:
+ *  - <h2>X.Y[.Z] Title</h2>            → <h3>X.Y[.Z] Title</h3>
+ *  - <p>X.Y Title<br>body…</p>         → <h3>X.Y Title</h3><p>body…</p>
+ *  - <p>X.Y Title</p>                  → <h3>X.Y Title</h3>
+ *  - First line of a multi-line <p> that matches "X.Y Title" → split into
+ *    an <h3> followed by a <p> with the remaining body.
+ *
+ * Top-level "X.0 …" lines are NOT promoted — those are reserved for the
+ * section H2 emitted by `mergeSectionsToHtml`.
+ */
+function promoteSubsectionHeadings(html: string): string {
+  if (!html) return html;
+  const subsectionRe = /^\s*\d+\.\d+(?:\.\d+)*\s+\S/;
+  // Skip "X.0 …" — those are top-level section titles.
+  const isSubsection = (text: string) =>
+    subsectionRe.test(text) && !/^\s*\d+\.0\s/.test(text);
+
+  // 1) <h2>X.Y …</h2> → <h3>X.Y …</h3>
+  let out = html.replace(/<h2([^>]*)>([\s\S]*?)<\/h2>/gi, (m, attrs, inner) => {
+    const stripped = String(inner).replace(/<[^>]+>/g, '').trim();
+    return isSubsection(stripped) ? `<h3${attrs}>${inner}</h3>` : m;
+  });
+
+  // 2) Split <p>…</p> blocks where the first line is a subsection title.
+  out = out.replace(/<p([^>]*)>([\s\S]*?)<\/p>/gi, (full, attrs, inner: string) => {
+    // Normalise <br> variants into a single newline so we can split on lines.
+    const lines = inner
+      .replace(/<br\s*\/?>(\s*)/gi, '\n')
+      .split('\n');
+    const result: string[] = [];
+    let buffer: string[] = [];
+    const flushParagraph = () => {
+      const body = buffer.join('<br>').trim();
+      if (body) result.push(`<p${attrs}>${body}</p>`);
+      buffer = [];
+    };
+    for (const rawLine of lines) {
+      const line = rawLine.trim();
+      const plain = line.replace(/<[^>]+>/g, '').trim();
+      if (isSubsection(plain)) {
+        flushParagraph();
+        result.push(`<h3>${line}</h3>`);
+      } else {
+        buffer.push(rawLine);
+      }
+    }
+    flushParagraph();
+    // If nothing was promoted, return the original block untouched.
+    return result.length === 0 ? full : result.join('');
+  });
+
+  return out;
+}
+
 function mergeSectionsToHtml(sections: any[], companyName: string, numbered: boolean = false): string {
   // helper hoisted via function declaration below
   if (!sections || sections.length === 0) return '<p></p>';
@@ -548,6 +607,10 @@ function mergeSectionsToHtml(sections: any[], companyName: string, numbered: boo
       // Always add an empty paragraph after heading so user can click and type
       let contentHtml = contentItems || '<p></p>';
 
+      // Promote any "6.1 …" lines stored as plain paragraph text or <h2>
+      // into real <h3> blocks so the editor and outline see them as headings.
+      contentHtml = promoteSubsectionHeadings(contentHtml);
+
       // Re-number H3 sub-headings when section numbering is enabled
       if (numbered) {
         contentHtml = renumberSubHeadings(contentHtml, sectionNum);
@@ -575,10 +638,13 @@ export function annotateDocumentReferences(
 ): string {
   if (!html) return html;
   const prefixGroup = REFERENCE_PREFIXES.join('|');
-  // Match REF-CODE optionally followed by a short readable title (stops at
-  // punctuation or tag boundary so we don't swallow whole sentences).
+  // Match REF-CODE in either two-part legacy form (SOP-002) or three-part
+  // functional sub-prefix form (SOP-QA-002), optionally followed by a short
+  // readable title (stops at punctuation or tag boundary so we don't swallow
+  // whole sentences). Sub-prefix is constrained to 2–4 uppercase letters to
+  // avoid greedy matches against neighbouring words.
   const re = new RegExp(
-    `\\b(${prefixGroup})-(\\d{2,4})(?:\\s*[:\\-]?\\s*([A-Z][^<\\n,;]{0,80}?))?(?=$|[\\s<,;.)\\]])`,
+    `\\b(${prefixGroup})(?:-([A-Z]{2,4}))?-(\\d{2,4})(?:\\s*[:\\-]?\\s*([A-Z][^<\\n,;]{0,80}?))?(?=$|[\\s<,;.)\\]])`,
     'g',
   );
 
@@ -592,11 +658,18 @@ export function annotateDocumentReferences(
     const lt = html.indexOf('<', i);
     const textChunk = lt === -1 ? html.slice(i) : html.slice(i, lt);
     // Substitute references in this text segment.
-    out += textChunk.replace(re, (_m, prefix, num, tail) => {
-      const refCode = `${prefix}-${num}`;
+    out += textChunk.replace(re, (_m, prefix, sub, num, tail) => {
+      const refCode = sub
+        ? `${prefix}-${sub}-${num}`
+        : `${prefix}-${num}`;
+      // Two-part fallback used to look up legacy chips in `knownRefs`.
+      const legacyCode = `${prefix}-${num}`;
       const title = (tail || '').trim();
       const display = title ? `${refCode} ${title}` : refCode;
-      const known = knownRefs.get(refCode.toLowerCase()) || (title ? knownRefs.get(`${refCode} ${title}`.toLowerCase()) : undefined);
+      const known =
+        knownRefs.get(refCode.toLowerCase()) ||
+        (sub ? knownRefs.get(legacyCode.toLowerCase()) : undefined) ||
+        (title ? knownRefs.get(`${refCode} ${title}`.toLowerCase()) : undefined);
       const titleAttr = title.replace(/"/g, '&quot;');
       if (known) {
         // Linked → blue chip; existing delegated click handler opens the doc.
@@ -869,6 +942,7 @@ interface LiveEditorProps {
   recordId?: string;
   nextReviewDate?: string;
   documentNumber?: string;
+  changeControlRef?: string;
   hideVersioning?: boolean;
   isEditing?: boolean;
   showSectionNumbers?: boolean;
@@ -878,7 +952,7 @@ interface LiveEditorProps {
   disableSopMentions?: boolean;
 }
 
-export function LiveEditor({ template, className = '', onContentUpdate, companyId, onDocumentSaved, isEditingExistingDocument = false, editingDocumentId = null, docxSourceDocumentId = null, onAIGenerate, onAddAutoNote, currentNotes = [], isUploadedDocument = false, uploadedDocumentSaved = false, onUploadedDocumentSaved, disabled = false, selectedScope = 'company', selectedProductId, uploadedFileInfo, onDocumentControlChange, companyLogoUrl, onPushToDeviceFields, onCustomSave, isRecord = false, recordId, nextReviewDate, documentNumber, hideVersioning = false, isEditing: isEditingProp, showSectionNumbers = false, onShowSectionNumbersChange, onIsRecordChange , disableSopMentions = false }: LiveEditorProps) {
+export function LiveEditor({ template, className = '', onContentUpdate, companyId, onDocumentSaved, isEditingExistingDocument = false, editingDocumentId = null, docxSourceDocumentId = null, onAIGenerate, onAddAutoNote, currentNotes = [], isUploadedDocument = false, uploadedDocumentSaved = false, onUploadedDocumentSaved, disabled = false, selectedScope = 'company', selectedProductId, uploadedFileInfo, onDocumentControlChange, companyLogoUrl, onPushToDeviceFields, onCustomSave, isRecord = false, recordId, nextReviewDate, documentNumber, changeControlRef, hideVersioning = false, isEditing: isEditingProp, showSectionNumbers = false, onShowSectionNumbersChange, onIsRecordChange , disableSopMentions = false }: LiveEditorProps) {
   const { activeCompanyRole } = useCompanyRole();
   const aiAutoFillEnabled = useCustomerFeatureFlag('ai-auto-fill');
   const aiInlineSuggestionsEnabled = useCustomerFeatureFlag('ai-inline-suggestions');
@@ -933,6 +1007,11 @@ export function LiveEditor({ template, className = '', onContentUpdate, companyI
   // the popover blurs the editor, so we restore this before inserting so the
   // table lands at the caret instead of falling through to the document end.
   const tablePickerSelectionRef = useRef<{ from: number; to: number } | null>(null);
+  // Snapshot of whether the caret was inside a table when the popover opened.
+  // Reading editor.isActive('table') during render is racy because the editor
+  // can blur after the popover opens — freezing the mode at open time keeps
+  // the menu stable while it's visible.
+  const [tablePickerMode, setTablePickerMode] = useState<'insert' | 'edit'>('insert');
   const [isNarrow, setIsNarrow] = useState<boolean>(() =>
     typeof window !== 'undefined' ? window.innerWidth < 900 : false
   );
@@ -2735,6 +2814,7 @@ export function LiveEditor({ template, className = '', onContentUpdate, companyI
               if (open && unifiedEditor) {
                 const { from, to } = unifiedEditor.state.selection;
                 tablePickerSelectionRef.current = { from, to };
+                setTablePickerMode(unifiedEditor.isActive('table') ? 'edit' : 'insert');
               }
               setTablePickerOpen(open);
               if (!open) {
@@ -2748,59 +2828,141 @@ export function LiveEditor({ template, className = '', onContentUpdate, companyI
                 variant={unifiedEditor.isActive('table') ? 'default' : 'ghost'}
                 size="sm"
                 className="h-7 w-7 p-0"
-                title="Insert table"
+                title={unifiedEditor.isActive('table') ? 'Table options' : 'Insert table'}
+                // Prevent the editor from blurring on click so editor.state.selection
+                // stays put — table commands (deleteRow, etc.) depend on the caret
+                // still being inside the originally-clicked cell.
+                onMouseDown={(e) => e.preventDefault()}
               >
                 <TableIcon className="w-3.5 h-3.5" />
               </Button>
             </PopoverTrigger>
             <PopoverContent align="start" className="w-auto p-2">
-              {(() => {
-                const MAX_ROWS = 8;
-                const MAX_COLS = 10;
-                const { rows: hoverRows, cols: hoverCols } = tablePickerHover;
-                return (
-                  <div className="flex flex-col gap-1.5">
-                    <div
-                      className="grid gap-0.5"
-                      style={{ gridTemplateColumns: `repeat(${MAX_COLS}, 16px)` }}
-                      onMouseLeave={() => setTablePickerHover({ rows: 0, cols: 0 })}
-                    >
-                      {Array.from({ length: MAX_ROWS * MAX_COLS }).map((_, i) => {
-                        const r = Math.floor(i / MAX_COLS) + 1;
-                        const c = (i % MAX_COLS) + 1;
-                        const active = r <= hoverRows && c <= hoverCols;
-                        return (
-                          <button
-                            key={i}
-                            type="button"
-                            onMouseEnter={() => setTablePickerHover({ rows: r, cols: c })}
-                            onClick={() => {
-                              const saved = tablePickerSelectionRef.current;
-                              const chain = unifiedEditor.chain().focus();
-                              if (saved) chain.setTextSelection(saved);
-                              chain
-                                .insertTable({ rows: r, cols: c, withHeaderRow: true })
-                                .run();
-                              setTablePickerOpen(false);
-                              setTablePickerHover({ rows: 0, cols: 0 });
-                              tablePickerSelectionRef.current = null;
-                            }}
-                            className={cn(
-                              'w-4 h-4 border rounded-[2px] transition-colors',
-                              active
-                                ? 'bg-primary/20 border-primary'
-                                : 'bg-background border-border hover:border-primary/50'
-                            )}
-                          />
-                        );
-                      })}
+              {tablePickerMode === 'edit' ? (
+                (() => {
+                  const runTableCommand = (cmd: (chain: any) => any) => {
+                    const saved = tablePickerSelectionRef.current;
+                    const chain = unifiedEditor.chain().focus();
+                    if (saved) chain.setTextSelection(saved);
+                    cmd(chain).run();
+                    setTablePickerOpen(false);
+                    tablePickerSelectionRef.current = null;
+                  };
+                  const stopBlur = (e: React.MouseEvent) => e.preventDefault();
+                  return (
+                    <div className="flex flex-col min-w-[180px]">
+                      <button
+                        type="button"
+                        onMouseDown={stopBlur}
+                        onClick={() => runTableCommand((c) => c.addRowBefore())}
+                        className="text-left px-2 py-1.5 text-sm rounded-sm hover:bg-muted"
+                      >
+                        Insert row above
+                      </button>
+                      <button
+                        type="button"
+                        onMouseDown={stopBlur}
+                        onClick={() => runTableCommand((c) => c.addRowAfter())}
+                        className="text-left px-2 py-1.5 text-sm rounded-sm hover:bg-muted"
+                      >
+                        Insert row below
+                      </button>
+                      <button
+                        type="button"
+                        onMouseDown={stopBlur}
+                        onClick={() => runTableCommand((c) => c.addColumnBefore())}
+                        className="text-left px-2 py-1.5 text-sm rounded-sm hover:bg-muted"
+                      >
+                        Insert column left
+                      </button>
+                      <button
+                        type="button"
+                        onMouseDown={stopBlur}
+                        onClick={() => runTableCommand((c) => c.addColumnAfter())}
+                        className="text-left px-2 py-1.5 text-sm rounded-sm hover:bg-muted"
+                      >
+                        Insert column right
+                      </button>
+                      <Separator className="my-1" />
+                      <button
+                        type="button"
+                        onMouseDown={stopBlur}
+                        onClick={() => runTableCommand((c) => c.deleteRow())}
+                        className="text-left px-2 py-1.5 text-sm rounded-sm hover:bg-muted"
+                      >
+                        Delete row
+                      </button>
+                      <button
+                        type="button"
+                        onMouseDown={stopBlur}
+                        onClick={() => runTableCommand((c) => c.deleteColumn())}
+                        className="text-left px-2 py-1.5 text-sm rounded-sm hover:bg-muted"
+                      >
+                        Delete column
+                      </button>
+                      <Separator className="my-1" />
+                      <button
+                        type="button"
+                        onMouseDown={stopBlur}
+                        onClick={() => runTableCommand((c) => c.deleteTable())}
+                        className="flex items-center gap-2 text-left px-2 py-1.5 text-sm rounded-sm text-destructive hover:bg-destructive/10"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        Delete table
+                      </button>
                     </div>
-                    <div className="text-xs text-muted-foreground text-center tabular-nums">
-                      {hoverRows > 0 ? `${hoverCols} × ${hoverRows}` : 'Select size'}
+                  );
+                })()
+              ) : (
+                (() => {
+                  const MAX_ROWS = 8;
+                  const MAX_COLS = 10;
+                  const { rows: hoverRows, cols: hoverCols } = tablePickerHover;
+                  return (
+                    <div className="flex flex-col gap-1.5">
+                      <div
+                        className="grid gap-0.5"
+                        style={{ gridTemplateColumns: `repeat(${MAX_COLS}, 16px)` }}
+                        onMouseLeave={() => setTablePickerHover({ rows: 0, cols: 0 })}
+                      >
+                        {Array.from({ length: MAX_ROWS * MAX_COLS }).map((_, i) => {
+                          const r = Math.floor(i / MAX_COLS) + 1;
+                          const c = (i % MAX_COLS) + 1;
+                          const active = r <= hoverRows && c <= hoverCols;
+                          return (
+                            <button
+                              key={i}
+                              type="button"
+                              onMouseEnter={() => setTablePickerHover({ rows: r, cols: c })}
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={() => {
+                                const saved = tablePickerSelectionRef.current;
+                                const chain = unifiedEditor.chain().focus();
+                                if (saved) chain.setTextSelection(saved);
+                                chain
+                                  .insertTable({ rows: r, cols: c, withHeaderRow: true })
+                                  .run();
+                                setTablePickerOpen(false);
+                                setTablePickerHover({ rows: 0, cols: 0 });
+                                tablePickerSelectionRef.current = null;
+                              }}
+                              className={cn(
+                                'w-4 h-4 border rounded-[2px] transition-colors',
+                                active
+                                  ? 'bg-primary/20 border-primary'
+                                  : 'bg-background border-border hover:border-primary/50'
+                              )}
+                            />
+                          );
+                        })}
+                      </div>
+                      <div className="text-xs text-muted-foreground text-center tabular-nums">
+                        {hoverRows > 0 ? `${hoverCols} × ${hoverRows}` : 'Select size'}
+                      </div>
                     </div>
-                  </div>
-                );
-              })()}
+                  );
+                })()
+              )}
             </PopoverContent>
           </Popover>
 
@@ -2878,6 +3040,7 @@ export function LiveEditor({ template, className = '', onContentUpdate, companyI
             onShowSectionNumbersChange={onShowSectionNumbersChange}
             configDisabled={disabled}
             onIsRecordChange={onIsRecordChange}
+            template={template}
           />
         )}
 
@@ -2898,6 +3061,7 @@ export function LiveEditor({ template, className = '', onContentUpdate, companyI
                 onShowSectionNumbersChange={onShowSectionNumbersChange}
                 configDisabled={disabled}
                 onIsRecordChange={onIsRecordChange}
+                template={template}
               />
             </div>
             <div className="flex-1 bg-black/30" />
@@ -2924,6 +3088,7 @@ export function LiveEditor({ template, className = '', onContentUpdate, companyI
               recordId={recordId}
               nextReviewDate={nextReviewDate}
               documentNumber={documentNumber}
+              changeControlRef={changeControlRef}
               className="mx-8 mt-8"
             />
 

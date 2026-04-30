@@ -26,6 +26,7 @@ import {
   type TierBSop,
 } from '@/constants/sopAutoSeedTiers';
 import { SOP_FULL_CONTENT, sopContentToSections } from '@/data/sopFullContent';
+import { rewriteAllSopTokens } from '@/constants/sopAutoSeedTiers';
 
 export interface SopSeedResult {
   inserted: number;
@@ -69,7 +70,9 @@ function personalizeSections(
       ...block,
       content:
         typeof block.content === 'string'
-          ? block.content.replace(COMPANY_NAME_PLACEHOLDER, companyName)
+          ? rewriteAllSopTokens(
+              block.content.replace(COMPANY_NAME_PLACEHOLDER, companyName),
+            )
           : block.content,
     })),
   }));
@@ -98,15 +101,25 @@ async function seedSopsForCompany(
     return result;
   }
 
-  // Pre-fetch existing SOP CI names to avoid duplicates
+  // Pre-fetch ALL existing SOP CIs for this company so we can detect
+  // duplicates regardless of legacy naming. Older rows may be titled by
+  // canonical name only (e.g. "Quality Management System") with no
+  // "SOP-" prefix, or have a mismatched document_number. We match on
+  // BOTH document_number and normalized name/title to prevent the seeder
+  // from inserting a second copy.
   const { data: existing } = await supabase
     .from('phase_assigned_document_template')
-    .select('name')
+    .select('name, document_number')
     .eq('company_id', companyId)
-    .ilike('name', 'SOP-%');
+    .eq('document_type', 'SOP');
 
-  const existingTitles = new Set(
+  const existingNames = new Set(
     (existing ?? []).map((r) => normalizeTitle(r.name ?? '')),
+  );
+  const existingNumbers = new Set(
+    (existing ?? [])
+      .map((r) => (r.document_number ?? '').toUpperCase().trim())
+      .filter(Boolean),
   );
 
   for (const sopKey of sopKeys) {
@@ -118,7 +131,18 @@ async function seedSopsForCompany(
     }
 
     const fullName = `${content.sopNumber} ${content.title}`;
-    if (existingTitles.has(normalizeTitle(fullName))) {
+    const canonicalNumber = content.sopNumber.toUpperCase().trim();
+    const canonicalTitle = normalizeTitle(content.title);
+    const fullTitle = normalizeTitle(fullName);
+
+    // Skip if any existing SOP matches by document_number, by full
+    // "SOP-XXX Title" name, or by bare canonical title alone (legacy
+    // rows often store just the title without the SOP- prefix).
+    if (
+      existingNumbers.has(canonicalNumber) ||
+      existingNames.has(fullTitle) ||
+      existingNames.has(canonicalTitle)
+    ) {
       result.skipped++;
       continue;
     }
@@ -245,16 +269,55 @@ export async function countTierASopsPresent(companyId: string): Promise<number> 
   if (!companyId) return 0;
   const { data, error } = await supabase
     .from('phase_assigned_document_template')
-    .select('name')
+    .select('name, document_number')
     .eq('company_id', companyId)
     .eq('document_type', 'SOP');
 
   if (error || !data) return 0;
   const names = new Set(data.map((r) => normalizeTitle(r.name ?? '')));
+  const numbers = new Set(
+    data
+      .map((r) => (r.document_number ?? '').toUpperCase().trim())
+      .filter(Boolean),
+  );
   let count = 0;
   for (const entry of TIER_A_AUTO_SEED) {
     const c = SOP_FULL_CONTENT[entry.sop];
-    if (c && names.has(normalizeTitle(`${c.sopNumber} ${c.title}`))) count++;
+    if (!c) continue;
+    const num = c.sopNumber.toUpperCase().trim();
+    const full = normalizeTitle(`${c.sopNumber} ${c.title}`);
+    const bare = normalizeTitle(c.title);
+    if (numbers.has(num) || names.has(full) || names.has(bare)) count++;
+  }
+  return count;
+}
+
+/**
+ * Count Tier B (pathway-conditional) SOPs already present for a company.
+ */
+export async function countTierBSopsPresent(companyId: string): Promise<number> {
+  if (!companyId) return 0;
+  const { data, error } = await supabase
+    .from('phase_assigned_document_template')
+    .select('name, document_number')
+    .eq('company_id', companyId)
+    .eq('document_type', 'SOP');
+
+  if (error || !data) return 0;
+  const names = new Set(data.map((r) => normalizeTitle(r.name ?? '')));
+  const numbers = new Set(
+    data
+      .map((r) => (r.document_number ?? '').toUpperCase().trim())
+      .filter(Boolean),
+  );
+  let count = 0;
+  for (const entry of TIER_B_CONDITIONAL) {
+    const c = SOP_FULL_CONTENT[entry.sop];
+    if (!c) continue;
+    const num = c.sopNumber.toUpperCase().trim();
+    const full = normalizeTitle(`${c.sopNumber} ${c.title}`);
+    const bare = normalizeTitle(c.title);
+    if (numbers.has(num) || names.has(full) || names.has(bare)) count++;
   }
   return count;
 }

@@ -22,6 +22,19 @@ const fetchFlagsForCompany = async (companyId: string): Promise<Record<string, b
   return map;
 };
 
+export function useCustomerFeatureFlags(): Record<string, boolean> | undefined {
+  const { companyId } = useCurrentCompany();
+
+  const { data: flags } = useQuery({
+    queryKey: ['customer-feature-flags', companyId],
+    queryFn: () => fetchFlagsForCompany(companyId!),
+    enabled: !!companyId,
+    staleTime: 60_000,
+  });
+
+  return flags;
+}
+
 export function useCustomerFeatureFlag(featureKey: string): boolean {
   const { companyId } = useCurrentCompany();
 

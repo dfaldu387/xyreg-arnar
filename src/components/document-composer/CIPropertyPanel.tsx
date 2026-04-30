@@ -21,6 +21,7 @@ import { useReferenceDocuments } from '@/hooks/useReferenceDocuments';
 import { useCompanyActivePhases } from '@/hooks/useCompanyActivePhases';
 import { useReviewerGroups } from '@/hooks/useReviewerGroups';
 import { useExistingTags } from '@/hooks/useExistingTags';
+import { useCCRsByCompany } from '@/hooks/useChangeControlData';
 import { Settings2, Check, Loader2, BookOpen, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { SOP_FUNCTIONAL_SUBPREFIX } from '@/constants/sopAutoSeedTiers';
@@ -51,6 +52,7 @@ interface CIPropertyPanelProps {
   recordId?: string;
   nextReviewDate?: string;
   documentNumber?: string;
+  changeControlRef?: string;
   showSectionNumbers?: boolean;
   // Callback to persist changes
   onFieldChange: (field: string, value: any) => Promise<void>;
@@ -83,6 +85,7 @@ export function CIPropertyPanel({
   recordId,
   nextReviewDate,
   documentNumber,
+  changeControlRef,
   showSectionNumbers,
   onFieldChange,
   disabled = false,
@@ -97,6 +100,7 @@ export function CIPropertyPanel({
   const { activePhases } = useCompanyActivePhases(companyId);
   const { reviewerGroups = [] } = useReviewerGroups(companyId);
   const { data: existingTags = [] } = useExistingTags(companyId);
+  const { data: ccrs = [] } = useCCRsByCompany(companyId);
   const [isRefDocPickerOpen, setIsRefDocPickerOpen] = useState(false);
 
   // Local state for text inputs (debounced)
@@ -611,6 +615,48 @@ export function CIPropertyPanel({
             />
           </div>
         )}
+
+        {/* Change Control Reference — applies to both Documents and Records */}
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between">
+            <Label className="text-xs text-muted-foreground">
+              Change Control Ref.
+              <span className="text-muted-foreground/70 ml-1">(CCR)</span>
+            </Label>
+            {renderSaveIndicator('change_control_ref')}
+          </div>
+          <Select
+            value={changeControlRef || '__none__'}
+            onValueChange={(val) =>
+              handleFieldSave('change_control_ref', val === '__none__' ? null : val)
+            }
+            disabled={disabled}
+          >
+            <SelectTrigger className="h-8 text-sm">
+              <SelectValue placeholder="Link to a CCR…" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__none__">
+                <span className="text-muted-foreground">None</span>
+              </SelectItem>
+              {ccrs.length === 0 ? (
+                <div className="px-2 py-1.5 text-xs text-muted-foreground">
+                  No CCRs available for this company
+                </div>
+              ) : (
+                ccrs.map((ccr: any) => (
+                  <SelectItem key={ccr.ccr_id || ccr.id} value={ccr.ccr_id || ccr.id}>
+                    <span className="font-mono text-xs mr-2">{ccr.ccr_id || ccr.id}</span>
+                    <span className="truncate">{ccr.title || ccr.summary || ''}</span>
+                  </SelectItem>
+                ))
+              )}
+            </SelectContent>
+          </Select>
+          <p className="text-[10px] text-muted-foreground leading-tight">
+            Required for document revisions per ISO 13485 / 21 CFR Part 820.
+          </p>
+        </div>
 
         <Separator />
 

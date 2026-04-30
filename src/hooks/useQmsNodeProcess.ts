@@ -77,15 +77,26 @@ export function useQmsNodeProcessMutations(companyId: string | undefined, nodeId
   const queryClient = useQueryClient();
 
   const saveProcess = useMutation({
-    mutationFn: async ({ 
-      description, 
-      steps 
-    }: { 
-      description: string; 
-      steps?: ProcessStep[] 
+    mutationFn: async ({
+      description,
+      steps,
+      inputs,
+      outputs,
+    }: {
+      description: string;
+      steps?: ProcessStep[];
+      inputs?: string[] | null;
+      outputs?: string[] | null;
     }) => {
       if (!companyId || !nodeId) throw new Error('Missing companyId or nodeId');
-      return QmsNodeProcessService.upsertNodeProcess(companyId, nodeId, description, steps);
+      return QmsNodeProcessService.upsertNodeProcess(
+        companyId,
+        nodeId,
+        description,
+        steps,
+        inputs,
+        outputs,
+      );
     },
     onSuccess: () => {
       if (companyId && nodeId) {

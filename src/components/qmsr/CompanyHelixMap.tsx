@@ -6,6 +6,7 @@
  */
 
 import React, { useMemo, useCallback, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   ReactFlow,
   useNodesState,
@@ -122,8 +123,8 @@ const LAYOUT_CONFIG = {
   trackY: {
     // Vertical spacing so cards never overlap
     regulatory: 70,
-    engineering: 310,
-    management: 550,
+    engineering: 340,
+    management: 640,
   },
 };
 
@@ -536,15 +537,32 @@ function CompanyHelixMapInner({
   onViewInProduct
 }: CompanyHelixMapProps) {
   const { data, isLoading, refetch } = useHelixPulseStatus(companyId);
-  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
-  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const selectedNodeId = searchParams.get('foundationNode');
+  const isDrawerOpen = !!selectedNodeId;
+
+  const setSelectedNodeId = useCallback((nodeId: string | null) => {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (nodeId) next.set('foundationNode', nodeId);
+        else next.delete('foundationNode');
+        return next;
+      },
+      { replace: true },
+    );
+  }, [setSearchParams]);
+
+  const setIsDrawerOpen = useCallback((open: boolean) => {
+    if (!open) setSelectedNodeId(null);
+  }, [setSelectedNodeId]);
+
   const [isExportDialogOpen, setIsExportDialogOpen] = useState(false);
 
   const handleNodeClick = useCallback((nodeId: string) => {
     setSelectedNodeId(nodeId);
-    setIsDrawerOpen(true);
     onNodeClick?.(nodeId, nodeId);
-  }, [onNodeClick]);
+  }, [onNodeClick, setSelectedNodeId]);
 
   const handleRBRClick = useCallback((_rbrType: string) => {
     // RBR click handled via node drawer
@@ -654,9 +672,9 @@ function CompanyHelixMapInner({
           nodeTypes={nodeTypes}
           edgeTypes={edgeTypes}
           fitView
-          fitViewOptions={{ padding: 0.08 }}
+          fitViewOptions={{ padding: 0.18 }}
           proOptions={{ hideAttribution: true }}
-          minZoom={0.4}
+          minZoom={0.3}
           maxZoom={1}
           nodesDraggable={false}
           nodesConnectable={false}

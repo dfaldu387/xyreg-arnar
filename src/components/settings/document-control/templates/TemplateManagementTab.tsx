@@ -1,8 +1,14 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useParams } from 'react-router-dom';
 import { stripDocPrefix } from '@/utils/templateNameUtils';
-import { Plus, FileText, Calendar, User, Download, Trash2, Brain, Eye, Edit, ArrowUpDown, ArrowUp, ArrowDown, FilePlus2, Loader2 } from 'lucide-react';
+import { Plus, FileText, Calendar, User, Download, Trash2, Brain, Eye, Edit, ArrowUpDown, ArrowUp, ArrowDown, FilePlus2, Loader2, MoreHorizontal } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { useToast } from '@/hooks/use-toast';
 import { useTranslation } from '@/hooks/useTranslation';
 import { DocumentTemplateFileService } from '@/services/documentTemplateFileService';
@@ -14,11 +20,13 @@ import { TemplateViewDialog } from './TemplateViewDialog';
 import { TemplateEditDialog } from './TemplateEditDialog';
 import { SOPTemplatePreviewDialog } from './SOPTemplatePreviewDialog';
 import { Badge } from '@/components/ui/badge';
+import { Checkbox } from '@/components/ui/checkbox';
 import { supabase } from '@/integrations/supabase/client';
 import { useCompanyRole } from '@/context/CompanyRoleContext';
-import { TIER_A_AUTO_SEED, getSopTier } from '@/constants/sopAutoSeedTiers';
+import { TIER_A_AUTO_SEED, getSopTier, parseSopNumber, getSopSubPrefix , compareSopDocuments } from '@/constants/sopAutoSeedTiers';
 import { formatSopDisplayName } from '@/constants/sopAutoSeedTiers';
 import { seedSingleSopForCompany } from '@/services/sopAutoSeedService';
+import { SOP_FULL_CONTENT } from '@/data/sopFullContent';
 import { SopAutoSeedStatus } from '@/components/settings/document-control/SopAutoSeedStatus';
 import { TierBadge } from '@/components/documents/TierBadge';
 import { DocumentDraftDrawer } from '@/components/product/documents/DocumentDraftDrawer';
@@ -35,6 +43,17 @@ interface TemplateManagementTabProps {
   companyId: string;
   onOpenAiTemplateDialog: () => void;
   onOpenUploadDialog?: () => void;
+}
+
+interface DraftTemplateSummary {
+  id: string;
+  template_id?: string | null;
+  name: string;
+  type?: string | null;
+  updated_at?: string | null;
+  metadata?: {
+    sopNumber?: string;
+  } | null;
 }
 
 export function TemplateManagementTab({ companyId, onOpenAiTemplateDialog, onOpenUploadDialog }: TemplateManagementTabProps) {
@@ -56,7 +75,9 @@ export function TemplateManagementTab({ companyId, onOpenAiTemplateDialog, onOpe
   };
 
   const extractSopKey = (templateName: string): string | null => {
-    const match = templateName.match(/SOP-\d{3}/);
+    // Match both legacy "SOP-008" and current functional sub-prefix
+    // form "SOP-DE-008" / "SOP-SC-016" so the key uniquely identifies a draft.
+    const match = templateName.match(/SOP(?:-[A-Z]{2,4})?-\d{3}/i);
     return match ? match[0] : null;
   };
 
@@ -76,8 +97,13 @@ export function TemplateManagementTab({ companyId, onOpenAiTemplateDialog, onOpe
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
   const [sopPreviewOpen, setSopPreviewOpen] = useState(false);
   const [draftTemplateNames, setDraftTemplateNames] = useState<Set<string>>(new Set());
+  const [draftTemplatesBySopNumber, setDraftTemplatesBySopNumber] = useState<Map<string, DraftTemplateSummary>>(new Map());
   const [draftDrawerDoc, setDraftDrawerDoc] = useState<{ id: string; name: string; type: string } | null>(null);
   const { toast } = useToast();
+
+  // Bulk seed selection: set of SOP keys (e.g. "SOP-008") for missing-SOP rows.
+  const [bulkSeedSelected, setBulkSeedSelected] = useState<Set<string>>(new Set());
+  const [isBulkSeeding, setIsBulkSeeding] = useState(false);
 
   // Only reload templates when the company changes — filters are applied
   // client-side via the `filteredTemplates` useMemo below. Reloading on every
@@ -88,22 +114,85 @@ export function TemplateManagementTab({ companyId, onOpenAiTemplateDialog, onOpe
   }, [companyId]);
 
   // Load draft names to know which templates have CI docs
-  const loadDraftNames = async () => {
+  const getCanonicalSopName = (templateName: string): string => {
+    const sopNumber = parseSopNumber(templateName);
+    if (!sopNumber) return templateName;
+
+    const content = SOP_FULL_CONTENT[sopNumber];
+    return content ? `${content.sopNumber} ${content.title}` : templateName;
+  };
+
+  const getDraftSopNumber = (draft: DraftTemplateSummary): string | null => {
+    const metadataSopNumber = typeof draft.metadata?.sopNumber === 'string'
+      ? draft.metadata.sopNumber
+      : null;
+
+    return metadataSopNumber || parseSopNumber(draft.name);
+  };
+
+  const getMatchingDraft = (
+    template: any,
+    draftLookup: Map<string, DraftTemplateSummary> = draftTemplatesBySopNumber,
+  ): DraftTemplateSummary | null => {
+    const sopNumber = parseSopNumber(template?.name);
+    if (!sopNumber) return null;
+    return draftLookup.get(sopNumber) ?? null;
+  };
+
+  const hasDraftForTemplate = (template: any): boolean => {
+    if (isSOP(template?.name || '')) {
+      return !!getMatchingDraft(template);
+    }
+    return draftTemplateNames.has(template?.name);
+  };
+
+  const getEffectiveTemplateName = (template: any): string => {
+    const matchingDraft = getMatchingDraft(template);
+    if (matchingDraft?.name) return matchingDraft.name;
+    return getCanonicalSopName(template?.name || '');
+  };
+
+  const openDraftInDrawer = (draft: DraftTemplateSummary, fallbackType = 'SOP') => {
+    const drawerId = draft.template_id || draft.id;
+    setDraftDrawerDoc({
+      id: drawerId,
+      name: draft.name,
+      type: draft.type || fallbackType,
+    });
+  };
+
+  const loadDraftNames = async (): Promise<Map<string, DraftTemplateSummary>> => {
     try {
       const { data } = await supabase
         .from('document_studio_templates')
-        .select('name')
-        .eq('company_id', companyId);
+        .select('id, template_id, name, type, updated_at, metadata')
+        .eq('company_id', companyId)
+        .order('updated_at', { ascending: false });
       if (data) {
-        setDraftTemplateNames(new Set(data.map((d: any) => d.name)));
+        const nextDraftTemplateNames = new Set(data.map((d: any) => d.name));
+        const nextDraftTemplatesBySopNumber = new Map<string, DraftTemplateSummary>();
+
+        for (const draft of data as DraftTemplateSummary[]) {
+          const sopNumber = getDraftSopNumber(draft);
+          if (sopNumber && !nextDraftTemplatesBySopNumber.has(sopNumber)) {
+            nextDraftTemplatesBySopNumber.set(sopNumber, draft);
+          }
+        }
+
+        setDraftTemplateNames(nextDraftTemplateNames);
+        setDraftTemplatesBySopNumber(nextDraftTemplatesBySopNumber);
+        return nextDraftTemplatesBySopNumber;
       }
     } catch (e) {
       console.error('Error loading draft names:', e);
     }
+    setDraftTemplateNames(new Set());
+    setDraftTemplatesBySopNumber(new Map());
+    return new Map();
   };
 
   const handleUseTemplate = async (template: any) => {
-    const sopKey = extractSopKey(template.name);
+    const sopKey = parseSopNumber(template.name) || extractSopKey(template.name);
     if (!sopKey || !companyId || !companyName) return;
     try {
       setSeedingSop(sopKey);
@@ -209,13 +298,13 @@ export function TemplateManagementTab({ companyId, onOpenAiTemplateDialog, onOpe
     }
   };
 
-  const isSOP = (name: string) => /^SOP-\d{3}/.test(name);
+  const isSOP = (name: string) => /^SOP(?:-[A-Z]{2,4})?-\d{3}/i.test(name);
 
   // Eye-icon routing: real draft → TemplateViewDialog; SOP w/o draft →
   // read-only SOPTemplatePreviewDialog (boilerplate); other → TemplateViewDialog.
   const handleView = (template: any) => {
     setSelectedTemplate(template);
-    const hasDraft = draftTemplateNames.has(template.name);
+    const hasDraft = hasDraftForTemplate(template);
     if (!hasDraft && isSOP(template.name)) {
       setSopPreviewOpen(true);
     } else {
@@ -260,25 +349,67 @@ export function TemplateManagementTab({ companyId, onOpenAiTemplateDialog, onOpe
 
   const openDrawerForTemplateName = async (name: string) => {
     try {
-      // SOP names may differ between SaaS catalog and seeded studio draft (e.g.
-      // "SOP-014 Post-Market Surveillance (PMS)" vs "SOP-014 Clinical Evaluation").
-      // Match by SOP key (e.g. "SOP-014") when present, exact name otherwise.
-      const sopKeyMatch = name.match(/SOP-\d{3}/i);
-      let query = supabase
-        .from('document_studio_templates')
-        .select('id, template_id, name, type')
-        .eq('company_id', companyId);
-      query = sopKeyMatch
-        ? query.ilike('name', `${sopKeyMatch[0]}%`)
-        : query.eq('name', name);
-      const { data, error } = await query.limit(1).maybeSingle();
-      if (error) throw error;
-      if (data) {
-        // Pass the CI/template id so DocumentDraftDrawer can resolve the
-        // existing seeded draft via DocumentStudioPersistenceService
-        // (which queries by template_id, not the studio row id).
-        const drawerId = (data as any).template_id || data.id;
-        setDraftDrawerDoc({ id: drawerId, name: data.name, type: (data as any).type || 'SOP' });
+      const sopNumber = parseSopNumber(name);
+
+      if (sopNumber) {
+        const matchedDraft = draftTemplatesBySopNumber.get(sopNumber);
+        if (matchedDraft) {
+          openDraftInDrawer(matchedDraft, 'SOP');
+          return;
+        }
+
+        const canonicalName = getCanonicalSopName(name);
+        const { data, error } = await supabase
+          .from('document_studio_templates')
+          .select('id, template_id, name, type, updated_at, metadata')
+          .eq('company_id', companyId)
+          .eq('name', canonicalName)
+          .order('updated_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (error) throw error;
+        if (data) {
+          openDraftInDrawer(data as DraftTemplateSummary, 'SOP');
+          return;
+        }
+      } else {
+        const { data, error } = await supabase
+          .from('document_studio_templates')
+          .select('id, template_id, name, type, updated_at, metadata')
+          .eq('company_id', companyId)
+          .eq('name', name)
+          .order('updated_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (error) throw error;
+        if (data) {
+          openDraftInDrawer(data as DraftTemplateSummary, 'SOP');
+          return;
+        }
+      }
+
+      if (sopNumber) {
+        const result = await seedSingleSopForCompany(companyId, companyName, sopNumber);
+        if (result.failed > 0) {
+          throw new Error(result.errors[0] || 'Failed to create draft.');
+        }
+
+        const refreshedLookup = await loadDraftNames();
+        const createdDraft = refreshedLookup.get(sopNumber);
+        if (createdDraft) {
+          openDraftInDrawer(createdDraft, 'SOP');
+          return;
+        }
+      }
+
+      if (!sopNumber) {
+        toast({
+          title: lang('common.error'),
+          description: 'Could not locate the draft for this template.',
+          variant: 'destructive',
+        });
       } else {
         toast({
           title: lang('common.error'),
@@ -297,16 +428,12 @@ export function TemplateManagementTab({ companyId, onOpenAiTemplateDialog, onOpe
   };
 
   const openSopEditor = async (template: any) => {
-    // Detect existing draft by SOP key (names may differ between SaaS catalog
-    // and the seeded studio draft).
-    const sopKey = extractSopKey(template.name);
-    const hasDraft = sopKey
-      ? Array.from(draftTemplateNames).some((n) => n.startsWith(`${sopKey} `) || n === sopKey)
-      : draftTemplateNames.has(template.name);
+    const sopKey = parseSopNumber(template.name) || extractSopKey(template.name);
+    const hasDraft = hasDraftForTemplate(template);
     if (!hasDraft) {
       await handleUseTemplate(template);
     }
-    await openDrawerForTemplateName(template.name);
+    await openDrawerForTemplateName(getEffectiveTemplateName(template));
   };
 
   const handleUpdateTemplate = async (updatedTemplate: any) => {
@@ -454,24 +581,82 @@ export function TemplateManagementTab({ companyId, onOpenAiTemplateDialog, onOpe
       });
     }
 
-    // Search filter — match name OR description, but rank name hits first.
-    const searchTerm = (filters.search || '').trim().toLowerCase();
-    let nameMatchSet: Set<any> | null = null;
-    if (searchTerm) {
-      nameMatchSet = new Set();
+    // Multi-select functional sub-prefix (QA / DE / RM / CL / RA / MF / SC).
+    if (filters.subPrefixes && filters.subPrefixes.length > 0) {
+      const allowed = new Set(filters.subPrefixes);
+      templates = templates.filter(template => {
+        const sp = getSopSubPrefix(template.name);
+        return sp !== null && allowed.has(sp);
+      });
+    }
+
+    // Search filter — match title/name first, then description.
+    const rawSearch = (filters.search || '').trim().toLowerCase();
+    const searchTerm = rawSearch.replace(/^-+/, '').replace(/-+$/, '');
+
+    // Detect when the query is purely a sub-prefix token (e.g. "-cl", "cl",
+    // "sop-cl", "sop-cl-"). In that case match strictly against the SOP
+    // sub-prefix code so unrelated descriptions containing the letters don't
+    // pollute results.
+    const SUB_PREFIX_CODES = new Set(['qa', 'de', 'rm', 'cl', 'ra', 'mf', 'sc']);
+    const subPrefixOnlyMatch = (() => {
+      if (!rawSearch) return null;
+      const m = rawSearch.match(/^(?:sop[-\s]*)?-?([a-z]{2})-?$/i);
+      if (!m) return null;
+      const code = m[1].toLowerCase();
+      return SUB_PREFIX_CODES.has(code) ? code.toUpperCase() : null;
+    })();
+
+    let searchRankMap: Map<string, number> | null = null;
+    if (subPrefixOnlyMatch) {
+      searchRankMap = new Map();
+      templates = templates.filter(template => {
+        const sp = getSopSubPrefix(template.name);
+        if (sp === subPrefixOnlyMatch) {
+          searchRankMap!.set(template.id, 0);
+          return true;
+        }
+        return false;
+      });
+    } else if (searchTerm) {
+      searchRankMap = new Map();
       templates = templates.filter(template => {
         const name = (template.name || '').toLowerCase();
+        const displayName = formatSopDisplayName(template.name).toLowerCase();
         const desc = (template.description || '').toLowerCase();
-        const nameHit = name.includes(searchTerm);
+        const nameHit = name.includes(searchTerm) || displayName.includes(searchTerm);
         const descHit = desc.includes(searchTerm);
-        if (nameHit) nameMatchSet!.add(template);
-        return nameHit || descHit;
+
+        if (nameHit) {
+          searchRankMap!.set(template.id, 0);
+          return true;
+        }
+
+        if (descHit) {
+          searchRankMap!.set(template.id, 1);
+          return true;
+        }
+
+        return false;
       });
     }
 
     // Apply sorting
     if (sortColumn) {
       templates.sort((a, b) => {
+        if (searchRankMap) {
+          const rankA = searchRankMap.get(a.id) ?? Number.MAX_SAFE_INTEGER;
+          const rankB = searchRankMap.get(b.id) ?? Number.MAX_SAFE_INTEGER;
+          if (rankA !== rankB) return rankA - rankB;
+        }
+
+        // Name column uses the shared SOP-aware comparator so the Template
+        // Library and Company Documents views produce the same order.
+        if (sortColumn === 'name') {
+          const cmp = compareSopDocuments(a.name, b.name);
+          return sortDirection === 'asc' ? cmp : -cmp;
+        }
+
         let aVal = '';
         let bVal = '';
         
@@ -494,12 +679,12 @@ export function TemplateManagementTab({ companyId, onOpenAiTemplateDialog, onOpe
         const cmp = aVal.localeCompare(bVal, undefined, { sensitivity: 'base' });
         return sortDirection === 'asc' ? cmp : -cmp;
       });
-    } else if (nameMatchSet) {
-      // No explicit sort — promote name matches above description-only matches,
-      // preserving original order within each group (stable sort).
+    } else if (searchRankMap) {
+      // No explicit sort — keep title/name matches above description-only matches,
+      // preserving original order within each group.
       templates = [
-        ...templates.filter(t => nameMatchSet!.has(t)),
-        ...templates.filter(t => !nameMatchSet!.has(t)),
+        ...templates.filter(t => (searchRankMap!.get(t.id) ?? Number.MAX_SAFE_INTEGER) === 0),
+        ...templates.filter(t => (searchRankMap!.get(t.id) ?? Number.MAX_SAFE_INTEGER) === 1),
       ];
     }
     
@@ -519,28 +704,29 @@ export function TemplateManagementTab({ companyId, onOpenAiTemplateDialog, onOpe
 
   return (
     <div className="space-y-6">
-      {/* Header with Cleanup Button */}
-      <div className="flex items-center justify-between mb-4">
-        <div>
-          <h3 className="text-lg font-medium">{lang('templates.library.title')}</h3>
-          <p className="text-sm text-muted-foreground">{lang('templates.library.subtitle')}</p>
+      {/* Compact seed status + admin overflow — one line tall when collapsed */}
+      <div className="flex items-center gap-2">
+        <div className="flex-1 min-w-0">
+          <SopAutoSeedStatus
+            variant="compact"
+            companyId={companyId}
+            companyName={activeCompanyRole?.companyName || companyName}
+            onSeeded={() => { loadTemplates(); loadDraftNames(); }}
+          />
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={handleCleanupDuplicates}
-          disabled={isLoading}
-        >
-          {lang('templates.library.cleanupDuplicates')}
-        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="icon" className="h-9 w-9 shrink-0" aria-label="Template admin actions">
+              <MoreHorizontal className="h-4 w-4" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onClick={handleCleanupDuplicates} disabled={isLoading}>
+              {lang('templates.library.cleanupDuplicates')}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
-
-      {/* Foundation SOP auto-seed status — one-click recovery for missing Tier A SOPs */}
-      <SopAutoSeedStatus
-        companyId={companyId}
-        companyName={activeCompanyRole?.companyName || companyName}
-        onSeeded={() => { loadTemplates(); loadDraftNames(); }}
-      />
 
       {/* Filters — Documents-style search + popover */}
       <TemplateFilterBar
@@ -548,12 +734,97 @@ export function TemplateManagementTab({ companyId, onOpenAiTemplateDialog, onOpe
         onFiltersChange={setFilters}
       />
 
+      {/* Bulk-seed amber bar — shown only when ≥1 missing SOP row is selected */}
+      {bulkSeedSelected.size > 0 && (
+        <div className="flex items-center gap-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2">
+          <span className="text-sm font-medium text-amber-900">
+            {bulkSeedSelected.size} SOP{bulkSeedSelected.size === 1 ? '' : 's'} selected
+          </span>
+          <div className="h-4 w-px bg-amber-300" />
+          <Button
+            size="sm"
+            className="h-8 text-xs"
+            disabled={isBulkSeeding || !companyId || !companyName}
+            onClick={async () => {
+              if (!companyId || !companyName) return;
+              setIsBulkSeeding(true);
+              const keys = Array.from(bulkSeedSelected);
+              let inserted = 0;
+              let failed = 0;
+              for (const sopKey of keys) {
+                try {
+                  const r = await seedSingleSopForCompany(companyId, companyName, sopKey);
+                  inserted += r.inserted;
+                  failed += r.failed;
+                } catch {
+                  failed += 1;
+                }
+              }
+              setIsBulkSeeding(false);
+              setBulkSeedSelected(new Set());
+              await loadTemplates();
+              await loadDraftNames();
+              if (inserted > 0) {
+                toast({
+                  title: 'SOPs seeded',
+                  description: `${inserted} SOP${inserted === 1 ? '' : 's'} provisioned${failed > 0 ? `, ${failed} failed` : ''}.`,
+                });
+              } else if (failed > 0) {
+                toast({
+                  title: 'Bulk seed failed',
+                  description: `${failed} SOP${failed === 1 ? '' : 's'} failed to seed.`,
+                  variant: 'destructive',
+                });
+              }
+            }}
+          >
+            {isBulkSeeding ? (
+              <><Loader2 className="h-3 w-3 mr-1 animate-spin" />Seeding…</>
+            ) : (
+              `Seed selected SOPs`
+            )}
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-8 text-xs"
+            disabled={isBulkSeeding}
+            onClick={() => setBulkSeedSelected(new Set())}
+          >
+            Clear
+          </Button>
+        </div>
+      )}
+
       {/* Templates Table */}
       <div className="border rounded-lg">
         <Table>
            <TableHeader>
              <TableRow>
-               <TableHead className="w-[40px]"></TableHead>
+               <TableHead className="w-[40px]">
+                 {(() => {
+                   const missingKeys = filteredTemplates
+                     .filter(t => isTierASop(t.name) && !hasDraftForTemplate(t))
+                     .map(t => extractSopKey(t.name))
+                     .filter((k): k is string => !!k);
+                   if (missingKeys.length === 0) return null;
+                   const allSelected = missingKeys.every(k => bulkSeedSelected.has(k));
+                   return (
+                     <Checkbox
+                       checked={allSelected}
+                       onCheckedChange={(checked) => {
+                         setBulkSeedSelected(prev => {
+                           const next = new Set(prev);
+                           if (checked) missingKeys.forEach(k => next.add(k));
+                           else missingKeys.forEach(k => next.delete(k));
+                           return next;
+                         });
+                       }}
+                       aria-label="Select all missing SOPs"
+                     />
+                   );
+                 })()}
+               </TableHead>
                <TableHead className="cursor-pointer select-none" onClick={() => handleSort('name')}>
                  <span className="flex items-center">{lang('templates.library.headers.templateName')}<SortIcon column="name" /></span>
                </TableHead>
@@ -589,7 +860,27 @@ export function TemplateManagementTab({ companyId, onOpenAiTemplateDialog, onOpe
               filteredTemplates.map((template) => (
                 <TableRow key={template.id}>
                   <TableCell>
-                    <FileText className="h-4 w-4 text-muted-foreground" />
+                   {(() => {
+                     const isMissing = isTierASop(template.name) && !hasDraftForTemplate(template);
+                     const sopKey = extractSopKey(template.name);
+                     if (isMissing && sopKey) {
+                       return (
+                         <Checkbox
+                           checked={bulkSeedSelected.has(sopKey)}
+                           onCheckedChange={(checked) => {
+                             setBulkSeedSelected(prev => {
+                               const next = new Set(prev);
+                               if (checked) next.add(sopKey);
+                               else next.delete(sopKey);
+                               return next;
+                             });
+                           }}
+                           aria-label={`Select ${sopKey} for bulk seed`}
+                         />
+                       );
+                     }
+                     return <FileText className="h-4 w-4 text-muted-foreground" />;
+                   })()}
                   </TableCell>
                   <TableCell className="font-medium">
                     {stripDocPrefix(formatSopDisplayName(template.name))}
@@ -628,12 +919,12 @@ export function TemplateManagementTab({ companyId, onOpenAiTemplateDialog, onOpe
                   </TableCell>
                    <TableCell className="text-right">
                      <div className="flex items-center justify-end gap-1">
-                       <Button
+                        <Button
                          variant="ghost"
                          size="icon"
                          className="h-8 w-8"
                          onClick={() => handleView(template)}
-                         title={draftTemplateNames.has(template.name) ? 'View draft' : 'Preview template'}
+                          title={hasDraftForTemplate(template) ? 'View draft' : 'Preview template'}
                        >
                          <Eye className="h-4 w-4" />
                        </Button>
@@ -644,7 +935,7 @@ export function TemplateManagementTab({ companyId, onOpenAiTemplateDialog, onOpe
                          onClick={() => handleEdit(template)}
                          disabled={seedingSop === extractSopKey(template.name)}
                          title={
-                           isTierASop(template.name) && !draftTemplateNames.has(template.name)
+                            isTierASop(template.name) && !hasDraftForTemplate(template)
                              ? 'Provision this SOP for the company (auto-personalized) and open editor'
                              : 'Edit template'
                          }

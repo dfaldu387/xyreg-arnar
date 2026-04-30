@@ -99,10 +99,10 @@ export function GlobalHelpSidebar({ open, onOpenChange, listenForGlobalEvents = 
 
   if (detailScreen) {
     return (
-      <Sheet open={open} onOpenChange={handleOpenChange}>
+      <Sheet open={open} onOpenChange={handleOpenChange} modal={false}>
         <SheetContent 
           side="right" 
-          className="w-[90vw] sm:w-[900px] md:w-[1080px] p-0 flex flex-col text-base"
+          className="w-[90vw] sm:w-[900px] md:w-[1080px] p-0 flex flex-col text-base top-16 h-[calc(100vh-4rem)] z-40"
         >
           <ScrollArea className="flex-1">
             <HelpTopicDetailScreen topicId={detailScreen} onBack={handleBackFromDetail} />
@@ -113,10 +113,10 @@ export function GlobalHelpSidebar({ open, onOpenChange, listenForGlobalEvents = 
   }
   
   return (
-    <Sheet open={open} onOpenChange={handleOpenChange}>
+    <Sheet open={open} onOpenChange={handleOpenChange} modal={false}>
         <SheetContent 
           side="right" 
-          className="w-[90vw] sm:w-[900px] md:w-[1080px] p-0 flex flex-col text-base"
+          className="w-[90vw] sm:w-[900px] md:w-[1080px] p-0 flex flex-col text-base top-16 h-[calc(100vh-4rem)] z-40"
         >
         <SheetHeader className="p-6 pb-4 border-b space-y-4">
           <SheetTitle className="flex items-center gap-2 text-xl">

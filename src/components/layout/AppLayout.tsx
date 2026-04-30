@@ -966,7 +966,7 @@ export default function AppLayout() {
               <Button
                 variant="outline"
                 size="icon"
-                onClick={() => setHelpSidebarOpen(true)}
+                onClick={() => setHelpSidebarOpen((v: boolean) => !v)}
                 className="relative hover:bg-muted transition-colors"
                 aria-label="Help & Documentation"
                 title="Help & Documentation"

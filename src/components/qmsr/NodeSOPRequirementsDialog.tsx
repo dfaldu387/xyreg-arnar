@@ -67,6 +67,7 @@ import {
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 import { DocumentDraftDrawer } from '@/components/product/documents/DocumentDraftDrawer';
+import { formatSopDisplayId } from '@/constants/sopAutoSeedTiers';
 
 interface NodeSOPRequirementsDialogProps {
   open: boolean;
@@ -77,6 +78,12 @@ interface NodeSOPRequirementsDialogProps {
   companyId?: string;
   onCreateSOP?: (sopNumber: string, sopName: string) => void;
   onViewSOP?: (documentId: string) => void;
+  /**
+   * When provided, the dialog auto-opens the DocumentDraftDrawer for that
+   * SOP as soon as it has resolved status (View if linked, Create if missing).
+   * Used by chip clicks on the helix node so users skip the list view.
+   */
+  autoOpenSop?: { sopNumber: string; documentId?: string };
 }
 
 function TrackBadge({ track }: { track: SOPTrack }) {
@@ -168,9 +175,14 @@ function SOPRow({
         <div className="flex items-center gap-2 mb-1">
           <FileText className="h-4 w-4 text-slate-500 flex-shrink-0" />
           <span className="font-mono text-sm font-semibold text-slate-700">
-            {status.displayId}
+            {status.displayId || formatSopDisplayId(sop.sopNumber)}
           </span>
           <TrackBadge track={sop.track} />
+          {status.tier === 'A' && (
+            <Badge variant="outline" className="text-[9px] px-1 py-0 h-4 border-slate-200 text-slate-400">
+              Tier A
+            </Badge>
+          )}
           {status.tier === 'B' && (
             <Badge variant="outline" className="text-[9px] px-1 py-0 h-4 border-slate-300 text-slate-500">
               Tier B
@@ -328,6 +340,7 @@ export function NodeSOPRequirementsDialog({
   companyId,
   onCreateSOP,
   onViewSOP,
+  autoOpenSop,
 }: NodeSOPRequirementsDialogProps) {
   const recommendations = NODE_SOP_RECOMMENDATIONS[nodeId] || [];
   const { data: sopStatuses, isLoading } = useNodeSOPRequirements(companyId, nodeId);
@@ -395,6 +408,40 @@ export function NodeSOPRequirementsDialog({
   const approvedCount = sopStatuses?.filter(s => s.status === 'approved').length ?? 0;
   const missingCount = sopStatuses?.filter(s => s.status === 'missing').length ?? 0;
 
+  // Auto-open the drawer for a specific SOP when requested via chip click.
+  // Runs once per open+autoOpenSop combo, after status resolves.
+  const autoOpenedRef = React.useRef<string | null>(null);
+  useEffect(() => {
+    if (!open) {
+      autoOpenedRef.current = null;
+      return;
+    }
+    if (!autoOpenSop) return;
+    const key = `${autoOpenSop.sopNumber}:${autoOpenSop.documentId || ''}`;
+    if (autoOpenedRef.current === key) return;
+    if (drawerDoc) return;
+    // If we already know the documentId, open it directly without waiting.
+    if (autoOpenSop.documentId) {
+      autoOpenedRef.current = key;
+      handleViewInPlace(autoOpenSop.documentId);
+      return;
+    }
+    // Otherwise wait for sopStatuses to resolve so we can pick view vs create.
+    if (isLoading || !sopStatuses) return;
+    const status = sopStatuses.find((s) => s.sopNumber === autoOpenSop.sopNumber);
+    autoOpenedRef.current = key;
+    if (status?.documentId) {
+      handleViewInPlace(status.documentId);
+    } else {
+      const rec = recommendations.find((r) => r.sopNumber === autoOpenSop.sopNumber);
+      handleCreateInPlace(
+        autoOpenSop.sopNumber,
+        status?.documentName || rec?.clauseDescription || autoOpenSop.sopNumber,
+      );
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, autoOpenSop, sopStatuses, isLoading]);
+
   return (
     <Dialog
       open={open}
@@ -443,6 +490,12 @@ export function NodeSOPRequirementsDialog({
           )}
         </DialogHeader>
 
+        {/* Numbering format hint — explains why some SOPs carry MF/RA/etc. sub-prefixes */}
+        <p className="text-[11px] text-slate-500 -mt-1 leading-snug">
+          Numbering uses Xyreg's 3-part format <span className="font-mono">SOP-{'{area}'}-{'{number}'}</span>.
+          Design Transfer (SOP-010) shows as <span className="font-mono">SOP-MF-010</span> because it sits in the manufacturing scope.
+        </p>
+
         {/* Stats summary */}
         <div className="flex items-center gap-4 py-2 px-3 bg-slate-50 rounded-lg">
           <div className="flex items-center gap-1.5">
@@ -481,7 +534,7 @@ export function NodeSOPRequirementsDialog({
                 const status: SOPRequirementStatus =
                   sopStatuses?.find((s) => s.sopNumber === sop.sopNumber) ?? {
                     sopNumber: sop.sopNumber,
-                    displayId: sop.sopNumber,
+                    displayId: formatSopDisplayId(sop.sopNumber),
                     documentName: sop.sopNumber,
                     status: 'missing',
                   };
