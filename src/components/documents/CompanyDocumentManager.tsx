@@ -105,6 +105,45 @@ export function CompanyDocumentManager({ companyId, disabled = false }: CompanyD
   const [showRefreshConfirm, setShowRefreshConfirm] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [draftDrawerDocument, setDraftDrawerDocument] = useState<CompanyDocument | null>(null);
+  // Open-stack of drafts to support tabs at the top of the drawer.
+  // No cap — open as many drafts as you like. The tab strip scrolls
+  // horizontally so it can accommodate any number of tabs.
+  const [openDraftStack, setOpenDraftStack] = useState<CompanyDocument[]>([]);
+
+  const openDraft = useCallback((doc: CompanyDocument) => {
+    setOpenDraftStack(prev => {
+      if (prev.some(d => d.id === doc.id)) return prev;
+      return [...prev, doc];
+    });
+    setDraftDrawerDocument(doc);
+  }, []);
+
+  const closeDraftTab = useCallback((id: string) => {
+    setOpenDraftStack(prev => {
+      const idx = prev.findIndex(d => d.id === id);
+      if (idx < 0) return prev;
+      const next = prev.filter(d => d.id !== id);
+      if (next.length === 0) {
+        setDraftDrawerDocument(null);
+      } else {
+        setDraftDrawerDocument(prevActive => {
+          if (!prevActive || prevActive.id !== id) return prevActive;
+          // Activate previous neighbour, fallback to first
+          const neighbour = next[Math.max(0, idx - 1)] ?? next[0];
+          return neighbour;
+        });
+      }
+      return next;
+    });
+  }, []);
+
+  const selectDraftTab = useCallback((id: string) => {
+    setOpenDraftStack(prev => {
+      const target = prev.find(d => d.id === id);
+      if (target) setDraftDrawerDocument(target);
+      return prev;
+    });
+  }, []);
 
   // Bulk mode state (always on - checkboxes always visible)
 
@@ -249,20 +288,87 @@ export function CompanyDocumentManager({ companyId, disabled = false }: CompanyD
 
   // Use TanStack Query hook
   const { documents, isLoading, error, refetch, deleteDocument, updateDocumentStatus, isDeleting, isUpdatingStatus, updatingStatusId } = useCompanyDocuments(companyId);
-  
-  // Deep-link: auto-open drawer when docId param is present
+
+  // Listen for in-app "open this referenced doc as a tab" events fired by
+  // the LiveEditor. This bypasses URL-based deep-linking so opening the 3rd,
+  // 4th, … referenced doc inside an already-open drawer reliably produces
+  // a new tab instead of silently no-op'ing on a URL update.
   useEffect(() => {
-    const docId = searchParams.get('docId');
-    if (!docId || draftDrawerDocument) return;
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail || {};
+      const { docId, docName } = detail as { docId?: string; docName?: string };
+      let opened = false;
+      if (docId) {
+        const found = documents.find(d => d.id === docId);
+        if (found) { openDraft(found); opened = true; }
+      }
+      if (!opened && docName) {
+        const lc = docName.toLowerCase();
+        const found = documents.find(d => {
+          const n = (d.name || '').toLowerCase();
+          return n === lc || n.startsWith(lc + ' ') || n.includes(lc);
+        });
+        if (found) { openDraft(found); opened = true; }
+      }
+      if (opened) {
+        e.preventDefault();
+        return;
+      }
+      if (docId) {
+        // Last resort: fetch the row directly so a product-scoped doc still
+        // opens as a tab even if not present in the company list.
+        (async () => {
+          try {
+            const { data } = await supabase
+              .from('phase_assigned_document_template')
+              .select('id, name, document_type, status, created_at, updated_at')
+              .eq('id', docId)
+              .maybeSingle();
+            if (data) {
+              openDraft({
+                id: data.id,
+                name: data.name || docName || 'Document',
+                document_type: data.document_type || 'Standard',
+                status: data.status || 'Draft',
+                tech_applicability: '',
+                created_at: data.created_at,
+                updated_at: data.updated_at,
+                source_table: 'phase_assigned_document_template',
+              } as CompanyDocument);
+            }
+          } catch { /* ignore */ }
+        })();
+        e.preventDefault();
+      }
+    };
+    window.addEventListener('xyreg:openDocumentDraft', handler as EventListener);
+    return () => window.removeEventListener('xyreg:openDocumentDraft', handler as EventListener);
+  }, [documents, openDraft]);
+
+  // Deep-link: auto-open drawer when `n`/`docId` param is present
+  useEffect(() => {
+    const docId = searchParams.get('n') || searchParams.get('docId');
+    if (!docId) return;
+    // If the same doc is already open, nothing to do — just clean the URL.
+    if (draftDrawerDocument && draftDrawerDocument.id === docId) {
+      setSearchParams(prev => {
+        const newParams = new URLSearchParams(prev);
+        newParams.delete('n');
+        newParams.delete('docId');
+        return newParams;
+      }, { replace: true });
+      return;
+    }
 
     // Wait for documents to load
     if (isLoading) return;
 
     const targetDoc = documents.find(d => d.id === docId);
     if (targetDoc) {
-      setDraftDrawerDocument(targetDoc);
+      openDraft(targetDoc);
       setSearchParams(prev => {
         const newParams = new URLSearchParams(prev);
+        newParams.delete('n');
         newParams.delete('docId');
         return newParams;
       }, { replace: true });
@@ -276,7 +382,7 @@ export function CompanyDocumentManager({ companyId, disabled = false }: CompanyD
             .eq('id', docId)
             .maybeSingle();
           if (!error && data) {
-            setDraftDrawerDocument({
+            openDraft({
               id: data.id,
               name: data.name || 'Document',
               document_type: data.document_type || 'Standard',
@@ -290,6 +396,7 @@ export function CompanyDocumentManager({ companyId, disabled = false }: CompanyD
         } catch { /* ignore */ }
         setSearchParams(prev => {
           const newParams = new URLSearchParams(prev);
+          newParams.delete('n');
           newParams.delete('docId');
           return newParams;
         }, { replace: true });
@@ -680,6 +787,7 @@ export function CompanyDocumentManager({ companyId, disabled = false }: CompanyD
           product_id: null,
           language_code: code,
           source_document_id: sourceCiId,
+          translation_synced_at: new Date().toISOString(),
           description: `Translation (${code}) of ${document.name}. The English master is the authoritative version.`,
         })
         .select('id')
@@ -758,8 +866,8 @@ export function CompanyDocumentManager({ companyId, disabled = false }: CompanyD
   };
 
   const handleCreateInStudio = useCallback((doc: CompanyDocument) => {
-    setDraftDrawerDocument(doc);
-  }, []);
+    openDraft(doc);
+  }, [openDraft]);
 
   const handleStatusChange = (documentId: string, status: string) => {
     updateDocumentStatus(documentId, status);
@@ -1523,6 +1631,7 @@ export function CompanyDocumentManager({ companyId, disabled = false }: CompanyD
         onOpenChange={(open) => {
           if (!open) {
             setDraftDrawerDocument(null);
+            setOpenDraftStack([]);
             refetch();
           }
         }}
@@ -1531,10 +1640,14 @@ export function CompanyDocumentManager({ companyId, disabled = false }: CompanyD
         documentType={draftDrawerDocument?.document_type || ''}
         companyId={companyId}
         onDocumentSaved={() => {
-          setDraftDrawerDocument(null);
+          // Keep tabs open after save so user can keep navigating
           refetch();
         }}
         disableSopMentions
+        tabs={openDraftStack.map(d => ({ id: d.id, name: d.name }))}
+        activeTabId={draftDrawerDocument?.id}
+        onSelectTab={selectDraftTab}
+        onCloseTab={closeDraftTab}
       />
 
       <AlertDialog open={showRefreshConfirm} onOpenChange={setShowRefreshConfirm}>

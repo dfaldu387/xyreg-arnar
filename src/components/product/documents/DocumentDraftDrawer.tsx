@@ -28,6 +28,7 @@ import { useReviewerGroups } from '@/hooks/useReviewerGroups';
 import { useDocumentReviewAssignments } from '@/hooks/useDocumentReviewAssignments';
 import { useDocumentAuthors } from '@/hooks/useDocumentAuthors';
 import { LoadingSpinner } from '@/components/ui/loading-spinner';
+import { TranslationStaleBanner } from '@/components/documents/TranslationStaleBanner';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -89,6 +90,11 @@ interface DocumentDraftDrawerProps {
   onDocumentCreated?: (docId: string, docName: string, docType: string) => void;
   /** When true, disables SOP @-mention suggestions in the AI chat (e.g. for QMS Document Control > Documents tab). */
   disableSopMentions?: boolean;
+  /** Optional tab strip rendered at the very top of the drawer when multiple drafts are open. */
+  tabs?: { id: string; name: string }[];
+  activeTabId?: string;
+  onSelectTab?: (id: string) => void;
+  onCloseTab?: (id: string) => void;
 }
 
 export function DocumentDraftDrawer({
@@ -108,6 +114,10 @@ export function DocumentDraftDrawer({
   isNewUnsavedDocument,
   onDocumentCreated,
   disableSopMentions = false,
+  tabs,
+  activeTabId,
+  onSelectTab,
+  onCloseTab,
 }: DocumentDraftDrawerProps) {
   const [template, setTemplate] = useState<DocumentTemplate | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -1091,6 +1101,74 @@ export function DocumentDraftDrawer({
       onClose={() => onOpenChange(false)}
       defaultWidthPercent={97}
     >
+      {tabs && tabs.length > 1 && (
+        <Box
+          sx={{
+            display: 'flex',
+            alignItems: 'stretch',
+            gap: 0.5,
+            px: 2,
+            pt: 1,
+            pb: 0,
+            borderBottom: '1px solid',
+            borderColor: 'divider',
+            backgroundColor: 'hsl(var(--muted) / 0.4)',
+            overflowX: 'auto',
+            flexShrink: 0,
+          }}
+        >
+          {tabs.map(t => {
+            const { prefix, title } = splitDocPrefix(t.name);
+            const isActive = t.id === activeTabId;
+            const shortTitle = title.length > 24 ? title.slice(0, 22) + '…' : title;
+            return (
+              <Tooltip key={t.id} title={t.name} arrow>
+                <Box
+                  onClick={() => !isActive && onSelectTab?.(t.id)}
+                  sx={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 0.75,
+                    px: 1.25,
+                    py: 0.75,
+                    cursor: isActive ? 'default' : 'pointer',
+                    borderTopLeftRadius: 6,
+                    borderTopRightRadius: 6,
+                    border: '1px solid',
+                    borderColor: isActive ? 'hsl(var(--primary))' : 'transparent',
+                    borderBottom: 'none',
+                    backgroundColor: isActive ? 'hsl(var(--background))' : 'transparent',
+                    color: isActive ? 'hsl(var(--foreground))' : 'hsl(var(--muted-foreground))',
+                    fontSize: '0.8rem',
+                    lineHeight: 1.2,
+                    maxWidth: 280,
+                    whiteSpace: 'nowrap',
+                    '&:hover': {
+                      backgroundColor: isActive ? 'hsl(var(--background))' : 'hsl(var(--muted) / 0.7)',
+                    },
+                  }}
+                >
+                  {prefix && (
+                    <span style={{ fontWeight: 600 }}>{prefix}</span>
+                  )}
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{shortTitle}</span>
+                  <IconButton
+                    size="small"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onCloseTab?.(t.id);
+                    }}
+                    sx={{ p: 0.25, ml: 0.25 }}
+                    aria-label={`Close ${t.name}`}
+                  >
+                    <CloseIcon sx={{ fontSize: 14 }} />
+                  </IconButton>
+                </Box>
+              </Tooltip>
+            );
+          })}
+        </Box>
+      )}
       {/* Header */}
       <Box
         sx={{
@@ -1174,17 +1252,6 @@ export function DocumentDraftDrawer({
               </IconButton>
             </Tooltip>
           )}
-          {companyId && (
-            <Tooltip title="Send for Review" arrow>
-              <IconButton
-                onClick={() => setShowSendForReview(true)}
-                size="small"
-                sx={{ color: '#1976d2', border: '1px solid #1976d2', borderRadius: '6px', '&:hover': { backgroundColor: 'rgba(25, 118, 210, 0.08)' } }}
-              >
-                <Send style={{ width: 16, height: 16 }} />
-              </IconButton>
-            </Tooltip>
-          )}
           {resolvedCompanyId && (
             <Tooltip title="View in Document Control" arrow>
               <IconButton
@@ -1217,6 +1284,10 @@ export function DocumentDraftDrawer({
           </IconButton>
         </Box>
       </Box>
+
+      {/* Translation staleness banner — only renders when this CI is a translation
+          whose English master has been updated since the last sync. */}
+      <TranslationStaleBanner documentCiId={normalizedDocId} />
 
       {/* Document Lifecycle Stepper */}
       {(() => {
@@ -2267,6 +2338,7 @@ export function DocumentDraftDrawer({
                   hideVersioning
                   onIsRecordChange={setIsRecord}
                   disableSopMentions={disableSopMentions}
+                  documentPhase={activeView}
                   showSectionNumbers={showSectionNumbers}
                   onShowSectionNumbersChange={(show) => {
                     setShowSectionNumbers(show);

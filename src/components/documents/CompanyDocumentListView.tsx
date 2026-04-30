@@ -27,6 +27,8 @@ import { useNavigate } from "react-router-dom";
 import { useCompanyRole } from "@/context/CompanyRoleContext";
 import { formatSopDisplayId, formatSopDisplayName, getSopTier, compareSopDocuments } from '@/constants/sopAutoSeedTiers';
 import { TierBadge } from './TierBadge';
+import { useTranslationStaleness } from '@/hooks/useTranslationStaleness';
+import { AlertTriangle } from 'lucide-react';
 
 // URL param keys for table state
 const TABLE_URL_PARAMS = {
@@ -177,6 +179,7 @@ export function CompanyDocumentListView({
   const { formatDate } = useCompanyDateFormat(companyId);
   const navigate = useNavigate();
   const { activeCompanyRole } = useCompanyRole();
+  const stalenessMap = useTranslationStaleness(documents as any);
 
   // Helper to update URL params
   const updateUrlParams = React.useCallback((updates: Record<string, string | null>) => {
@@ -322,6 +325,9 @@ export function CompanyDocumentListView({
         const doc = row.original;
         const docNumber = doc.document_number;
         const langCode = (doc as any).language_code as string | null | undefined;
+        const staleEntry = stalenessMap[doc.id];
+        const isStale = staleEntry?.isStale ?? false;
+        const sourceUpdatedAt = staleEntry?.sourceUpdatedAt;
         // Strip the document number prefix from the name if it already starts with it
         let cleanName = doc.name;
         if (docNumber && cleanName.startsWith(docNumber)) {
@@ -354,6 +360,26 @@ export function CompanyDocumentListView({
                     >
                       {langCode}
                     </Badge>
+                  )}
+                  {isStale && (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Badge
+                          variant="outline"
+                          className="ml-1.5 text-[10px] bg-amber-50 text-amber-800 border-amber-300 inline-flex items-center gap-1"
+                        >
+                          <AlertTriangle className="h-3 w-3" />
+                          Out of date
+                        </Badge>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        <span className="text-sm">
+                          The English master was updated
+                          {sourceUpdatedAt ? ` on ${formatDate(sourceUpdatedAt)}` : ''}.
+                          Re-translate to sync.
+                        </span>
+                      </TooltipContent>
+                    </Tooltip>
                   )}
                 </span>
               </TooltipTrigger>
@@ -767,7 +793,7 @@ export function CompanyDocumentListView({
         );
       },
     },
-  ], [onView, onEdit, onDelete, onCopy, onTranslate, isDeleting, disabled, getAuthorById, authorsLoading, formatDate, navigate, activeCompanyRole, bulkMode, bulkSelectedDocs, onToggleBulkDoc, companyId, pdfLoadingDocId]);
+  ], [onView, onEdit, onDelete, onCopy, onTranslate, isDeleting, disabled, getAuthorById, authorsLoading, formatDate, navigate, activeCompanyRole, bulkMode, bulkSelectedDocs, onToggleBulkDoc, companyId, pdfLoadingDocId, stalenessMap, onCreateInStudio]);
 
   const table = useReactTable({
     data: documents,

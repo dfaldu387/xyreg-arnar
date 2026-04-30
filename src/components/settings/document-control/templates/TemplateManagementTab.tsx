@@ -191,9 +191,13 @@ export function TemplateManagementTab({ companyId, onOpenAiTemplateDialog, onOpe
     return new Map();
   };
 
-  const handleUseTemplate = async (template: any) => {
+  const handleUseTemplate = async (
+    template: any,
+  ): Promise<{ ok: boolean; sopKey: string | null; reason?: string }> => {
     const sopKey = parseSopNumber(template.name) || extractSopKey(template.name);
-    if (!sopKey || !companyId || !companyName) return;
+    if (!sopKey || !companyId || !companyName) {
+      return { ok: false, sopKey: null, reason: 'missing-context' };
+    }
     try {
       setSeedingSop(sopKey);
       const result = await seedSingleSopForCompany(companyId, companyName, sopKey);
@@ -202,19 +206,24 @@ export function TemplateManagementTab({ companyId, onOpenAiTemplateDialog, onOpe
           title: lang('common.success'),
           description: `${sopKey} draft created and personalized for ${companyName}.`,
         });
+        await loadDraftNames();
+        return { ok: true, sopKey };
       } else if (result.skipped > 0) {
         toast({
           title: 'Already exists',
           description: `${sopKey} is already provisioned for this company.`,
         });
+        await loadDraftNames();
+        return { ok: true, sopKey };
       } else {
         toast({
           title: lang('common.error'),
           description: result.errors[0] ?? 'Failed to seed SOP.',
           variant: 'destructive',
         });
+        await loadDraftNames();
+        return { ok: false, sopKey, reason: result.errors[0] ?? 'seed-failed' };
       }
-      await loadDraftNames();
     } catch (e) {
       console.error('Use Template failed:', e);
       toast({
@@ -222,6 +231,7 @@ export function TemplateManagementTab({ companyId, onOpenAiTemplateDialog, onOpe
         description: e instanceof Error ? e.message : 'Failed to seed SOP.',
         variant: 'destructive',
       });
+      return { ok: false, sopKey, reason: e instanceof Error ? e.message : 'exception' };
     } finally {
       setSeedingSop(null);
     }
@@ -373,6 +383,23 @@ export function TemplateManagementTab({ companyId, onOpenAiTemplateDialog, onOpe
           openDraftInDrawer(data as DraftTemplateSummary, 'SOP');
           return;
         }
+
+        // Fallback: a draft may exist under a sub-prefixed name variant
+        // (e.g. "SOP-MF-018 …" instead of canonical "SOP-018 …"). Match by
+        // the canonical document_number stored in metadata.
+        const { data: byNumber, error: byNumberError } = await supabase
+          .from('document_studio_templates')
+          .select('id, template_id, name, type, updated_at, metadata')
+          .eq('company_id', companyId)
+          .eq('metadata->>document_number', sopNumber)
+          .order('updated_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (byNumberError) throw byNumberError;
+        if (byNumber) {
+          openDraftInDrawer(byNumber as DraftTemplateSummary, 'SOP');
+          return;
+        }
       } else {
         const { data, error } = await supabase
           .from('document_studio_templates')
@@ -431,7 +458,12 @@ export function TemplateManagementTab({ companyId, onOpenAiTemplateDialog, onOpe
     const sopKey = parseSopNumber(template.name) || extractSopKey(template.name);
     const hasDraft = hasDraftForTemplate(template);
     if (!hasDraft) {
-      await handleUseTemplate(template);
+      const seedResult = await handleUseTemplate(template);
+      if (!seedResult.ok) {
+        // Toast already raised by handleUseTemplate. Bail out so we don't
+        // open the drawer onto a non-existent draft (silent failure).
+        return;
+      }
     }
     await openDrawerForTemplateName(getEffectiveTemplateName(template));
   };

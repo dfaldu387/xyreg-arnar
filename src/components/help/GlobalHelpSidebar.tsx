@@ -103,6 +103,14 @@ export function GlobalHelpSidebar({ open, onOpenChange, listenForGlobalEvents = 
         <SheetContent 
           side="right" 
           className="w-[90vw] sm:w-[900px] md:w-[1080px] p-0 flex flex-col text-base top-16 h-[calc(100vh-4rem)] z-40"
+          onPointerDownOutside={(e: any) => {
+            const t = e?.target as HTMLElement | null;
+            if (t?.closest?.('[data-help-toggle]')) e.preventDefault();
+          }}
+          onInteractOutside={(e: any) => {
+            const t = e?.target as HTMLElement | null;
+            if (t?.closest?.('[data-help-toggle]')) e.preventDefault();
+          }}
         >
           <ScrollArea className="flex-1">
             <HelpTopicDetailScreen topicId={detailScreen} onBack={handleBackFromDetail} />
@@ -117,6 +125,14 @@ export function GlobalHelpSidebar({ open, onOpenChange, listenForGlobalEvents = 
         <SheetContent 
           side="right" 
           className="w-[90vw] sm:w-[900px] md:w-[1080px] p-0 flex flex-col text-base top-16 h-[calc(100vh-4rem)] z-40"
+          onPointerDownOutside={(e: any) => {
+            const t = e?.target as HTMLElement | null;
+            if (t?.closest?.('[data-help-toggle]')) e.preventDefault();
+          }}
+          onInteractOutside={(e: any) => {
+            const t = e?.target as HTMLElement | null;
+            if (t?.closest?.('[data-help-toggle]')) e.preventDefault();
+          }}
         >
         <SheetHeader className="p-6 pb-4 border-b space-y-4">
           <SheetTitle className="flex items-center gap-2 text-xl">

@@ -15779,6 +15779,7 @@ export type Database = {
           sub_section: string | null
           tags: string[] | null
           tech_applicability: string | null
+          translation_synced_at: string | null
           updated_at: string | null
           uploaded_at: string | null
           uploaded_by: string | null
@@ -15844,6 +15845,7 @@ export type Database = {
           sub_section?: string | null
           tags?: string[] | null
           tech_applicability?: string | null
+          translation_synced_at?: string | null
           updated_at?: string | null
           uploaded_at?: string | null
           uploaded_by?: string | null
@@ -15909,6 +15911,7 @@ export type Database = {
           sub_section?: string | null
           tags?: string[] | null
           tech_applicability?: string | null
+          translation_synced_at?: string | null
           updated_at?: string | null
           uploaded_at?: string | null
           uploaded_by?: string | null

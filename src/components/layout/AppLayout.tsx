@@ -970,6 +970,7 @@ export default function AppLayout() {
                 className="relative hover:bg-muted transition-colors"
                 aria-label="Help & Documentation"
                 title="Help & Documentation"
+                data-help-toggle
               >
                 <BookOpen className="h-4 w-4" />
               </Button>

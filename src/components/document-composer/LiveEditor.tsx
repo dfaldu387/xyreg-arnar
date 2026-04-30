@@ -634,7 +634,7 @@ function mergeSectionsToHtml(sections: any[], companyName: string, numbered: boo
  */
 export function annotateDocumentReferences(
   html: string,
-  knownRefs: Map<string, { id: string; name: string }>,
+  knownRefs: Map<string, { id?: string; name: string; ambiguous?: boolean }>,
 ): string {
   if (!html) return html;
   const prefixGroup = REFERENCE_PREFIXES.join('|');
@@ -644,9 +644,42 @@ export function annotateDocumentReferences(
   // whole sentences). Sub-prefix is constrained to 2–4 uppercase letters to
   // avoid greedy matches against neighbouring words.
   const re = new RegExp(
-    `\\b(${prefixGroup})(?:-([A-Z]{2,4}))?-(\\d{2,4})(?:\\s*[:\\-]?\\s*([A-Z][^<\\n,;]{0,80}?))?(?=$|[\\s<,;.)\\]])`,
+    // Title capture is greedy across normal title chars (Word characters,
+    // spaces, ampersands, slashes, hyphens) and stops at punctuation/tag
+    // boundaries so the WHOLE title becomes part of the chip — not just the
+    // first word. Capped at 80 chars to avoid runaway matches.
+    `\\b(${prefixGroup})(?:-([A-Z]{2,4}))?-(\\d{2,4})(?:\\s*[:\\-]?\\s*([A-Z][\\w][\\w &/\\-]{0,78}))?(?=$|[<\\n,;.)\\]])`,
     'g',
   );
+  const renderReferenceChip = (refCode: string, title: string) => {
+    const legacyCode = refCode.replace(/^([A-Z]{2,5})-[A-Z]{2,4}-(\d{2,4})$/i, '$1-$2');
+    const display = title ? `${refCode} ${title}` : refCode;
+    const known =
+      knownRefs.get(refCode.toLowerCase()) ||
+      (legacyCode !== refCode ? knownRefs.get(legacyCode.toLowerCase()) : undefined) ||
+      (title ? knownRefs.get(`${refCode} ${title}`.toLowerCase()) : undefined);
+    const titleAttr = title.replace(/"/g, '&quot;');
+    if (known) {
+      return `<span data-doc-ref data-state="linked" data-id="${known.id}" data-ref-code="${refCode}" data-ref-title="${titleAttr}" class="xyreg-doc-ref" contenteditable="false">${display}</span>`;
+    }
+    return `<span data-doc-ref data-state="missing" data-ref-code="${refCode}" data-ref-title="${titleAttr}" class="xyreg-doc-ref" contenteditable="false">${display}</span>`;
+  };
+
+  // Re-resolve already-rendered chips too. Without this, a reference that was
+  // once saved as `data-state="missing"` stays stuck forever because the text
+  // pass below intentionally skips content inside tags.
+  html = html.replace(/<span\b([^>]*\bdata-doc-ref\b[^>]*)>([^<]*)<\/span>/gi, (_match, attrs, text) => {
+    const attr = (name: string) => attrs.match(new RegExp(`${name}="([^"]*)"`, 'i'))?.[1] || '';
+    const refCode = attr('data-ref-code').trim();
+    const refTitle = attr('data-ref-title').replace(/&quot;/g, '"').trim();
+    const chipText = String(text || '').replace(/&quot;/g, '"').trim();
+    if (refCode) return renderReferenceChip(refCode, refTitle);
+
+    const parsed = chipText.match(new RegExp(`^(${prefixGroup})(?:-([A-Z]{2,4}))?-(\\d{2,4})(?:\\s+(.+))?$`, 'i'));
+    if (!parsed) return _match;
+    const [, prefix, sub, num, tail] = parsed;
+    return renderReferenceChip(sub ? `${prefix}-${sub}-${num}` : `${prefix}-${num}`, (tail || '').trim());
+  });
 
   // Skip text inside tags (between < and >) and inside known chip/anchor wrappers.
   // Simple state machine: walk the string, keep depth of opened tags, and only
@@ -654,28 +687,42 @@ export function annotateDocumentReferences(
   let out = '';
   let i = 0;
   const len = html.length;
+  // Range expander: turn `SOP-DE-005 through SOP-DE-011` (or `– / — / to / -`)
+  // into the explicit comma-separated list before the chip regex runs, so each
+  // document becomes an individually clickable chip. Only expands when both
+  // ends share the same prefix (incl. functional sub-prefix) and the range is
+  // sane (≤ 50 entries, end ≥ start).
+  const rangeRe = new RegExp(
+    `\\b(${prefixGroup})(?:-([A-Z]{2,4}))?-(\\d{2,4})\\s*(?:through|thru|to|–|—|-)\\s*(${prefixGroup})(?:-([A-Z]{2,4}))?-(\\d{2,4})\\b`,
+    'gi',
+  );
+  const expandRanges = (chunk: string) =>
+    chunk.replace(rangeRe, (match, p1, s1, n1, p2, s2, n2) => {
+      if (p1.toUpperCase() !== p2.toUpperCase()) return match;
+      if ((s1 || '').toUpperCase() !== (s2 || '').toUpperCase()) return match;
+      const startNum = parseInt(n1, 10);
+      const endNum = parseInt(n2, 10);
+      if (!Number.isFinite(startNum) || !Number.isFinite(endNum)) return match;
+      if (endNum <= startNum || endNum - startNum > 49) return match;
+      const pad = Math.max(n1.length, n2.length);
+      const codes: string[] = [];
+      for (let k = startNum; k <= endNum; k++) {
+        const numStr = String(k).padStart(pad, '0');
+        codes.push(s1 ? `${p1}-${s1}-${numStr}` : `${p1}-${numStr}`);
+      }
+      return codes.join(', ');
+    });
   while (i < len) {
     const lt = html.indexOf('<', i);
-    const textChunk = lt === -1 ? html.slice(i) : html.slice(i, lt);
+    const rawChunk = lt === -1 ? html.slice(i) : html.slice(i, lt);
+    const textChunk = expandRanges(rawChunk);
     // Substitute references in this text segment.
     out += textChunk.replace(re, (_m, prefix, sub, num, tail) => {
       const refCode = sub
         ? `${prefix}-${sub}-${num}`
         : `${prefix}-${num}`;
-      // Two-part fallback used to look up legacy chips in `knownRefs`.
-      const legacyCode = `${prefix}-${num}`;
       const title = (tail || '').trim();
-      const display = title ? `${refCode} ${title}` : refCode;
-      const known =
-        knownRefs.get(refCode.toLowerCase()) ||
-        (sub ? knownRefs.get(legacyCode.toLowerCase()) : undefined) ||
-        (title ? knownRefs.get(`${refCode} ${title}`.toLowerCase()) : undefined);
-      const titleAttr = title.replace(/"/g, '&quot;');
-      if (known) {
-        // Linked → blue chip; existing delegated click handler opens the doc.
-        return `<span data-doc-ref data-state="linked" data-id="${known.id}" data-ref-code="${refCode}" data-ref-title="${titleAttr}" class="xyreg-doc-ref" contenteditable="false">${display}</span>`;
-      }
-      return `<span data-doc-ref data-state="missing" data-ref-code="${refCode}" data-ref-title="${titleAttr}" class="xyreg-doc-ref" contenteditable="false">${display}</span>`;
+      return renderReferenceChip(refCode, title);
     });
     if (lt === -1) break;
     // Copy the tag verbatim until matching '>'.
@@ -950,9 +997,12 @@ interface LiveEditorProps {
   /** Notify parent when classification toggles in the Configure panel, so SOPDocumentHeader re-renders. */
   onIsRecordChange?: (isRecord: boolean) => void;
   disableSopMentions?: boolean;
+  /** Document workflow phase. When not 'draft', AI proposed-change actions
+   * (Accept/Reject/Replace) are hidden — content is locked for review/approval. */
+  documentPhase?: 'draft' | 'review' | 'completed';
 }
 
-export function LiveEditor({ template, className = '', onContentUpdate, companyId, onDocumentSaved, isEditingExistingDocument = false, editingDocumentId = null, docxSourceDocumentId = null, onAIGenerate, onAddAutoNote, currentNotes = [], isUploadedDocument = false, uploadedDocumentSaved = false, onUploadedDocumentSaved, disabled = false, selectedScope = 'company', selectedProductId, uploadedFileInfo, onDocumentControlChange, companyLogoUrl, onPushToDeviceFields, onCustomSave, isRecord = false, recordId, nextReviewDate, documentNumber, changeControlRef, hideVersioning = false, isEditing: isEditingProp, showSectionNumbers = false, onShowSectionNumbersChange, onIsRecordChange , disableSopMentions = false }: LiveEditorProps) {
+export function LiveEditor({ template, className = '', onContentUpdate, companyId, onDocumentSaved, isEditingExistingDocument = false, editingDocumentId = null, docxSourceDocumentId = null, onAIGenerate, onAddAutoNote, currentNotes = [], isUploadedDocument = false, uploadedDocumentSaved = false, onUploadedDocumentSaved, disabled = false, selectedScope = 'company', selectedProductId, uploadedFileInfo, onDocumentControlChange, companyLogoUrl, onPushToDeviceFields, onCustomSave, isRecord = false, recordId, nextReviewDate, documentNumber, changeControlRef, hideVersioning = false, isEditing: isEditingProp, showSectionNumbers = false, onShowSectionNumbersChange, onIsRecordChange , disableSopMentions = false, documentPhase = 'draft' }: LiveEditorProps) {
   const { activeCompanyRole } = useCompanyRole();
   const aiAutoFillEnabled = useCustomerFeatureFlag('ai-auto-fill');
   const aiInlineSuggestionsEnabled = useCustomerFeatureFlag('ai-inline-suggestions');
@@ -1058,19 +1108,56 @@ export function LiveEditor({ template, className = '', onContentUpdate, companyI
   // Merge all sections into a single HTML string for the unified editor
   const companyName = activeCompanyRole?.companyName || '';
   // We need the company-document mention list to resolve "SOP-008"-style refs
-  // to existing rows. The hook is also called below for the @mention popup;
-  // calling it twice is fine — both call sites get the same memoized result.
+  // to existing rows. This MUST stay enabled regardless of `disableSopMentions`,
+  // which only controls the @mention suggestion popup and the AI chat — not
+  // the reference-chip linking. Coupling the two caused existing references
+  // (e.g. "SOP-MF-020 Labeling") to be rendered as "missing" and trigger the
+  // create-reference dialog even when the document already exists.
   const refDocItems = useCompanyDocumentMentions(
     companyId || activeCompanyRole?.companyId,
-    !disableSopMentions,
+    true,
   );
   const knownRefs = useMemo(() => {
-    const m = new Map<string, { id: string; name: string }>();
+    const m = new Map<string, { id?: string; name: string; ambiguous?: boolean }>();
+    // Capture both legacy two-part (SOP-019) and three-part functional
+    // sub-prefix (SOP-DE-019) formats. The optional middle group must be
+    // 2–4 uppercase letters to mirror the chip-side regex above.
+    const refRe = /\b([A-Z]{2,5}(?:-[A-Z]{2,4})?-\d{2,4})\b/;
+    const addKey = (raw: string | undefined, id: string, name: string) => {
+      if (!raw) return;
+      const code = raw.trim().toUpperCase();
+      const key = code.toLowerCase();
+      const existing = m.get(key);
+      if (!existing) {
+        m.set(key, { id, name, ambiguous: false });
+      } else if (existing.id && existing.id !== id) {
+        m.set(key, { name: existing.name, ambiguous: true });
+      }
+      // Also index the two-part legacy fallback (SOP-DE-019 → SOP-019) so
+      // older references in existing content still resolve.
+      const parts = code.split('-');
+      if (parts.length === 3) {
+        const legacyKey = `${parts[0]}-${parts[2]}`.toLowerCase();
+        const existingLegacy = m.get(legacyKey);
+        if (!existingLegacy) {
+          m.set(legacyKey, { id, name, ambiguous: false });
+        } else if (existingLegacy.id && existingLegacy.id !== id) {
+          m.set(legacyKey, { name: existingLegacy.name, ambiguous: true });
+        }
+      }
+    };
     for (const it of refDocItems) {
-      const ref = (it as any).hint?.match?.(/\b([A-Z]{2,5}-\d{2,4})\b/)?.[1]
-        || it.label?.match?.(/\b([A-Z]{2,5}-\d{2,4})\b/)?.[1];
-      if (ref) m.set(ref.toLowerCase(), { id: it.id, name: it.name });
-      if (it.label) m.set(it.label.toLowerCase(), { id: it.id, name: it.name });
+      // Prefer the SSOT regulatory id when available, then fall back to
+      // regex-extracting from hint/label.
+      const fromMeta = (it as any).document_number || (it as any).document_reference;
+      const fromHint = (it as any).hint?.match?.(refRe)?.[1];
+      const fromLabel = it.label?.match?.(refRe)?.[1];
+      addKey(fromMeta, it.id, it.name);
+      addKey(fromHint, it.id, it.name);
+      addKey(fromLabel, it.id, it.name);
+      if (it.label && !m.has(it.label.toLowerCase())) {
+        m.set(it.label.toLowerCase(), { id: it.id, name: it.name, ambiguous: false });
+      }
     }
     return m;
   }, [refDocItems]);
@@ -1403,14 +1490,56 @@ export function LiveEditor({ template, className = '', onContentUpdate, companyI
   const linkHoverElementRef = useRef<HTMLAnchorElement | null>(null);
   const navigate = useNavigate();
 
-  const navigateToDoc = useCallback(
-    (docName: string) => {
+  const buildDocUrl = useCallback(
+    (docName: string, docId?: string) => {
       const cName = companyName || activeCompanyRole?.companyName;
-      if (!cName) return;
-      navigate(`/app/company/${encodeURIComponent(cName)}/documents?filter=${encodeURIComponent(docName)}`);
+      if (!cName) return null;
+      const qs = docId
+        ? `n=${encodeURIComponent(docId)}`
+        : `q=${encodeURIComponent(docName)}`;
+      return `/app/company/${encodeURIComponent(cName)}/documents?${qs}`;
     },
-    [navigate, companyName, activeCompanyRole?.companyName],
+    [companyName, activeCompanyRole?.companyName],
   );
+
+  const navigateToDoc = useCallback(
+    (docName: string, docId?: string) => {
+      // If a draft drawer is currently mounted on the page, prefer opening
+      // the referenced doc as a NEW TAB inside that drawer rather than
+      // mutating the URL (which gets swallowed once the drawer is open and
+      // can make 3rd+ tabs feel like "nothing happened"). The manager
+      // listens for this event and calls its own `openDraft` directly.
+      try {
+        if (typeof window !== 'undefined') {
+          const evt = new CustomEvent('xyreg:openDocumentDraft', {
+            detail: { docId, docName },
+            cancelable: true,
+          });
+          // dispatchEvent returns false only if a listener called
+          // preventDefault — we treat that as "handled, don't navigate".
+          const handled = !window.dispatchEvent(evt);
+          if (handled) return;
+        }
+      } catch { /* fall through to URL navigation */ }
+      const url = buildDocUrl(docName, docId);
+      if (!url) return;
+      navigate(url);
+    },
+    [buildDocUrl, navigate],
+  );
+
+  const parseInternalDocumentLink = useCallback((href: string) => {
+    try {
+      const parsed = new URL(href, window.location.origin);
+      if (!/\/app\/company\/[^/]+\/documents/i.test(parsed.pathname)) return null;
+      return {
+        docId: parsed.searchParams.get('n') || parsed.searchParams.get('docId') || undefined,
+        filter: parsed.searchParams.get('q') || parsed.searchParams.get('filter') || undefined,
+      };
+    } catch {
+      return null;
+    }
+  }, []);
 
   // ---------- Hyperlink insert / edit flow ----------
   const openLinkDialog = useCallback(() => {
@@ -1500,7 +1629,8 @@ export function LiveEditor({ template, className = '', onContentUpdate, companyI
     return () => dom.removeEventListener('keydown', handler);
   }, [unifiedEditor, openLinkDialog]);
 
-  // Open link in new tab on plain click (Google Docs behavior).
+  // External links open in a new tab. Internal document links stay inside the
+  // authenticated SPA so they don't bounce the user to the sandbox login page.
   useEffect(() => {
     const editorEl = editorContainerRef.current;
     if (!editorEl) return;
@@ -1509,14 +1639,43 @@ export function LiveEditor({ template, className = '', onContentUpdate, companyI
       if (!anchor) return;
       // Ignore doc-mention spans that happen to be wrapped elsewhere.
       if (anchor.closest('[data-doc-mention]')) return;
+      const href = anchor.getAttribute('href');
+      if (!href) return;
+      const internal = parseInternalDocumentLink(href);
       e.preventDefault();
       e.stopPropagation();
-      const href = anchor.getAttribute('href');
-      if (href) window.open(href, '_blank', 'noopener,noreferrer');
+      if (internal) {
+        navigateToDoc(internal.filter || (anchor.textContent || '').trim(), internal.docId || undefined);
+        return;
+      }
+      // Before treating the href as an external URL, try to resolve a doc
+      // reference code from the visible text (e.g. "SOP-QA-001 Quality
+      // Management System"). AI-generated content often emits hrefs like
+      // `#sop-qa-001` or even raw text that browsers can't navigate to —
+      // resolving from the displayed code keeps these links working.
+      const text = (anchor.textContent || '').trim();
+      const refMatch = text.match(/\b([A-Z]{2,5}(?:-[A-Z]{2,4})?-\d{2,4})\b/);
+      const refCode = refMatch?.[1] || '';
+      if (refCode) {
+        const known =
+          knownRefs.get(refCode.toLowerCase()) ||
+          knownRefs.get(refCode.replace(/^([A-Z]{2,5})-[A-Z]{2,4}-(\d{2,4})$/i, '$1-$2').toLowerCase());
+        if (known) {
+          navigateToDoc(refCode, known.ambiguous ? undefined : known.id);
+          return;
+        }
+        // Reference code present but no matching doc — search for it.
+        navigateToDoc(refCode);
+        return;
+      }
+      // Genuine external URL — open in a new tab.
+      if (/^https?:\/\//i.test(href) || /^mailto:/i.test(href)) {
+        window.open(href, '_blank', 'noopener,noreferrer');
+      }
     };
     editorEl.addEventListener('click', handler);
     return () => editorEl.removeEventListener('click', handler);
-  }, []);
+  }, [navigateToDoc, parseInternalDocumentLink, knownRefs]);
 
   // Map docId → owner name. `useCompanyUsers` already fetched company teammates.
   const companyOwnerName = useMemo(() => {
@@ -1637,8 +1796,45 @@ export function LiveEditor({ template, className = '', onContentUpdate, companyI
       if (linked) {
         e.preventDefault();
         e.stopPropagation();
-        navigateToDoc(linked.textContent || '');
+        // Prefer the resolved doc id captured at chip-render time so we open
+        // the exact row that satisfied the reference, not a name-match guess.
+        const id = linked.getAttribute('data-id') || '';
+        const refCode = linked.getAttribute('data-ref-code') || '';
+        navigateToDoc(refCode || linked.textContent || '', id || undefined);
         return;
+      }
+      // Plain <a> anchors that round-tripped without becoming chips. The
+      // browser ignores anchor clicks inside contenteditable, so we manually
+      // route them. Two cases:
+      //   1. href points at our own /documents route → re-route through
+      //      navigateToDoc so it opens in a new tab with the right param.
+      //   2. href is empty / "#" but the visible text matches a known
+      //      reference code → resolve via knownRefs and open that doc.
+      const anchor = (e.target as HTMLElement | null)?.closest?.('a[href]') as HTMLAnchorElement | null;
+      if (anchor) {
+        const href = anchor.getAttribute('href') || '';
+        const text = (anchor.textContent || '').trim();
+        // Try to match a reference code in the visible text (e.g. "SOP-QA-021 Complaints").
+        const refMatch = text.match(/\b([A-Z]{2,5}(?:-[A-Z]{2,4})?-\d{2,4})\b/);
+        const refCode = refMatch?.[1] || '';
+        const known = refCode
+          ? knownRefs.get(refCode.toLowerCase()) ||
+            knownRefs.get(refCode.replace(/^([A-Z]{2,5})-[A-Z]{2,4}-(\d{2,4})$/i, '$1-$2').toLowerCase())
+          : undefined;
+        const internal = parseInternalDocumentLink(href);
+        if (known || internal) {
+          e.preventDefault();
+          e.stopPropagation();
+          // Stop the sibling bubble-phase anchor handler (line ~1614) from
+          // also processing this click and double-navigating.
+          e.stopImmediatePropagation();
+          navigateToDoc(
+            refCode || internal?.filter || text,
+            known?.ambiguous ? undefined : known?.id || internal?.docId || undefined,
+          );
+          return;
+        }
+        // External link → let LinkHoverCard handle it; nothing to do here.
       }
       const target = (e.target as HTMLElement | null)?.closest?.('[data-doc-mention]') as HTMLElement | null;
       if (!target) return;
@@ -1648,16 +1844,43 @@ export function LiveEditor({ template, className = '', onContentUpdate, companyI
       navigateToDoc(docName);
     };
 
+    // Suppress ProseMirror's selection / bubble-menu when the click lands on a
+    // doc-reference chip or an internal-doc anchor. Without this, a click on
+    // `SOP-DE-011` only opens the floating Edit toolbar — the chip's own
+    // click handler never wins because PM has already preventDefault'd.
+    const handleMouseDownCapture = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (!target) return;
+      const chip = target.closest('[data-doc-ref]');
+      const anchor = target.closest('a[href]') as HTMLAnchorElement | null;
+      if (chip) {
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
+      if (anchor) {
+        const href = anchor.getAttribute('href') || '';
+        const text = (anchor.textContent || '').trim();
+        const looksLikeRef = /\b[A-Z]{2,5}(?:-[A-Z]{2,4})?-\d{2,4}\b/.test(text);
+        if (looksLikeRef || parseInternalDocumentLink(href)) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
+      }
+    };
+
     editorEl.addEventListener('mouseover', handleOver);
     editorEl.addEventListener('mouseout', handleOut);
-    editorEl.addEventListener('click', handleClick);
+    editorEl.addEventListener('mousedown', handleMouseDownCapture, true);
+    editorEl.addEventListener('click', handleClick, true);
     return () => {
       editorEl.removeEventListener('mouseover', handleOver);
       editorEl.removeEventListener('mouseout', handleOut);
-      editorEl.removeEventListener('click', handleClick);
+      editorEl.removeEventListener('mousedown', handleMouseDownCapture, true);
+      editorEl.removeEventListener('click', handleClick, true);
       clearTimer();
     };
-  }, [companyOwnerName, navigateToDoc, resolvePersonFromChip]);
+  }, [companyOwnerName, navigateToDoc, parseInternalDocumentLink, resolvePersonFromChip, knownRefs]);
 
   const cancelHoverClose = useCallback(() => {
     if (hoverCloseTimer.current) {
@@ -1857,16 +2080,14 @@ export function LiveEditor({ template, className = '', onContentUpdate, companyI
   // empty paragraph in the section, matching the pre-diff behavior.
   const handleApplyAIContent = useCallback((content: string, sectionName?: string, mode: 'insert' | 'replace' = 'insert') => {
     if (!unifiedEditor) return;
-    const html = content
-      .replace(/^### (.*$)/gm, '<h3>$1</h3>')
-      .replace(/^## (.*$)/gm, '<h2>$1</h2>')
-      .replace(/^# (.*$)/gm, '<h1>$1</h1>')
-      .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-      .replace(/\*(.*?)\*/g, '<em>$1</em>')
-      .replace(/^\s*[-*]\s+(.*$)/gm, '<li>$1</li>')
-      .replace(/(<li>[\s\S]*?<\/li>)/g, '<ul>$1</ul>')
-      .replace(/<\/ul>\s*<ul>/g, '')
-      .replace(/^\s*\d+\.\s+(.*$)/gm, '<li>$1</li>');
+    // Use the shared markdown→HTML converter, which wraps each block in <p>.
+    // Without paragraph wrapping, plain text inserted at a position adjacent
+    // to a section H2 inherits the heading's block type and renders the body
+    // text as bold/H2 heading text.
+    let html = markdownToHtml(content);
+    if (html && !/^\s*<(p|ul|ol|h[1-6]|table|blockquote|pre|div)\b/i.test(html)) {
+      html = `<p>${html}</p>`;
+    }
 
     const editorEl = editorContainerRef.current;
     if (editorEl && sectionName && mode === 'replace') {
@@ -1976,13 +2197,12 @@ export function LiveEditor({ template, className = '', onContentUpdate, companyI
     }
   }, [template?.id, template?.sections, companyName, unifiedEditor, showSectionNumbers, knownRefs]);
 
-  // One-shot re-annotation pass: if a draft was saved before reference chips
-  // existed, its stored HTML is plain text. Once the editor has hydrated and
-  // knownRefs is resolved, scan the current HTML for `PREFIX-NNN` patterns
-  // and upgrade them to chips in-place — no re-typing required.
-  const refAnnotationDoneRef = useRef(false);
+  // Re-annotation pass: if a draft was saved before reference chips existed,
+  // its stored HTML is plain text. Re-run when `knownRefs` changes so chips
+  // that were initially marked missing can upgrade to linked once lookup data
+  // arrives.
   useEffect(() => {
-    if (!unifiedEditor || refAnnotationDoneRef.current) return;
+    if (!unifiedEditor) return;
     if (!editorInitializedRef.current) return;
     try {
       const currentHtml = unifiedEditor.getHTML();
@@ -1992,9 +2212,8 @@ export function LiveEditor({ template, className = '', onContentUpdate, companyI
         unifiedEditor.commands.setContent(annotated);
         setTimeout(() => { programmaticUpdateRef.current = false; }, 0);
       }
-      refAnnotationDoneRef.current = true;
     } catch (err) {
-      console.warn('[LiveEditor] one-shot ref-annotation failed', err);
+      console.warn('[LiveEditor] ref-annotation failed', err);
     }
   }, [unifiedEditor, knownRefs, refreshTrigger]);
 
@@ -3320,6 +3539,7 @@ export function LiveEditor({ template, className = '', onContentUpdate, companyI
             onApplyContent={handleApplyAIContent}
             onClose={() => setRightPanelOpen(false)}
             disableSopMentions={disableSopMentions}
+            documentPhase={documentPhase}
           />
         )}
 
@@ -3376,6 +3596,7 @@ export function LiveEditor({ template, className = '', onContentUpdate, companyI
                     onClose={() => setNarrowRightOpen(false)}
                     className="w-full border-l-0"
                     disableSopMentions={disableSopMentions}
+                    documentPhase={documentPhase}
                   />
                 </div>
               </div>

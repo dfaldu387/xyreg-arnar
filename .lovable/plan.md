@@ -1,57 +1,44 @@
-## Why seeding "isn't working"
+## Goal
+Three small UX fixes around the Help panel and the Edit Draft drawer.
 
-It actually is — but the UI lies. Here's what's happening for Actiweight Labs AS:
+## Todo
+- [ ] (a) Make the Help & Guide book icon a true toggle — open when closed, close when open.
+- [ ] (b) Constrain the Edit Draft drawer so it starts below the top app header (matching the Help & Guide sheet's `top-16` offset) instead of covering the full viewport height.
+- [ ] (c) Remove the paper-airplane "Send for Review" icon from the Edit Draft top header (it already exists on the Review & Approve step).
 
-1. The badge says **Foundation 27/28 → "Seed 1 missing"**.
-2. You click it → toast says **"All foundation SOPs already present"** and nothing is inserted.
-3. The badge stays at 27/28 forever, looking broken.
+## What I found
 
-### Root cause
+### a) Toggle race
+`AppLayout` already calls `setHelpSidebarOpen(v => !v)` on the book button. But the Sheet underneath calls `onOpenChange(false)` from its `onInteractOutside` handler the moment a click lands outside it (including on the book button). The order is:
+1. Sheet outside-click → `setHelpSidebarOpen(false)`
+2. Button onClick → `setHelpSidebarOpen(v => !v)` flips false → true
 
-The DB has all 28 Tier A SOPs. The 28th one (**SOP-004**) is a legacy row named `"Personnel and Training"` (no `SOP-004 ` prefix), with `document_number = 'SOP-004'`.
+Net result: open stays open. This is the classic Radix sheet/dialog "toggle button next to a non-modal sheet" race.
 
-Two pieces of code disagree on how to detect duplicates:
+Fix: in `SheetContent.onInteractOutside` (or directly in `GlobalHelpSidebar`), if the pointer-down target is inside an element marked as the help toggle, call `e.preventDefault()` so Radix doesn't close. The button's onClick then flips state cleanly.
 
-| Function | Matches by | Result for SOP-004 |
-|---|---|---|
-| `seedSopsForCompany` (the seeder) | `document_number` **OR** name | Found → skip |
-| `countTierASopsPresent` (the badge counter) | name only | Not found → counts as missing |
+### b) Drawer height vs help height
+`GlobalHelpSidebar` uses `top-16 h-[calc(100vh-4rem)]` so the app's top header stays visible.
 
-So the seeder correctly skips it, but the counter under-reports → badge stays red and never reconciles. Same bug exists in `countTierBSopsPresent`.
+`ResizableDrawer` (used by `DocumentDraftDrawer`) renders an MUI `Drawer` with default `top: 0` / full viewport height, so it overlays the top header and adds visual whitespace at the very top.
 
-The DB itself is fine. No data loss. Just a UI/counter bug.
+Fix: pass MUI `PaperProps.sx` so the drawer Paper is offset by the header height:
+- `top: '64px'` (matches `top-16`)
+- `height: 'calc(100vh - 64px)'`
+- and lower the modal/backdrop top similarly so the resize handle stays aligned.
 
-## Fix (one file, ~20 lines)
+### c) Redundant Send icon
+`DocumentDraftDrawer.tsx` lines 1255–1265 render a "Send for Review" `IconButton` (paper airplane) in the drawer top toolbar. The same action is the primary CTA of the Review & Approve step (line ~1587). Remove the toolbar icon.
 
-**`src/services/sopAutoSeedService.ts`** — make the two count functions use the same three-way match the seeder uses (document_number, full name, bare title):
+## Technical details
 
-```ts
-// Pseudocode for both countTierA / countTierB:
-const { data } = await supabase
-  .from('phase_assigned_document_template')
-  .select('name, document_number')
-  .eq('company_id', companyId)
-  .eq('document_type', 'SOP');
+Files:
+- `src/components/help/GlobalHelpSidebar.tsx` — add `onInteractOutside` / `onPointerDownOutside` that preventDefault when the click is on `[data-help-toggle]`.
+- `src/components/layout/AppLayout.tsx` — add `data-help-toggle` to the book-icon Button.
+- `src/components/ui/resizable-drawer.tsx` — add a `topOffset` (default 64px) and apply it to PaperProps and the resize handle, OR set it directly via `PaperProps.sx` for the document drawer.
+- `src/components/product/documents/DocumentDraftDrawer.tsx` — delete the Send-for-Review IconButton block and drop the unused `Send` import if no longer used elsewhere in the toolbar.
 
-const numbers = new Set((data ?? []).map(r => (r.document_number ?? '').toUpperCase().trim()).filter(Boolean));
-const names   = new Set((data ?? []).map(r => normalizeTitle(r.name ?? '')));
+Minimal-impact approach: keep `ResizableDrawer` API stable; add an optional `topOffsetPx` prop with default `64`. Drawer applies it via PaperProps + Modal sx.
 
-let count = 0;
-for (const entry of TIER_A_AUTO_SEED) {
-  const c = SOP_FULL_CONTENT[entry.sop];
-  if (!c) continue;
-  const num = c.sopNumber.toUpperCase().trim();
-  const full = normalizeTitle(`${c.sopNumber} ${c.title}`);
-  const bare = normalizeTitle(c.title);
-  if (numbers.has(num) || names.has(full) || names.has(bare)) count++;
-}
-```
-
-After this:
-- Actiweight Labs AS will correctly show **Foundation 28/28** (green, no "Seed missing" button).
-- Any other company with legacy bare-title SOPs (the second screenshot suggests there are several with `document_number = NULL` and just the canonical title) will also reconcile properly.
-
-## Out of scope (intentionally)
-
-- I am **not** renaming the legacy `"Personnel and Training"` row to add the `SOP-004` prefix, and **not** backfilling missing `document_number` values. Those are cosmetic data tweaks separate from the seeding bug. Happy to do them as a follow-up if you want consistent naming in the list.
-- No template content changes. SOP-QA-002 / Document Control template is untouched.
+## Review section
+After implementation I'll add a one-paragraph note covering what changed and how each item was verified.
