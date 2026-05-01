@@ -33,6 +33,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { format } from 'date-fns';
 import { useTranslation } from '@/hooks/useTranslation';
 import { AiAssistPopover } from '@/components/change-control/AiAssistPopover';
+import { CCRAuditLog } from '@/components/change-control/CCRAuditLog';
 
 // ---------------------------------------------------------------------------
 // Inline edit helpers (Draft-only)
@@ -907,6 +908,20 @@ export default function ChangeControlDetailPage() {
                     ))}
                   </div>
                 )}
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Clock className="h-5 w-5" />
+                  Audit log
+                </CardTitle>
+                <CardDescription>
+                  Every create, update, and delete on this CCR — captured automatically at the database level.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <CCRAuditLog ccrId={ccr.id} />
               </CardContent>
             </Card>
           </TabsContent>

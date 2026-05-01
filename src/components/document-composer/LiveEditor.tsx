@@ -1000,9 +1000,24 @@ interface LiveEditorProps {
   /** Document workflow phase. When not 'draft', AI proposed-change actions
    * (Accept/Reject/Replace) are hidden — content is locked for review/approval. */
   documentPhase?: 'draft' | 'review' | 'completed';
+  /** Optional: when provided, LiveEditor registers its header action handlers
+   * with the parent (e.g. DocumentDraftDrawer) so the parent can render the
+   * action icons in its own top header instead of LiveEditor's own row.
+   * Pass `null` later to clear. */
+  onRegisterHeaderActions?: (actions: {
+    aiAutoFillEnabled: boolean;
+    onOpenAutoFill: () => void;
+    onValidate: () => void;
+    onDownload: () => void;
+    onPushToDeviceFields?: () => void;
+    onShare: () => void;
+    onSaveVersion: () => void;
+    onShowVersions: () => void;
+    hideVersioning: boolean;
+  } | null) => void;
 }
 
-export function LiveEditor({ template, className = '', onContentUpdate, companyId, onDocumentSaved, isEditingExistingDocument = false, editingDocumentId = null, docxSourceDocumentId = null, onAIGenerate, onAddAutoNote, currentNotes = [], isUploadedDocument = false, uploadedDocumentSaved = false, onUploadedDocumentSaved, disabled = false, selectedScope = 'company', selectedProductId, uploadedFileInfo, onDocumentControlChange, companyLogoUrl, onPushToDeviceFields, onCustomSave, isRecord = false, recordId, nextReviewDate, documentNumber, changeControlRef, hideVersioning = false, isEditing: isEditingProp, showSectionNumbers = false, onShowSectionNumbersChange, onIsRecordChange , disableSopMentions = false, documentPhase = 'draft' }: LiveEditorProps) {
+export function LiveEditor({ template, className = '', onContentUpdate, companyId, onDocumentSaved, isEditingExistingDocument = false, editingDocumentId = null, docxSourceDocumentId = null, onAIGenerate, onAddAutoNote, currentNotes = [], isUploadedDocument = false, uploadedDocumentSaved = false, onUploadedDocumentSaved, disabled = false, selectedScope = 'company', selectedProductId, uploadedFileInfo, onDocumentControlChange, companyLogoUrl, onPushToDeviceFields, onCustomSave, isRecord = false, recordId, nextReviewDate, documentNumber, changeControlRef, hideVersioning = false, isEditing: isEditingProp, showSectionNumbers = false, onShowSectionNumbersChange, onIsRecordChange , disableSopMentions = false, documentPhase = 'draft', onRegisterHeaderActions }: LiveEditorProps) {
   const { activeCompanyRole } = useCompanyRole();
   const aiAutoFillEnabled = useCustomerFeatureFlag('ai-auto-fill');
   const aiInlineSuggestionsEnabled = useCustomerFeatureFlag('ai-inline-suggestions');
@@ -1066,11 +1081,13 @@ export function LiveEditor({ template, className = '', onContentUpdate, companyI
     typeof window !== 'undefined' ? window.innerWidth < 900 : false
   );
   const [narrowRightOpen, setNarrowRightOpen] = useState(false);
+  // Document Outline open/closed state persists across sessions so users
+  // returning to a document see the same layout they left.
   const [outlineCollapsed, setOutlineCollapsed] = useState<boolean>(() => {
-    try { return localStorage.getItem('xyreg.draft.leftRail.collapsed') === '1'; } catch { return false; }
+    try { return localStorage.getItem('xyreg.outline.collapsed') !== '0'; } catch { return true; }
   });
   useEffect(() => {
-    try { localStorage.setItem('xyreg.draft.leftRail.collapsed', outlineCollapsed ? '1' : '0'); } catch { /* ignore */ }
+    try { localStorage.setItem('xyreg.outline.collapsed', outlineCollapsed ? '1' : '0'); } catch { /* ignore */ }
   }, [outlineCollapsed]);
   const [narrowOutlineOpen, setNarrowOutlineOpen] = useState(false);
   const [rightPanelOpen, setRightPanelOpen] = useState<boolean>(() => {
@@ -2683,195 +2700,31 @@ export function LiveEditor({ template, className = '', onContentUpdate, companyI
     }
   };
 
+  // Register header action handlers with the parent (DocumentDraftDrawer)
+  // so the action icons can render in the drawer's top header instead of
+  // a redundant secondary header row inside LiveEditor.
+  useEffect(() => {
+    if (!onRegisterHeaderActions) return;
+    onRegisterHeaderActions({
+      aiAutoFillEnabled: !!aiAutoFillEnabled,
+      onOpenAutoFill: () => openAutoFillSafely(),
+      onValidate: () => setShowValidationDialog(true),
+      onDownload: () => { handleDownload(); },
+      onPushToDeviceFields: onPushToDeviceFields,
+      onShare: () => { handleShare(); },
+      onSaveVersion: () => handleSaveVersion(),
+      onShowVersions: () => handleShowVersions(),
+      hideVersioning,
+    });
+    return () => onRegisterHeaderActions(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aiAutoFillEnabled, hideVersioning, onPushToDeviceFields, onRegisterHeaderActions]);
+
   return (
     <div className={`h-full flex flex-col bg-background ${className}`}>
-      {/* Editor Header */}
-      <div className="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 p-4 sticky top-0 z-10">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <FileText className="w-5 h-5 text-primary" />
-            <div>
-              {isEditingTitle ? (
-                <div className="flex items-center gap-2">
-                  <Input
-                    value={editedTitle}
-                    onChange={(e) => setEditedTitle(e.target.value)}
-                    onKeyDown={handleTitleKeyPress}
-                    onBlur={handleTitleSave}
-                    className="text-lg font-semibold"
-                    autoFocus
-                  />
-                  <Button size="sm" variant="ghost" onClick={handleTitleSave}>
-                    Save
-                  </Button>
-                  <Button size="sm" variant="ghost" onClick={handleTitleCancel}>
-                    Cancel
-                  </Button>
-                </div>
-              ) : (
-                <div className="flex items-center gap-3">
-                  <h1
-                    className="text-lg font-semibold text-foreground cursor-pointer hover:bg-muted/50 px-2 py-1 rounded"
-                    onClick={() => setIsEditingTitle(true)}
-                    title="Click to edit title"
-                  >
-                    {(() => {
-                      const cleanName = (template?.name || '').replace(/^[A-Z]{2,6}-\d{3}\s+/, '');
-                      return cleanName || 'Untitled Document';
-                    })()}
-                  </h1>
-                  {/* Google-Docs-style autosave indicator placed next to the title. */}
-                  {saveStatus !== 'idle' && (
-                    <span
-                      className={
-                        'inline-flex items-center gap-1.5 text-sm font-medium select-none px-2 py-0.5 rounded-md transition-opacity ' +
-                        (saveStatus === 'error'
-                          ? 'text-red-600 bg-red-50 dark:text-red-400 dark:bg-red-950/40'
-                          : saveStatus === 'saved'
-                            ? 'text-green-700 bg-green-50 dark:text-green-400 dark:bg-green-950/40'
-                            : 'text-muted-foreground bg-muted/40')
-                      }
-                      aria-live="polite"
-                    >
-                      {saveStatus === 'saving' && (
-                        <>
-                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                          Saving…
-                        </>
-                      )}
-                      {saveStatus === 'saved' && (
-                        <>
-                          <CheckCircle2 className="w-3.5 h-3.5" />
-                          Saved
-                        </>
-                      )}
-                      {saveStatus === 'error' && (
-                        <>
-                          <AlertCircle className="w-3.5 h-3.5" />
-                          Save failed — will retry on next edit
-                        </>
-                      )}
-                    </span>
-                  )}
-                </div>
-              )}
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <span>For {template?.productContext?.name || (selectedScope === 'product' ? 'Product' : 'Company')}</span>
-              </div>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <TooltipProvider>
-              {aiAutoFillEnabled && (
-                <DropdownMenu open={aiMenuOpen} onOpenChange={setAiMenuOpen} modal={false}>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      variant="outline"
-                      size="icon"
-                      className="border-amber-300 text-amber-400 hover:bg-amber-50 hover:text-amber-500 h-8 w-8"
-                    >
-                      <Sparkles className="w-4 h-4 " />
-                    </Button>
-                  </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" onCloseAutoFocus={(e) => {
-                      if (autoFillPendingRef.current) {
-                        e.preventDefault();
-                        autoFillPendingRef.current = false;
-                      }
-                    }}>
-                    <DropdownMenuItem onSelect={() => {
-                      autoFillPendingRef.current = true;
-                      setAiMenuOpen(false);
-                      openAutoFillSafely();
-                    }}>
-                      <Wand2 className="w-4 h-4 mr-2" />
-                      Auto-Fill Sections
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              )}
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="outline"
-                    size="icon"
-                    onClick={() => setShowValidationDialog(true)}
-                    className="border-blue-300 text-blue-400 hover:bg-blue-50 hover:text-blue-500 dark:hover:bg-blue-950 h-8 w-8"
-                  >
-                    <ShieldCheck className="w-4 h-4" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>AI Validate</TooltipContent>
-              </Tooltip>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button variant="outline" size="icon" onClick={handleDownload} className="h-8 w-8">
-                    <Download className="w-4 h-4" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>Export</TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
-            {!!onPushToDeviceFields && (
-              <TooltipProvider>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="outline"
-                      size="icon"
-                      onClick={onPushToDeviceFields}
-                      className="border-green-300 text-green-400 hover:text-green-500 hover:bg-green-50 h-8 w-8"
-                    >
-                      <ArrowUpFromLine className="w-4 h-4" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>Push to Device Fields</TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
-            )}
-            {hideVersioning && (
-              <TooltipProvider>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button variant="outline" size="icon" onClick={handleShare} className="h-8 w-8">
-                      <Share className="w-4 h-4" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>Share</TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
-            )}
-            {!hideVersioning && (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="sm">
-                    <MoreHorizontal className="w-4 h-4" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem onClick={handleSaveVersion}>
-                    <GitBranch className="w-4 h-4 mr-2" />
-                    Save Version
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={handleShowVersions}>
-                    <History className="w-4 h-4 mr-2" />
-                    View Versions
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={handleShare}>
-                    <Share className="w-4 h-4 mr-2" />
-                    Share
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            )}
-          </div>
-        </div>
-      </div>
-
       {/* Formatting Toolbar */}
       {unifiedEditor && (
-        <div className="border-b bg-background px-4 py-1.5 flex items-center gap-1 flex-wrap sticky top-[72px] z-10">
+        <div className="border-b bg-background px-4 py-1.5 flex items-center gap-1 flex-wrap sticky top-0 z-10">
           <Button
             variant={unifiedEditor.isActive('bold') ? 'default' : 'ghost'}
             size="sm"
@@ -3468,6 +3321,7 @@ export function LiveEditor({ template, className = '', onContentUpdate, companyI
               <CreateReferenceDocDialog
                 open={createRefDialog.open}
                 companyId={companyId || activeCompanyRole?.companyId}
+                companyName={companyName || activeCompanyRole?.companyName}
                 initialRefCode={createRefDialog.refCode}
                 initialTitle={createRefDialog.title}
                 onClose={() => setCreateRefDialog({ open: false, refCode: '', title: '' })}

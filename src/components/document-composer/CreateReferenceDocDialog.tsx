@@ -4,16 +4,20 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Loader2, FilePlus2 } from 'lucide-react';
+import { Loader2, FilePlus2, Sparkles, FileText } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   createReferenceDocument,
   REFERENCE_PREFIX_TO_TYPE,
+  findDefaultTemplateForRefCode,
+  seedReferenceDocumentFromTemplate,
+  type MatchingDefaultTemplate,
 } from '@/services/createReferenceDocument';
 
 interface CreateReferenceDocDialogProps {
   open: boolean;
   companyId?: string;
+  companyName?: string;
   initialRefCode: string;
   initialTitle?: string;
   onClose: () => void;
@@ -29,6 +33,7 @@ interface CreateReferenceDocDialogProps {
 export function CreateReferenceDocDialog({
   open,
   companyId,
+  companyName = '',
   initialRefCode,
   initialTitle,
   onClose,
@@ -39,6 +44,8 @@ export function CreateReferenceDocDialog({
   const [docType, setDocType] = useState<string>('');
   const [openAfter, setOpenAfter] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [matchingTemplate, setMatchingTemplate] = useState<MatchingDefaultTemplate | null>(null);
+  const [lookupBusy, setLookupBusy] = useState(false);
 
   // Reset form when reopening for a different reference.
   useEffect(() => {
@@ -49,6 +56,16 @@ export function CreateReferenceDocDialog({
     setDocType(REFERENCE_PREFIX_TO_TYPE[prefix] || 'Document');
     setOpenAfter(false);
     setBusy(false);
+    setMatchingTemplate(null);
+    // Look up a matching default template for the refCode so we can offer
+    // "Seed from template" as the primary action when one exists.
+    let cancelled = false;
+    setLookupBusy(true);
+    findDefaultTemplateForRefCode(initialRefCode)
+      .then((tpl) => { if (!cancelled) setMatchingTemplate(tpl); })
+      .catch(() => { /* silent — fall back to blank-only */ })
+      .finally(() => { if (!cancelled) setLookupBusy(false); });
+    return () => { cancelled = true; };
   }, [open, initialRefCode, initialTitle]);
 
   const handleCreate = async () => {
@@ -89,6 +106,47 @@ export function CreateReferenceDocDialog({
     }
   };
 
+  const handleSeedFromTemplate = async () => {
+    if (!companyId) {
+      toast.error('No active company — cannot seed template.');
+      return;
+    }
+    const trimmedRef = refCode.trim();
+    if (!trimmedRef) {
+      toast.error('Reference code is required.');
+      return;
+    }
+    setBusy(true);
+    try {
+      const seeded = await seedReferenceDocumentFromTemplate(
+        companyId,
+        companyName,
+        trimmedRef,
+      );
+      if (!seeded) {
+        toast.error('Could not seed from template. Try creating a blank draft.');
+        return;
+      }
+      toast.success(`Seeded ${seeded.name} from template`);
+      onCreated?.({ id: seeded.id, name: seeded.name, refCode: trimmedRef });
+      onClose();
+      if (openAfter) {
+        setTimeout(() => {
+          window.dispatchEvent(
+            new CustomEvent('xyreg:open-document', {
+              detail: { docId: seeded.id, name: seeded.name },
+            }),
+          );
+        }, 50);
+      }
+    } catch (err) {
+      console.error('[CreateReferenceDocDialog] seed failed', err);
+      toast.error('Failed to seed from template. Please try again.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <Dialog open={open} onOpenChange={(o) => !o && !busy && onClose()}>
       <DialogContent className="sm:max-w-md">
@@ -98,10 +156,59 @@ export function CreateReferenceDocDialog({
             Create reference document
           </DialogTitle>
           <DialogDescription>
-            This reference is not yet in your document registry. Create a draft
-            so it can be linked, edited, and reviewed.
+            This reference isn't in your registry yet. Seed it from the
+            matching template, or create a blank draft.
           </DialogDescription>
         </DialogHeader>
+
+        {(lookupBusy || matchingTemplate) && (
+          <div className="rounded-md border border-emerald-200 bg-emerald-50/60 dark:bg-emerald-950/20 dark:border-emerald-900 p-3">
+            {lookupBusy ? (
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                Checking template library…
+              </div>
+            ) : matchingTemplate ? (
+              <div className="space-y-2">
+                <div className="flex items-start gap-2">
+                  <FileText className="w-4 h-4 text-emerald-600 mt-0.5 shrink-0" />
+                  <div className="min-w-0">
+                    <div className="text-xs font-semibold text-emerald-900 dark:text-emerald-200">
+                      Template available
+                    </div>
+                    <div className="text-sm font-medium truncate">{matchingTemplate.name}</div>
+                    {matchingTemplate.description && (
+                      <div className="text-xs text-muted-foreground line-clamp-2 mt-0.5">
+                        {matchingTemplate.description}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <Button
+                  size="sm"
+                  className="w-full bg-emerald-600 hover:bg-emerald-700 text-white"
+                  onClick={handleSeedFromTemplate}
+                  disabled={busy}
+                >
+                  {busy ? (
+                    <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />
+                  ) : (
+                    <Sparkles className="w-4 h-4 mr-1.5" />
+                  )}
+                  Seed from template
+                </Button>
+              </div>
+            ) : null}
+          </div>
+        )}
+
+        {matchingTemplate && (
+          <div className="flex items-center gap-2 text-[11px] uppercase tracking-wide text-muted-foreground">
+            <div className="h-px flex-1 bg-border" />
+            or create blank
+            <div className="h-px flex-1 bg-border" />
+          </div>
+        )}
 
         <div className="space-y-3 py-2">
           <div className="grid grid-cols-2 gap-3">
@@ -155,9 +262,13 @@ export function CreateReferenceDocDialog({
           <Button variant="ghost" onClick={onClose} disabled={busy}>
             Cancel
           </Button>
-          <Button onClick={handleCreate} disabled={busy || !refCode.trim()}>
+          <Button
+            variant={matchingTemplate ? 'outline' : 'default'}
+            onClick={handleCreate}
+            disabled={busy || !refCode.trim()}
+          >
             {busy ? <Loader2 className="w-4 h-4 mr-1.5 animate-spin" /> : <FilePlus2 className="w-4 h-4 mr-1.5" />}
-            Create draft
+            {matchingTemplate ? 'Create blank draft' : 'Create draft'}
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -4,6 +4,7 @@ import { IconButton, Box, Typography, CircularProgress, Tooltip } from '@mui/mat
 import CloseIcon from '@mui/icons-material/Close';
 import { ResizableDrawer } from '@/components/ui/resizable-drawer';
 import { LiveEditor } from '@/components/document-composer/LiveEditor';
+import { LiveEditorHeaderActions, type LiveEditorHeaderActionsConfig } from '@/components/document-composer/LiveEditorHeaderActions';
 import { DocumentTemplate } from '@/types/documentComposer';
 import { DocumentTemplatePersistenceService } from '@/services/documentTemplatePersistenceService';
 import { getDefaultSectionsForType } from '@/utils/documentTemplateUtils';
@@ -95,6 +96,14 @@ interface DocumentDraftDrawerProps {
   activeTabId?: string;
   onSelectTab?: (id: string) => void;
   onCloseTab?: (id: string) => void;
+  /** Multi-select state for bulk-edit across open tabs. */
+  selectedTabIds?: string[];
+  onToggleTabSelection?: (id: string) => void;
+  onClearTabSelection?: () => void;
+  onBulkEditSelectedTabs?: () => void;
+  /** Tab-group features: render a custom slot (e.g. Groups dropdown) at the start of the tab strip, and a callback for saving the current selection (or all open tabs) as a group. */
+  groupsMenuSlot?: React.ReactNode;
+  onSaveSelectedAsGroup?: () => void;
 }
 
 export function DocumentDraftDrawer({
@@ -118,12 +127,21 @@ export function DocumentDraftDrawer({
   activeTabId,
   onSelectTab,
   onCloseTab,
+  selectedTabIds,
+  onToggleTabSelection,
+  onClearTabSelection,
+  onBulkEditSelectedTabs,
+  groupsMenuSlot,
+  onSaveSelectedAsGroup,
 }: DocumentDraftDrawerProps) {
   const [template, setTemplate] = useState<DocumentTemplate | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [existingDraftId, setExistingDraftId] = useState<string | null>(null);
   const [showAdvancedEditor, setShowAdvancedEditor] = useState(false);
   const [editorMounted, setEditorMounted] = useState(false);
+  // Header actions registered by LiveEditor — rendered inside the drawer's
+  // top header (replaces the former secondary header row).
+  const [liveEditorActions, setLiveEditorActions] = useState<LiveEditorHeaderActionsConfig | null>(null);
   const [docStatus, setDocStatus] = useState<string>('Not Started');
   const [editorKey, setEditorKey] = useState<string | null>(null);
   const { activeCompanyRole } = useCompanyRole();
@@ -1101,7 +1119,77 @@ export function DocumentDraftDrawer({
       onClose={() => onOpenChange(false)}
       defaultWidthPercent={97}
     >
-      {tabs && tabs.length > 1 && (
+      {tabs && (tabs.length > 1 || groupsMenuSlot) && (
+        <>
+        {selectedTabIds && selectedTabIds.length > 0 && (
+          <Box
+            sx={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 1,
+              px: 2,
+              py: 1,
+              backgroundColor: 'hsl(45 93% 90%)',
+              borderBottom: '1px solid hsl(45 80% 70%)',
+              color: 'hsl(30 80% 25%)',
+              fontSize: '0.8rem',
+              flexShrink: 0,
+            }}
+          >
+            <span style={{ fontWeight: 600 }}>
+              {selectedTabIds.length} draft{selectedTabIds.length === 1 ? '' : 's'} selected
+            </span>
+            <Box sx={{ display: 'flex', gap: 1 }}>
+              <button
+                onClick={onBulkEditSelectedTabs}
+                style={{
+                  padding: '4px 12px',
+                  borderRadius: 4,
+                  background: 'hsl(30 80% 35%)',
+                  color: 'white',
+                  border: 'none',
+                  fontSize: '0.75rem',
+                  cursor: 'pointer',
+                  fontWeight: 500,
+                }}
+              >
+                Bulk edit
+              </button>
+              {onSaveSelectedAsGroup && (
+                <button
+                  onClick={onSaveSelectedAsGroup}
+                  style={{
+                    padding: '4px 12px',
+                    borderRadius: 4,
+                    background: 'transparent',
+                    color: 'hsl(30 80% 25%)',
+                    border: '1px solid hsl(30 80% 35%)',
+                    fontSize: '0.75rem',
+                    cursor: 'pointer',
+                    fontWeight: 500,
+                  }}
+                >
+                  Save as group…
+                </button>
+              )}
+              <button
+                onClick={onClearTabSelection}
+                style={{
+                  padding: '4px 10px',
+                  borderRadius: 4,
+                  background: 'transparent',
+                  color: 'hsl(30 80% 25%)',
+                  border: '1px solid hsl(45 80% 60%)',
+                  fontSize: '0.75rem',
+                  cursor: 'pointer',
+                }}
+              >
+                Clear
+              </button>
+            </Box>
+          </Box>
+        )}
         <Box
           sx={{
             display: 'flex',
@@ -1117,10 +1205,16 @@ export function DocumentDraftDrawer({
             flexShrink: 0,
           }}
         >
+          {groupsMenuSlot && (
+            <Box sx={{ display: 'flex', alignItems: 'center', pr: 1, mr: 0.5, borderRight: '1px solid', borderColor: 'divider' }}>
+              {groupsMenuSlot}
+            </Box>
+          )}
           {tabs.map(t => {
             const { prefix, title } = splitDocPrefix(t.name);
             const isActive = t.id === activeTabId;
             const shortTitle = title.length > 24 ? title.slice(0, 22) + '…' : title;
+            const isSelected = selectedTabIds?.includes(t.id) ?? false;
             return (
               <Tooltip key={t.id} title={t.name} arrow>
                 <Box
@@ -1135,9 +1229,17 @@ export function DocumentDraftDrawer({
                     borderTopLeftRadius: 6,
                     borderTopRightRadius: 6,
                     border: '1px solid',
-                    borderColor: isActive ? 'hsl(var(--primary))' : 'transparent',
+                    borderColor: isSelected
+                      ? 'hsl(45 80% 55%)'
+                      : isActive
+                        ? 'hsl(var(--primary))'
+                        : 'transparent',
                     borderBottom: 'none',
-                    backgroundColor: isActive ? 'hsl(var(--background))' : 'transparent',
+                    backgroundColor: isSelected
+                      ? 'hsl(45 93% 92%)'
+                      : isActive
+                        ? 'hsl(var(--background))'
+                        : 'transparent',
                     color: isActive ? 'hsl(var(--foreground))' : 'hsl(var(--muted-foreground))',
                     fontSize: '0.8rem',
                     lineHeight: 1.2,
@@ -1148,6 +1250,16 @@ export function DocumentDraftDrawer({
                     },
                   }}
                 >
+                  {onToggleTabSelection && (
+                    <input
+                      type="checkbox"
+                      checked={isSelected}
+                      onClick={(e) => e.stopPropagation()}
+                      onChange={() => onToggleTabSelection(t.id)}
+                      aria-label={`Select ${t.name} for bulk edit`}
+                      style={{ cursor: 'pointer', margin: 0 }}
+                    />
+                  )}
                   {prefix && (
                     <span style={{ fontWeight: 600 }}>{prefix}</span>
                   )}
@@ -1168,6 +1280,7 @@ export function DocumentDraftDrawer({
             );
           })}
         </Box>
+        </>
       )}
       {/* Header */}
       <Box
@@ -1181,7 +1294,7 @@ export function DocumentDraftDrawer({
           borderColor: 'divider',
         }}
       >
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 0, flexShrink: 1 }}>
           {showAdvancedEditor && (
             <Tooltip title="Back to Draft Editor" arrow>
               <IconButton
@@ -1237,7 +1350,92 @@ export function DocumentDraftDrawer({
             );
           })()}
         </Box>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+        {/* Inline compact lifecycle stepper (merged from former row below) */}
+        {(() => {
+          const steps = [
+            { label: 'Draft', icon: FilePen },
+            { label: 'Review & Approve', icon: Eye },
+            { label: 'Completed', icon: CircleCheckBig },
+          ];
+          const statusLower = docStatus?.toLowerCase() || '';
+          let activeStep = 0;
+          if (statusLower === 'draft' || statusLower === 'not started') activeStep = 0;
+          else if (statusLower === 'under review' || statusLower === 'in review' || statusLower === 'changes requested' || statusLower === 'changes_requested' || statusLower === 'pending approval') activeStep = 1;
+          else if (statusLower === 'approved' || statusLower === 'signed' || statusLower === 'esigned' || statusLower === 'completed' || statusLower === 'closed') activeStep = 3;
+
+          const stepColors = [
+            { bg: '#eab308', border: '#eab308' },
+            { bg: '#2563eb', border: '#2563eb' },
+            { bg: '#16a34a', border: '#16a34a' },
+          ];
+
+          return (
+            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0, flexShrink: 0, mx: 'auto', px: 2 }}>
+              {steps.map((step, index) => {
+                const isCompleted = index < activeStep;
+                const isActive = index === activeStep;
+                const StepIcon = step.icon;
+                const canNavigate = index <= 1 || (index === 2 && activeStep >= 3);
+                const c = stepColors[index];
+                return (
+                  <React.Fragment key={step.label}>
+                    <Tooltip title={step.label} arrow>
+                      <Box
+                        onClick={() => {
+                          if (!canNavigate) {
+                            if (index === 2) toast.error('Review & approval must be completed before viewing Completed');
+                            return;
+                          }
+                          if (step.label === 'Draft') setActiveView('draft');
+                          else if (step.label === 'Review & Approve') setActiveView('review');
+                          else if (step.label === 'Completed') setActiveView('completed');
+                        }}
+                        sx={{
+                          display: 'flex', alignItems: 'center', gap: 0.75,
+                          cursor: canNavigate ? 'pointer' : 'not-allowed',
+                          opacity: canNavigate ? 1 : 0.5,
+                          '&:hover': canNavigate ? { opacity: 0.8 } : {},
+                        }}
+                      >
+                        <Box sx={{
+                          width: 26, height: 26, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          backgroundColor: (isCompleted || isActive) ? c.bg : '#fff',
+                          border: (isCompleted || isActive) ? `2px solid ${c.border}` : '2px solid #d1d5db',
+                          color: (isCompleted || isActive) ? '#fff' : '#9ca3af',
+                          flexShrink: 0,
+                        }}>
+                          {isCompleted ? <Check style={{ width: 14, height: 14 }} /> : isActive ? <Hourglass style={{ width: 14, height: 14 }} /> : <StepIcon style={{ width: 14, height: 14 }} />}
+                        </Box>
+                        <Typography sx={{
+                          fontSize: '0.75rem', fontWeight: 600,
+                          color: isCompleted || isActive ? '#111827' : '#9ca3af',
+                          lineHeight: 1.2,
+                          display: { xs: 'none', lg: 'inline' },
+                          whiteSpace: 'nowrap',
+                        }}>
+                          {step.label}
+                        </Typography>
+                      </Box>
+                    </Tooltip>
+                    {index < steps.length - 1 && (
+                      <Box sx={{
+                        width: 24, height: 2,
+                        backgroundColor: isCompleted ? stepColors[index].bg : '#d1d5db',
+                        borderRadius: 1, mx: 0.75, flexShrink: 0,
+                      }} />
+                    )}
+                  </React.Fragment>
+                );
+              })}
+            </Box>
+          );
+        })()}
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexShrink: 0, ml: 'auto' }}>
+          {activeView === 'draft' && !showAdvancedEditor && liveEditorActions && (
+            <Box sx={{ mr: 0.5 }}>
+              <LiveEditorHeaderActions {...liveEditorActions} />
+            </Box>
+          )}
           {!showAdvancedEditor && (() => {
             const ext = (fileName || filePath || '').split('.').pop()?.toLowerCase();
             return ext === 'doc' || ext === 'docx';
@@ -1288,87 +1486,6 @@ export function DocumentDraftDrawer({
       {/* Translation staleness banner — only renders when this CI is a translation
           whose English master has been updated since the last sync. */}
       <TranslationStaleBanner documentCiId={normalizedDocId} />
-
-      {/* Document Lifecycle Stepper */}
-      {(() => {
-        const steps = [
-          { label: 'Draft', icon: FilePen },
-          { label: 'Review & Approve', icon: Eye },
-          { label: 'Completed', icon: CircleCheckBig },
-        ];
-        const statusLower = docStatus?.toLowerCase() || '';
-        let activeStep = 0;
-        if (statusLower === 'draft' || statusLower === 'not started') activeStep = 0;
-        else if (statusLower === 'under review' || statusLower === 'in review' || statusLower === 'changes requested' || statusLower === 'changes_requested' || statusLower === 'pending approval') activeStep = 1;
-        else if (statusLower === 'approved' || statusLower === 'signed' || statusLower === 'esigned' || statusLower === 'completed' || statusLower === 'closed') activeStep = 3;
-
-        return (
-          <Box sx={{ px: 3, py: 1.5, borderBottom: '1px solid', borderColor: 'divider', backgroundColor: '#fafbfc' }}>
-            {/* Step icons and connectors */}
-            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0 }}>
-              {steps.map((step, index) => {
-                const isCompleted = index < activeStep;
-                const isActive = index === activeStep;
-                const StepIcon = step.icon;
-                // Determine which steps are accessible based on document status
-                // Draft (0) & Review & Approve (1): always accessible
-                // Completed (2): only if activeStep >= 3 (approved/completed)
-                const canNavigate =
-                  index <= 1 ||
-                  (index === 2 && activeStep >= 3);
-
-                return (
-                  <React.Fragment key={step.label}>
-                    <Box
-                      onClick={() => {
-                        if (!canNavigate) {
-                          if (index === 2) toast.error('Review & approval must be completed before viewing Completed');
-                          return;
-                        }
-                        if (step.label === 'Draft') setActiveView('draft');
-                        else if (step.label === 'Review & Approve') setActiveView('review');
-                        else if (step.label === 'Completed') setActiveView('completed');
-                      }}
-                      sx={{
-                        display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: 90,
-                        cursor: canNavigate ? 'pointer' : 'not-allowed',
-                        opacity: canNavigate ? 1 : 0.5,
-                        '&:hover': canNavigate ? { opacity: 0.8 } : {},
-                      }}
-                    >
-                      {(() => {
-                        // Per-step colors: Draft=yellow, Review & Approve=blue, Completed=green
-                        const stepColors = [
-                          { bg: '#eab308', border: '#eab308' },  // Draft - yellow
-                          { bg: '#2563eb', border: '#2563eb' },  // Review & Approve - blue
-                          { bg: '#16a34a', border: '#16a34a' },  // Completed - green
-                        ];
-                        const c = stepColors[index];
-                        return (
-                          <Box sx={{
-                            width: 36, height: 36, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            backgroundColor: (isCompleted || isActive) ? c.bg : '#fff',
-                            border: (isCompleted || isActive) ? `2px solid ${c.border}` : '2px solid #d1d5db',
-                            color: (isCompleted || isActive) ? '#fff' : '#9ca3af',
-                          }}>
-                            {isCompleted ? <Check style={{ width: 18, height: 18 }} /> : isActive ? <Hourglass style={{ width: 18, height: 18 }} /> : <StepIcon style={{ width: 18, height: 18 }} />}
-                          </Box>
-                        );
-                      })()}
-                      <Typography sx={{ fontSize: '0.8rem', fontWeight: 600, color: isCompleted || isActive ? '#111827' : '#9ca3af', lineHeight: 1.2, mt: 0.5 }}>
-                        {step.label}
-                      </Typography>
-                    </Box>
-                    {index < steps.length - 1 && (
-                      <Box sx={{ width: 48, height: 2, backgroundColor: isCompleted ? ['#eab308','#2563eb','#16a34a'][index] : '#d1d5db', borderRadius: 1, mt: -3 }} />
-                    )}
-                  </React.Fragment>
-                );
-              })}
-            </Box>
-          </Box>
-        );
-      })()}
 
       {/* Cross-reference tracking banner */}
       {referencingSources.length > 0 && (
@@ -2329,6 +2446,7 @@ export function DocumentDraftDrawer({
                   onDocumentControlChange={handleDocumentControlChange}
                   onPushToDeviceFields={productId ? handlePushToDeviceFields : undefined}
                   onCustomSave={isUnsaved ? () => setShowSaveCIDialog(true) : undefined}
+                  onRegisterHeaderActions={setLiveEditorActions}
                   isRecord={isRecord}
                   recordId={recordId || undefined}
                   nextReviewDate={nextReviewDate || undefined}

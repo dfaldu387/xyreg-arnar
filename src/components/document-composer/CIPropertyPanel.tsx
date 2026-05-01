@@ -160,19 +160,17 @@ export function CIPropertyPanel({
     }
   }, [documentNumber, documentType, subPrefixes]);
 
-  // Fetch used numbers when category prefix changes
+  // Fetch used numbers when category prefix changes. Identify "own row" by
+  // documentId (UUID) — never by parsed number string — so this CI's own
+  // slot is always available to itself regardless of how the number is spelled.
   useEffect(() => {
     if (!documentType) return;
     setIsLoadingUsedNumbers(true);
-    getUsedNumbers(documentType, companyId).then(used => {
-      if (documentNumber) {
-        const ownMatch = documentNumber.match(new RegExp(`^${documentType}-(?:[A-Z]+-)?([\\d]+)`));
-        if (ownMatch) used.delete(ownMatch[1]);
-      }
+    getUsedNumbers(documentType, companyId, documentId).then(used => {
       setUsedNumbersSet(used);
       setIsLoadingUsedNumbers(false);
     });
-  }, [documentType, getUsedNumbers, documentNumber]);
+  }, [documentType, getUsedNumbers, companyId, documentId]);
 
   const showSaveIndicator = useCallback((field: string) => {
     setFieldStates(prev => ({ ...prev, [field]: 'saved' }));
@@ -327,7 +325,7 @@ export function CIPropertyPanel({
               }}
               disabled={disabled}
             >
-              <SelectTrigger className="h-8 text-sm flex-1">
+              <SelectTrigger className="h-8 text-sm font-mono w-24">
                 <SelectValue placeholder={isCategoryConfigsLoading ? "Loading..." : "Category"} />
               </SelectTrigger>
               <SelectContent>

@@ -135,12 +135,16 @@ function speakBrowser(text: string) {
 }
 
 const VOICE_OPTIONS = [
-  { id: 'ErXwobaYiN019PkySvjV', name: 'Antoni', desc: 'Clear & professional' },
-  { id: 'JBFqnCBsd6RMkjVDRZzb', name: 'George', desc: 'Warm & authoritative' },
-  { id: 'onwK4e9ZLuTAKqWW03F9', name: 'Daniel', desc: 'Calm British' },
-  { id: 'TxGEqnHWrfWFTfGW9XjX', name: 'Josh', desc: 'Deep & warm' },
-  { id: 'pNInz6obpgDQGcFmaJgB', name: 'Adam', desc: 'Clear American' },
-  { id: 'IKne3meq5aSn9XLyUdCD', name: 'Charlie', desc: 'Natural Australian' },
+  { id: 'ErXwobaYiN019PkySvjV', name: 'Antoni', desc: 'Clear & professional', gender: 'male' },
+  { id: 'JBFqnCBsd6RMkjVDRZzb', name: 'George', desc: 'Warm & authoritative', gender: 'male' },
+  { id: 'onwK4e9ZLuTAKqWW03F9', name: 'Daniel', desc: 'Calm British', gender: 'male' },
+  { id: 'TxGEqnHWrfWFTfGW9XjX', name: 'Josh', desc: 'Deep & warm', gender: 'male' },
+  { id: 'pNInz6obpgDQGcFmaJgB', name: 'Adam', desc: 'Clear American', gender: 'male' },
+  { id: 'IKne3meq5aSn9XLyUdCD', name: 'Charlie', desc: 'Natural Australian', gender: 'male' },
+  { id: 'EXAVITQu4vr4xnSDxMaL', name: 'Bella', desc: 'Soft & warm', gender: 'female' },
+  { id: 'MF3mGyEYCl7XYWbV9V6O', name: 'Elli', desc: 'Young & expressive', gender: 'female' },
+  { id: 'jBpfuIE2acCO8z3wKNLl', name: 'Gigi', desc: 'Energetic & playful', gender: 'female' },
+  { id: 'oWAxZDx7w5VEj9dCyTzz', name: 'Grace', desc: 'Gentle & soothing', gender: 'female' },
 ] as const;
 
 /** Active audio element for cancellation. */
@@ -302,6 +306,7 @@ export function FloatingAdvisoryBot() {
   const [isLoading, setIsLoading] = useState(false);
   const [voiceEnabled, setVoiceEnabled] = useState(true);
   const [selectedVoice, setSelectedVoice] = useState<string>(VOICE_OPTIONS[0].id);
+  const [voiceGenderTab, setVoiceGenderTab] = useState<'male' | 'female'>('male');
   const [showHistory, setShowHistory] = useState(false);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [isCompact, setIsCompact] = useState(false);
@@ -903,7 +908,23 @@ export function FloatingAdvisoryBot() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {VOICE_OPTIONS.map(v => (
+                <div className="flex border-b border-border mb-1">
+                  <button
+                    type="button"
+                    className={`flex-1 px-2 py-1.5 text-[10px] font-medium transition-colors ${voiceGenderTab === 'male' ? 'text-primary border-b-2 border-primary' : 'text-muted-foreground hover:text-foreground'}`}
+                    onMouseDown={(e) => { e.preventDefault(); setVoiceGenderTab('male'); }}
+                  >
+                    Male
+                  </button>
+                  <button
+                    type="button"
+                    className={`flex-1 px-2 py-1.5 text-[10px] font-medium transition-colors ${voiceGenderTab === 'female' ? 'text-primary border-b-2 border-primary' : 'text-muted-foreground hover:text-foreground'}`}
+                    onMouseDown={(e) => { e.preventDefault(); setVoiceGenderTab('female'); }}
+                  >
+                    Female
+                  </button>
+                </div>
+                {VOICE_OPTIONS.filter(v => v.gender === voiceGenderTab).map(v => (
                   <SelectItem key={v.id} value={v.id} className="text-xs">
                     <span className="font-medium">{v.name}</span>
                     <span className="text-muted-foreground ml-1">· {v.desc}</span>

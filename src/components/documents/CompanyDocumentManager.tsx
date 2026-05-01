@@ -33,6 +33,9 @@ import { CompanyDocumentViewer } from "./CompanyDocumentViewer";
 import { CompanyDocumentCard } from "./CompanyDocumentCard";
 import { CompanyDocumentListView } from "./CompanyDocumentListView";
 import { DocumentDraftDrawer } from "@/components/product/documents/DocumentDraftDrawer";
+import { BulkDraftEditDialog } from "@/components/product/documents/BulkDraftEditDialog";
+import { DraftTabGroupsMenu } from "@/components/product/documents/DraftTabGroupsMenu";
+import { SaveDraftTabGroupDialog } from "@/components/product/documents/SaveDraftTabGroupDialog";
 import { useAuditLog } from '@/hooks/useAuditLog';
 import { useCompanyDocuments, CompanyDocument } from '@/hooks/useCompanyDocuments';
 import { useDocumentTypes } from '@/hooks/useDocumentTypes';
@@ -109,6 +112,10 @@ export function CompanyDocumentManager({ companyId, disabled = false }: CompanyD
   // No cap — open as many drafts as you like. The tab strip scrolls
   // horizontally so it can accommodate any number of tabs.
   const [openDraftStack, setOpenDraftStack] = useState<CompanyDocument[]>([]);
+  // Multi-select state for bulk-edit across open draft tabs
+  const [selectedDraftTabIds, setSelectedDraftTabIds] = useState<string[]>([]);
+  const [bulkDraftEditOpen, setBulkDraftEditOpen] = useState(false);
+  const [saveGroupOpen, setSaveGroupOpen] = useState(false);
 
   const openDraft = useCallback((doc: CompanyDocument) => {
     setOpenDraftStack(prev => {
@@ -117,6 +124,7 @@ export function CompanyDocumentManager({ companyId, disabled = false }: CompanyD
     });
     setDraftDrawerDocument(doc);
   }, []);
+
 
   const closeDraftTab = useCallback((id: string) => {
     setOpenDraftStack(prev => {
@@ -143,6 +151,16 @@ export function CompanyDocumentManager({ companyId, disabled = false }: CompanyD
       if (target) setDraftDrawerDocument(target);
       return prev;
     });
+  }, []);
+
+  const toggleDraftTabSelection = useCallback((id: string) => {
+    setSelectedDraftTabIds(prev =>
+      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
+    );
+  }, []);
+
+  const clearDraftTabSelection = useCallback(() => {
+    setSelectedDraftTabIds([]);
   }, []);
 
   // Bulk mode state (always on - checkboxes always visible)
@@ -289,10 +307,85 @@ export function CompanyDocumentManager({ companyId, disabled = false }: CompanyD
   // Use TanStack Query hook
   const { documents, isLoading, error, refetch, deleteDocument, updateDocumentStatus, isDeleting, isUpdatingStatus, updatingStatusId } = useCompanyDocuments(companyId);
 
+  /**
+   * Open multiple drafts as tabs from a list of CI ids (used when reopening
+   * a saved tab group). Looks each id up in the loaded `documents` array;
+   * missing ids are fetched directly from the CI registry.
+   */
+  const openDraftsByIds = useCallback(async (ciIds: string[]) => {
+    if (!ciIds || ciIds.length === 0) return;
+    const fromCache: CompanyDocument[] = [];
+    const missingIds: string[] = [];
+    for (const id of ciIds) {
+      const hit = documents.find(d => d.id === id);
+      if (hit) fromCache.push(hit);
+      else missingIds.push(id);
+    }
+    let fetched: CompanyDocument[] = [];
+    if (missingIds.length > 0) {
+      const { data, error } = await supabase
+        .from('phase_assigned_document_template')
+        .select('id, name, document_type, document_number, status')
+        .in('id', missingIds);
+      if (error) {
+        console.error('[openDraftsByIds] Failed to fetch missing CI rows', error);
+      } else if (data) {
+        fetched = data.map((r: any) => ({
+          id: r.id,
+          name: r.name || 'Untitled',
+          document_type: r.document_type || '',
+          document_number: r.document_number || null,
+          status: r.status || 'Not Started',
+        }) as unknown as CompanyDocument);
+      }
+    }
+    const combined: CompanyDocument[] = [];
+    for (const id of ciIds) {
+      const hit = fromCache.find(d => d.id === id) || fetched.find(d => d.id === id);
+      if (hit) combined.push(hit);
+    }
+    if (combined.length === 0) {
+      toast.error('None of the documents in this group are available anymore.');
+      return;
+    }
+    setOpenDraftStack(prev => {
+      const seen = new Set(prev.map(d => d.id));
+      const next = [...prev];
+      for (const d of combined) {
+        if (!seen.has(d.id)) {
+          next.push(d);
+          seen.add(d.id);
+        }
+      }
+      return next;
+    });
+    setDraftDrawerDocument(combined[0]);
+    setSelectedDraftTabIds(combined.map(d => d.id));
+    if (combined.length < ciIds.length) {
+      toast.warning(`${ciIds.length - combined.length} document(s) in the group could not be opened (deleted or moved).`);
+    } else {
+      toast.success(`Opened ${combined.length} document(s) — bulk edit ready.`);
+    }
+  }, [documents]);
+
   // Listen for in-app "open this referenced doc as a tab" events fired by
   // the LiveEditor. This bypasses URL-based deep-linking so opening the 3rd,
   // 4th, … referenced doc inside an already-open drawer reliably produces
   // a new tab instead of silently no-op'ing on a URL update.
+  useEffect(() => {
+    // Listen for "open just-created derivative draft" events emitted by
+    // the Translate / Generate WI sections in the Configure panel.
+    const derivativeHandler = (e: Event) => {
+      const detail = (e as CustomEvent).detail || {};
+      const ciId = (detail as { ciId?: string }).ciId;
+      if (ciId) openDraftsByIds([ciId]);
+    };
+    window.addEventListener('xyreg:open-draft-by-id', derivativeHandler as EventListener);
+    return () => {
+      window.removeEventListener('xyreg:open-draft-by-id', derivativeHandler as EventListener);
+    };
+  }, [openDraftsByIds]);
+
   useEffect(() => {
     const handler = (e: Event) => {
       const detail = (e as CustomEvent).detail || {};
@@ -1331,6 +1424,27 @@ export function CompanyDocumentManager({ companyId, disabled = false }: CompanyD
                     {bulkSelectedDocs.size} document(s) selected
                   </span>
                   <div className="h-4 w-px bg-amber-300" />
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-8 text-xs gap-1 bg-white"
+                    disabled={bulkSelectedDocs.size === 0}
+                    onClick={async () => {
+                      const ids = Array.from(bulkSelectedDocs);
+                      const HARD_CAP = 25;
+                      const targets = ids.length > HARD_CAP ? ids.slice(0, HARD_CAP) : ids;
+                      if (ids.length > HARD_CAP) {
+                        toast.warning(`Opening first ${HARD_CAP} of ${ids.length} documents to keep the tab strip usable.`);
+                      }
+                      await openDraftsByIds(targets);
+                      setBulkSelectedDocs(new Set());
+                      setSelectedBulkAction("");
+                    }}
+                  >
+                    <Layers className="h-3 w-3" />
+                    Open in tabs
+                  </Button>
+                  <div className="h-4 w-px bg-amber-300" />
                   <Select
                     value={selectedBulkAction}
                     onValueChange={(val) => { setSelectedBulkAction(val); setSelectedBulkValue(""); setBulkDueDateValue(undefined); }}
@@ -1644,10 +1758,57 @@ export function CompanyDocumentManager({ companyId, disabled = false }: CompanyD
           refetch();
         }}
         disableSopMentions
-        tabs={openDraftStack.map(d => ({ id: d.id, name: d.name }))}
+        tabs={openDraftStack.map(d => {
+          // Mirror CompanyDocumentListView so the regulatory ID prefix
+          // (e.g. SOP-RA-038) shows on every drawer tab regardless of
+          // whether it lives in `name` or only in `document_number`.
+          const docNumber = d.document_number;
+          let cleanName = d.name;
+          if (docNumber && cleanName.startsWith(docNumber)) {
+            cleanName = cleanName.slice(docNumber.length).replace(/^\s+/, '');
+          }
+          const displayDocNumber = docNumber ? formatSopDisplayId(docNumber) : null;
+          const displayCleanName = docNumber ? cleanName : formatSopDisplayName(cleanName);
+          const tabName = displayDocNumber
+            ? `${displayDocNumber} ${displayCleanName}`
+            : displayCleanName;
+          return { id: d.id, name: tabName };
+        })}
         activeTabId={draftDrawerDocument?.id}
         onSelectTab={selectDraftTab}
         onCloseTab={closeDraftTab}
+        selectedTabIds={selectedDraftTabIds}
+        onToggleTabSelection={toggleDraftTabSelection}
+        onClearTabSelection={clearDraftTabSelection}
+        onBulkEditSelectedTabs={() => setBulkDraftEditOpen(true)}
+        groupsMenuSlot={
+          <DraftTabGroupsMenu
+            companyId={companyId}
+            onOpenGroup={(ids) => { openDraftsByIds(ids); }}
+          />
+        }
+        onSaveSelectedAsGroup={() => setSaveGroupOpen(true)}
+      />
+
+      <BulkDraftEditDialog
+        open={bulkDraftEditOpen}
+        onOpenChange={setBulkDraftEditOpen}
+        targets={openDraftStack
+          .filter(d => selectedDraftTabIds.includes(d.id))
+          .map(d => ({ id: d.id, name: d.name }))}
+        companyId={companyId}
+        onApplied={() => {
+          clearDraftTabSelection();
+          refetch();
+        }}
+      />
+
+      <SaveDraftTabGroupDialog
+        open={saveGroupOpen}
+        onOpenChange={setSaveGroupOpen}
+        companyId={companyId}
+        selectedTabIds={selectedDraftTabIds}
+        allOpenTabIds={openDraftStack.map(d => d.id)}
       />
 
       <AlertDialog open={showRefreshConfirm} onOpenChange={setShowRefreshConfirm}>

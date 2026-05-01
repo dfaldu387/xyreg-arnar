@@ -22,6 +22,13 @@ export interface TemplateUploadData {
   template_scope?: TemplateScope;
   template_category?: TemplateCategory;
   file: File;
+  /**
+   * Optional link to an FPD (Foundation/Pathway/Device-specific) catalog
+   * entry. When set, this uploaded file becomes the default attachment for
+   * the named SOP and is propagated to every newly seeded company.
+   */
+  fpd_sop_key?: string | null;
+  fpd_tier?: 'foundation' | 'pathway' | 'device_specific' | null;
 }
 
 export interface TemplateFilters {

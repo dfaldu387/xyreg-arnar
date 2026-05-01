@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useParams } from 'react-router-dom';
 import { stripDocPrefix } from '@/utils/templateNameUtils';
-import { Plus, FileText, Calendar, User, Download, Trash2, Brain, Eye, Edit, ArrowUpDown, ArrowUp, ArrowDown, FilePlus2, Loader2, MoreHorizontal } from 'lucide-react';
+import { Plus, FileText, Calendar, User, Download, Trash2, Brain, Eye, Edit, ArrowUpDown, ArrowUp, ArrowDown, FilePlus2, Loader2, MoreHorizontal, ChevronRight, ChevronDown, ListChecks, ExternalLink } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -30,6 +30,11 @@ import { SOP_FULL_CONTENT } from '@/data/sopFullContent';
 import { SopAutoSeedStatus } from '@/components/settings/document-control/SopAutoSeedStatus';
 import { TierBadge } from '@/components/documents/TierBadge';
 import { DocumentDraftDrawer } from '@/components/product/documents/DocumentDraftDrawer';
+import {
+  listGlobalWIsForSop,
+  materializeGlobalWIForCompany,
+  type GlobalWI,
+} from '@/services/globalWorkInstructionsService';
 import { 
   Table, 
   TableBody, 
@@ -104,6 +109,84 @@ export function TemplateManagementTab({ companyId, onOpenAiTemplateDialog, onOpe
   // Bulk seed selection: set of SOP keys (e.g. "SOP-008") for missing-SOP rows.
   const [bulkSeedSelected, setBulkSeedSelected] = useState<Set<string>>(new Set());
   const [isBulkSeeding, setIsBulkSeeding] = useState(false);
+
+  // Foundation SOP <-> Global Work Instruction unification.
+  // wisBySopKey: e.g. "SOP-001" -> [global WI rows]
+  const [wisBySopKey, setWisBySopKey] = useState<Map<string, GlobalWI[]>>(new Map());
+  const [expandedSopKeys, setExpandedSopKeys] = useState<Set<string>>(new Set());
+  const [openingWiId, setOpeningWiId] = useState<string | null>(null);
+
+  // Load global WIs once per company mount; they're global so we don't filter by company.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data } = await supabase
+          .from('global_work_instructions' as never)
+          .select('id, sop_template_key, wi_number, title, focus, scope, roles, modules, sections, version')
+          .order('wi_number', { ascending: true });
+        if (cancelled) return;
+        const map = new Map<string, GlobalWI[]>();
+        ((data ?? []) as unknown as GlobalWI[]).forEach((w) => {
+          const arr = map.get(w.sop_template_key) ?? [];
+          arr.push(w);
+          map.set(w.sop_template_key, arr);
+        });
+        setWisBySopKey(map);
+      } catch (e) {
+        console.error('[Templates] failed to load global WIs', e);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [companyId]);
+
+  const toggleSopExpanded = (sopKey: string) => {
+    setExpandedSopKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(sopKey)) next.delete(sopKey);
+      else next.add(sopKey);
+      return next;
+    });
+  };
+
+  const handleOpenGlobalWI = async (wi: GlobalWI) => {
+    if (!companyId) return;
+    setOpeningWiId(wi.id);
+    try {
+      // Resolve a phase id (first company phase) to anchor the materialized CI.
+      const { data: phase } = await supabase
+        .from('company_phases')
+        .select('id')
+        .eq('company_id', companyId)
+        .order('order_index', { ascending: true })
+        .limit(1)
+        .maybeSingle();
+      const phaseId = (phase as { id?: string } | null)?.id;
+      if (!phaseId) {
+        toast({
+          title: lang('common.error'),
+          description: 'No company phase found to anchor this Work Instruction.',
+          variant: 'destructive',
+        });
+        return;
+      }
+      const ciId = await materializeGlobalWIForCompany({
+        globalWiId: wi.id,
+        companyId,
+        phaseId,
+      });
+      if (!ciId) {
+        toast({ title: lang('common.error'), description: 'Failed to open Work Instruction.', variant: 'destructive' });
+        return;
+      }
+      setDraftDrawerDoc({ id: ciId, name: wi.title, type: 'WI' });
+      await loadDraftNames();
+    } finally {
+      setOpeningWiId(null);
+    }
+  };
 
   // Only reload templates when the company changes — filters are applied
   // client-side via the `filteredTemplates` useMemo below. Reloading on every
@@ -888,14 +971,35 @@ export function TemplateManagementTab({ companyId, onOpenAiTemplateDialog, onOpe
                    {lang('templates.library.noTemplates')}
                  </TableCell>
                </TableRow>
-            ) : (
-              filteredTemplates.map((template) => (
-                <TableRow key={template.id}>
-                  <TableCell>
-                   {(() => {
-                     const isMissing = isTierASop(template.name) && !hasDraftForTemplate(template);
-                     const sopKey = extractSopKey(template.name);
-                     if (isMissing && sopKey) {
+             ) : (
+               filteredTemplates.map((template) => {
+                 const sopKey = extractSopKey(template.name);
+                 const isFoundation = isTierASop(template.name);
+                 const wisForRow = sopKey ? (wisBySopKey.get(sopKey) ?? []) : [];
+                 const isExpanded = sopKey ? expandedSopKeys.has(sopKey) : false;
+                 const showExpander = isFoundation && !!sopKey;
+                 return (
+                 <React.Fragment key={template.id}>
+                 <TableRow>
+                   <TableCell>
+                    <div className="flex items-center gap-1">
+                    {showExpander && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6 -ml-1"
+                        onClick={() => sopKey && toggleSopExpanded(sopKey)}
+                        aria-label={isExpanded ? 'Collapse Work Instructions' : 'Expand Work Instructions'}
+                        title={wisForRow.length > 0 ? `${wisForRow.length} Work Instructions` : 'No global Work Instructions yet'}
+                      >
+                        {isExpanded
+                          ? <ChevronDown className="h-3.5 w-3.5" />
+                          : <ChevronRight className="h-3.5 w-3.5" />}
+                      </Button>
+                    )}
+                    {(() => {
+                      const isMissing = isTierASop(template.name) && !hasDraftForTemplate(template);
+                      if (isMissing && sopKey) {
                        return (
                          <Checkbox
                            checked={bulkSeedSelected.has(sopKey)}
@@ -911,8 +1015,17 @@ export function TemplateManagementTab({ companyId, onOpenAiTemplateDialog, onOpe
                          />
                        );
                      }
-                     return <FileText className="h-4 w-4 text-muted-foreground" />;
+                      const seeded = hasDraftForTemplate(template);
+                      return (
+                        <span title={seeded ? 'Seeded — draft exists' : 'Not seeded yet'} className="inline-flex">
+                          <FileText
+                            className={`h-4 w-4 ${seeded ? 'text-emerald-600' : 'text-muted-foreground'}`}
+                            aria-label={seeded ? 'Seeded — draft exists' : 'Not seeded yet'}
+                          />
+                        </span>
+                      );
                    })()}
+                    </div>
                   </TableCell>
                   <TableCell className="font-medium">
                     {stripDocPrefix(formatSopDisplayName(template.name))}
@@ -921,9 +1034,17 @@ export function TemplateManagementTab({ companyId, onOpenAiTemplateDialog, onOpe
                     {template.description || lang('templates.library.noDescription')}
                   </TableCell>
                   <TableCell>
-                    <Badge variant="outline" className="text-xs">
-                      {template.document_type || '-'}
-                    </Badge>
+                    <div className="flex items-center gap-1.5">
+                      <Badge variant="outline" className="text-xs">
+                        {template.document_type || '-'}
+                      </Badge>
+                      {isFoundation && (
+                        <span className="text-[10px] text-muted-foreground inline-flex items-center gap-0.5">
+                          <ListChecks className="h-3 w-3" />
+                          {wisForRow.length} {wisForRow.length === 1 ? 'WI' : 'WIs'}
+                        </span>
+                      )}
+                    </div>
                   </TableCell>
                   <TableCell>
                     <TierBadge source={template.name} />
@@ -1003,7 +1124,47 @@ export function TemplateManagementTab({ companyId, onOpenAiTemplateDialog, onOpe
                      </div>
                    </TableCell>
                 </TableRow>
-              ))
+                  {showExpander && isExpanded && (
+                    <TableRow className="bg-muted/30 hover:bg-muted/40">
+                      <TableCell />
+                      <TableCell colSpan={8} className="py-2">
+                        {wisForRow.length === 0 ? (
+                          <div className="text-xs text-muted-foreground italic">
+                            No global Work Instructions yet — use the “Generate WIs” action above to seed them for this SOP.
+                          </div>
+                        ) : (
+                          <ul className="space-y-1">
+                            {wisForRow.map((wi) => (
+                              <li key={wi.id} className="flex items-start justify-between gap-3 text-sm">
+                                <div className="min-w-0">
+                                  <span className="font-mono text-xs text-muted-foreground mr-2">{wi.wi_number}</span>
+                                  <span className="font-medium">{wi.title}</span>
+                                  {wi.focus && (
+                                    <div className="text-xs text-muted-foreground truncate">{wi.focus}</div>
+                                  )}
+                                </div>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  className="h-7 px-2 text-xs"
+                                  onClick={() => handleOpenGlobalWI(wi)}
+                                  disabled={openingWiId === wi.id}
+                                >
+                                  {openingWiId === wi.id
+                                    ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                    : <ExternalLink className="h-3.5 w-3.5 mr-1" />}
+                                  Open
+                                </Button>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  )}
+                  </React.Fragment>
+                  );
+               })
             )}
           </TableBody>
         </Table>

@@ -6318,6 +6318,8 @@ export type Database = {
           file_path: string | null
           file_size: number | null
           file_type: string | null
+          fpd_sop_key: string | null
+          fpd_tier: string | null
           id: string
           markets: Json | null
           name: string
@@ -6338,6 +6340,8 @@ export type Database = {
           file_path?: string | null
           file_size?: number | null
           file_type?: string | null
+          fpd_sop_key?: string | null
+          fpd_tier?: string | null
           id?: string
           markets?: Json | null
           name: string
@@ -6358,6 +6362,8 @@ export type Database = {
           file_path?: string | null
           file_size?: number | null
           file_type?: string | null
+          fpd_sop_key?: string | null
+          fpd_tier?: string | null
           id?: string
           markets?: Json | null
           name?: string
@@ -7975,6 +7981,48 @@ export type Database = {
             referencedColumns: ["company_id"]
           },
         ]
+      }
+      document_draft_tab_groups: {
+        Row: {
+          color: string | null
+          company_id: string
+          created_at: string
+          description: string | null
+          id: string
+          is_shared: boolean
+          last_opened_at: string | null
+          member_ci_ids: string[]
+          name: string
+          owner_user_id: string
+          updated_at: string
+        }
+        Insert: {
+          color?: string | null
+          company_id: string
+          created_at?: string
+          description?: string | null
+          id?: string
+          is_shared?: boolean
+          last_opened_at?: string | null
+          member_ci_ids?: string[]
+          name: string
+          owner_user_id: string
+          updated_at?: string
+        }
+        Update: {
+          color?: string | null
+          company_id?: string
+          created_at?: string
+          description?: string | null
+          id?: string
+          is_shared?: boolean
+          last_opened_at?: string | null
+          member_ci_ids?: string[]
+          name?: string
+          owner_user_id?: string
+          updated_at?: string
+        }
+        Relationships: []
       }
       document_editor_sessions: {
         Row: {
@@ -10812,6 +10860,54 @@ export type Database = {
           },
         ]
       }
+      fpd_sop_catalog: {
+        Row: {
+          created_at: string
+          default_content: Json | null
+          default_sections: Json
+          description: string | null
+          id: string
+          is_active: boolean
+          rationale: string | null
+          sop_key: string
+          sort_order: number
+          tier: string
+          title: string
+          trigger: string | null
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          default_content?: Json | null
+          default_sections?: Json
+          description?: string | null
+          id?: string
+          is_active?: boolean
+          rationale?: string | null
+          sop_key: string
+          sort_order?: number
+          tier: string
+          title: string
+          trigger?: string | null
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          default_content?: Json | null
+          default_sections?: Json
+          description?: string | null
+          id?: string
+          is_active?: boolean
+          rationale?: string | null
+          sop_key?: string
+          sort_order?: number
+          tier?: string
+          title?: string
+          trigger?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       funding_programmes: {
         Row: {
           checklist_items: Json | null
@@ -11393,6 +11489,86 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      global_wi_company_materializations: {
+        Row: {
+          ci_id: string
+          company_id: string
+          created_at: string
+          global_wi_id: string
+          id: string
+        }
+        Insert: {
+          ci_id: string
+          company_id: string
+          created_at?: string
+          global_wi_id: string
+          id?: string
+        }
+        Update: {
+          ci_id?: string
+          company_id?: string
+          created_at?: string
+          global_wi_id?: string
+          id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "global_wi_company_materializations_global_wi_id_fkey"
+            columns: ["global_wi_id"]
+            isOneToOne: false
+            referencedRelation: "global_work_instructions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      global_work_instructions: {
+        Row: {
+          created_at: string
+          focus: string | null
+          generated_at: string
+          id: string
+          modules: string[]
+          roles: string[] | null
+          scope: string | null
+          sections: Json
+          sop_template_key: string
+          title: string
+          updated_at: string
+          version: number
+          wi_number: string
+        }
+        Insert: {
+          created_at?: string
+          focus?: string | null
+          generated_at?: string
+          id?: string
+          modules?: string[]
+          roles?: string[] | null
+          scope?: string | null
+          sections?: Json
+          sop_template_key: string
+          title: string
+          updated_at?: string
+          version?: number
+          wi_number: string
+        }
+        Update: {
+          created_at?: string
+          focus?: string | null
+          generated_at?: string
+          id?: string
+          modules?: string[]
+          roles?: string[] | null
+          scope?: string | null
+          sections?: Json
+          sop_template_key?: string
+          title?: string
+          updated_at?: string
+          version?: number
+          wi_number?: string
+        }
+        Relationships: []
       }
       hardware_requirements: {
         Row: {
@@ -15720,6 +15896,7 @@ export type Database = {
       }
       phase_assigned_document_template: {
         Row: {
+          ai_translated: boolean | null
           approval_date: string | null
           approval_note: string | null
           approved_by: string | null
@@ -15737,6 +15914,9 @@ export type Database = {
           current_version_id: string | null
           date: string | null
           deadline: string | null
+          derivation_type: string | null
+          derived_from_ci_id: string | null
+          derived_work_instructions: string[] | null
           description: string | null
           device_scope: Json | null
           document_number: string | null
@@ -15754,11 +15934,14 @@ export type Database = {
           is_excluded: boolean | null
           is_predefined_core_template: boolean | null
           is_record: boolean | null
+          language: string | null
           language_code: string | null
+          language_variants: Json | null
           markets: Json | null
           milestone_due_date: string | null
           name: string
           need_template_update: boolean | null
+          needs_review: boolean | null
           next_review_date: string | null
           phase_id: string
           phases: Json[] | null
@@ -15786,6 +15969,7 @@ export type Database = {
           version: string | null
         }
         Insert: {
+          ai_translated?: boolean | null
           approval_date?: string | null
           approval_note?: string | null
           approved_by?: string | null
@@ -15803,6 +15987,9 @@ export type Database = {
           current_version_id?: string | null
           date?: string | null
           deadline?: string | null
+          derivation_type?: string | null
+          derived_from_ci_id?: string | null
+          derived_work_instructions?: string[] | null
           description?: string | null
           device_scope?: Json | null
           document_number?: string | null
@@ -15820,11 +16007,14 @@ export type Database = {
           is_excluded?: boolean | null
           is_predefined_core_template?: boolean | null
           is_record?: boolean | null
+          language?: string | null
           language_code?: string | null
+          language_variants?: Json | null
           markets?: Json | null
           milestone_due_date?: string | null
           name: string
           need_template_update?: boolean | null
+          needs_review?: boolean | null
           next_review_date?: string | null
           phase_id: string
           phases?: Json[] | null
@@ -15852,6 +16042,7 @@ export type Database = {
           version?: string | null
         }
         Update: {
+          ai_translated?: boolean | null
           approval_date?: string | null
           approval_note?: string | null
           approved_by?: string | null
@@ -15869,6 +16060,9 @@ export type Database = {
           current_version_id?: string | null
           date?: string | null
           deadline?: string | null
+          derivation_type?: string | null
+          derived_from_ci_id?: string | null
+          derived_work_instructions?: string[] | null
           description?: string | null
           device_scope?: Json | null
           document_number?: string | null
@@ -15886,11 +16080,14 @@ export type Database = {
           is_excluded?: boolean | null
           is_predefined_core_template?: boolean | null
           is_record?: boolean | null
+          language?: string | null
           language_code?: string | null
+          language_variants?: Json | null
           markets?: Json | null
           milestone_due_date?: string | null
           name?: string
           need_template_update?: boolean | null
+          needs_review?: boolean | null
           next_review_date?: string | null
           phase_id?: string
           phases?: Json[] | null

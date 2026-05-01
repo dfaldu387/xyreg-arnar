@@ -27,6 +27,7 @@ import {
 } from '@/constants/sopAutoSeedTiers';
 import { SOP_FULL_CONTENT, sopContentToSections } from '@/data/sopFullContent';
 import { rewriteAllSopTokens } from '@/constants/sopAutoSeedTiers';
+import type { SOPSectionContent } from '@/data/sopContent/types';
 
 export interface SopSeedResult {
   inserted: number;
@@ -122,13 +123,21 @@ async function seedSopsForCompany(
       .filter(Boolean),
   );
 
+  // Pre-fetch any super-admin-edited section bodies from the FPD catalog;
+  // these override the hardcoded SOP_FULL_CONTENT for the SOPs being seeded.
+  const catalogOverrides = await fetchCatalogSectionOverrides(sopKeys);
+
   for (const sopKey of sopKeys) {
-    const content = SOP_FULL_CONTENT[sopKey];
-    if (!content) {
+    const baseContent = SOP_FULL_CONTENT[sopKey];
+    if (!baseContent) {
       result.failed++;
       result.errors.push(`${sopKey}: content definition missing`);
       continue;
     }
+    const overrideSections = catalogOverrides.get(sopKey);
+    const content = overrideSections
+      ? { ...baseContent, sections: overrideSections }
+      : baseContent;
 
     const fullName = `${content.sopNumber} ${content.title}`;
     const canonicalNumber = content.sopNumber.toUpperCase().trim();
@@ -214,6 +223,39 @@ async function seedSopsForCompany(
 
 function normalizeTitle(s: string): string {
   return s.toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Fetch super-admin-edited `default_sections` from the FPD catalog for the
+ * given SOP keys. Returns a map of sopKey -> sections; entries with empty
+ * sections fall through to the hardcoded SOP_FULL_CONTENT library.
+ */
+async function fetchCatalogSectionOverrides(
+  sopKeys: readonly string[],
+): Promise<Map<string, SOPSectionContent[]>> {
+  const overrides = new Map<string, SOPSectionContent[]>();
+  if (sopKeys.length === 0) return overrides;
+  try {
+    const { data, error } = await supabase
+      .from('fpd_sop_catalog' as never)
+      .select('sop_key, default_sections')
+      .in('sop_key', sopKeys as unknown as string[]);
+    if (error) {
+      console.warn('[sopAutoSeed] catalog override fetch failed:', error);
+      return overrides;
+    }
+    for (const row of (data as unknown as Array<{
+      sop_key: string;
+      default_sections: SOPSectionContent[] | null;
+    }>) ?? []) {
+      if (Array.isArray(row.default_sections) && row.default_sections.length > 0) {
+        overrides.set(row.sop_key, row.default_sections);
+      }
+    }
+  } catch (err) {
+    console.warn('[sopAutoSeed] catalog override fetch threw:', err);
+  }
+  return overrides;
 }
 
 /**
