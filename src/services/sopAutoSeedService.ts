@@ -26,7 +26,7 @@ import {
   type TierBSop,
 } from '@/constants/sopAutoSeedTiers';
 import { SOP_FULL_CONTENT, sopContentToSections } from '@/data/sopFullContent';
-import { rewriteAllSopTokens } from '@/constants/sopAutoSeedTiers';
+import { rewriteAllSopTokens, formatSopDisplayId } from '@/constants/sopAutoSeedTiers';
 import type { SOPSectionContent } from '@/data/sopContent/types';
 
 export interface SopSeedResult {
@@ -139,8 +139,11 @@ async function seedSopsForCompany(
       ? { ...baseContent, sections: overrideSections }
       : baseContent;
 
-    const fullName = `${content.sopNumber} ${content.title}`;
-    const canonicalNumber = content.sopNumber.toUpperCase().trim();
+    // Canonicalize to the 3-part form (SOP-XX-NNN) — required by the DB
+    // trigger `enforce_sop_subprefix` and our numbering rule.
+    const canonicalSopNumber = formatSopDisplayId(content.sopNumber);
+    const fullName = `${canonicalSopNumber} ${content.title}`;
+    const canonicalNumber = canonicalSopNumber.toUpperCase().trim();
     const canonicalTitle = normalizeTitle(content.title);
     const fullTitle = normalizeTitle(fullName);
 
@@ -165,7 +168,7 @@ async function seedSopsForCompany(
           company_id: companyId,
           phase_id: phaseId,
           document_type: 'SOP',
-          document_number: content.sopNumber,
+          document_number: canonicalSopNumber,
           document_scope: 'company_document',
           status: 'Draft',
           version: '1.0',
@@ -194,8 +197,8 @@ async function seedSopsForCompany(
         type: 'SOP',
         sections: personalized as unknown as Json,
         metadata: {
-          sopNumber: content.sopNumber,
-          document_number: content.sopNumber,
+          sopNumber: canonicalSopNumber,
+          document_number: canonicalSopNumber,
           seededFrom: 'tier-a-auto-seed',
           seededAt: new Date().toISOString(),
         } as unknown as Json,

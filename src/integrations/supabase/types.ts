@@ -10810,6 +10810,7 @@ export type Database = {
           updated_at: string
           user_agent: string | null
           user_id: string | null
+          videos_url: string[] | null
           viewport_size: string | null
         }
         Insert: {
@@ -10832,6 +10833,7 @@ export type Database = {
           updated_at?: string
           user_agent?: string | null
           user_id?: string | null
+          videos_url?: string[] | null
           viewport_size?: string | null
         }
         Update: {
@@ -10854,6 +10856,7 @@ export type Database = {
           updated_at?: string
           user_agent?: string | null
           user_id?: string | null
+          videos_url?: string[] | null
           viewport_size?: string | null
         }
         Relationships: [
@@ -28629,6 +28632,7 @@ export type Database = {
         Returns: string
       }
       can_manage_user_profiles: { Args: never; Returns: boolean }
+      canonicalize_sop_id: { Args: { legacy: string }; Returns: string }
       check_phase_system_health: {
         Args: never
         Returns: {
@@ -29432,6 +29436,7 @@ export type Database = {
         Args: { p_file_id: string }
         Returns: undefined
       }
+      sop_subprefix: { Args: { canonical: string }; Returns: string }
       standardize_company_phases: {
         Args: { target_company_id: string }
         Returns: {

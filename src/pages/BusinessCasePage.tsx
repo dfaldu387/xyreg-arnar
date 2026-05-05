@@ -78,39 +78,11 @@ const TAB_CONFIG = [
     description: 'Track your product\'s strategic planning progress with comprehensive phase-based activities and completion metrics.',
     investorRelevant: true,
   },
-{
-    value: 'business-canvas',
-    label: 'Business Canvas',
-    menuAccessKey: DEVICES_MENU_ACCESS.BUSINESS_CASE_CANVAS,
-    description: 'Visualize and plan your product\'s business model with the Business Canvas framework.',
-    investorRelevant: true,
-  },
-   {
-    value: 'team-profile',
-    label: 'Team',
-    menuAccessKey: DEVICES_MENU_ACCESS.BUSINESS_CASE_TEAM,
-    description: 'Manage and showcase your team members and their roles.',
-    investorRelevant: true,
-  },
-  {
-    value: 'market-analysis',
-    label: 'Market Analysis',
-    menuAccessKey: DEVICES_MENU_ACCESS.BUSINESS_CASE_COMPETITION,
-    description: 'Analyze market sizing (TAM/SAM/SOM) and track competitors via manual entry, EUDAMED database, FDA clearances, and global registrations.',
-    investorRelevant: true,
-  },
   {
     value: 'gtm-strategy',
     label: 'GTM',
     menuAccessKey: DEVICES_MENU_ACCESS.BUSINESS_CASE_CANVAS,
     description: 'Go-to-market channels, territory priority, and sales cycle planning.',
-    investorRelevant: true,
-  },
-  {
-    value: 'use-of-proceeds',
-    label: 'Use of Proceeds',
-    menuAccessKey: DEVICES_MENU_ACCESS.BUSINESS_CASE_CANVAS,
-    description: 'Allocation of raise across R&D, regulatory, team, commercial, and operations.',
     investorRelevant: true,
   },
   // {
@@ -120,20 +92,6 @@ const TAB_CONFIG = [
   //   description: 'Manufacturing stage, strategy, and capacity planning.',
   //   investorRelevant: true,
   // },
-  {
-    value: 'rnpv',
-    label: 'rNPV',
-    menuAccessKey: DEVICES_MENU_ACCESS.BUSINESS_CASE_RNPV,
-    description: 'Calculate risk-adjusted net present value to evaluate product investment potential.',
-    investorRelevant: false,
-  },
-  {
-    value: 'reimbursement',
-    label: 'Reimbursement',
-    menuAccessKey: DEVICES_MENU_ACCESS.BUSINESS_CASE_REIMBURSEMENT,
-    description: 'Track reimbursement codes, coverage policies, and payer landscape for your target markets.',
-    investorRelevant: true,
-  },
   {
     value: 'pricing-strategy',
     label: 'Pricing',
@@ -147,13 +105,6 @@ const TAB_CONFIG = [
     label: 'Strategic Horizon',
     menuAccessKey: DEVICES_MENU_ACCESS.BUSINESS_CASE_CANVAS,
     description: 'Define your strategic path: M&A, Independent Growth, IPO, Licensing, or PE.',
-    investorRelevant: true,
-  },
-  {
-    value: 'ip-strategy',
-    label: 'IP Strategy',
-    menuAccessKey: DEVICES_MENU_ACCESS.BUSINESS_CASE_CANVAS,
-    description: 'Map your IP protection strategy, ownership status, and FTO risk.',
     investorRelevant: true,
   },
 ];
@@ -226,6 +177,32 @@ export default function BusinessCasePage() {
   const isGenesisTab = activeTab === 'genesis';
   const isGenesisFlow = returnTo === 'genesis' || returnTo === 'venture-blueprint';
   const isInvestorFlow = (returnTo === 'investor-share' && !isProgressLoading) || isGenesisTab;
+
+  // Tabs that have been absorbed by Venture Blueprint as steps. Old deep links
+  // redirect to the matching VB step so existing URLs and shared links still work.
+  const ABSORBED_TAB_TO_BLUEPRINT_STEP: Record<string, string | null> = {
+    'business-canvas': null,
+    'team-profile': 'team-composition',
+    'market-analysis': 'market-sizing',
+    'use-of-proceeds': 'use-of-proceeds',
+    'rnpv': 'revenue-forecast',
+    'reimbursement': 'reimbursement',
+    'ip-strategy': 'ip-strategy',
+  };
+  useEffect(() => {
+    if (activeTab in ABSORBED_TAB_TO_BLUEPRINT_STEP) {
+      const next = new URLSearchParams(searchParams);
+      next.set('tab', 'venture-blueprint');
+      const stepId = ABSORBED_TAB_TO_BLUEPRINT_STEP[activeTab];
+      if (stepId) {
+        next.set('step', stepId);
+      } else {
+        next.delete('step');
+      }
+      setSearchParams(next, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
 
   // Auto-scroll to first checklist item when navigating from Genesis sidebar
   const genesisScrollTargets: Record<string, string> = {
@@ -651,7 +628,7 @@ export default function BusinessCasePage() {
               overallProgress={Math.round((readinessChecklist.filter(r => r.complete).length / readinessChecklist.length) * 100)}
             />
           )}
-          <div className={`flex-1 overflow-y-auto ${currentTab === 'genesis' && productId && !isProgressLoading && readinessChecklist.length > 0 ? 'mr-[280px] lg:mr-[300px] xl:mr-[320px]' : ''}`}>
+          <div className={`flex-1 overflow-y-auto ${(currentTab === 'genesis' && productId && !isProgressLoading && readinessChecklist.length > 0) || currentTab === 'venture-blueprint' ? 'mr-[280px] lg:mr-[300px] xl:mr-[320px]' : ''}`}>
             <div className="w-full py-6 max-w-none">
               <div className="w-full space-y-6">
                 <TooltipProvider>

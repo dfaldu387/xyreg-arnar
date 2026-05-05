@@ -2,7 +2,18 @@ import React, { useEffect, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { LoadingSpinner } from '@/components/ui/loading-spinner';
 import { Badge } from '@/components/ui/badge';
-import { History, Plus, Pencil, Trash2 } from 'lucide-react';
+import {
+  History,
+  FilePlus,
+  Pencil,
+  Trash2,
+  CheckCircle2,
+  Users,
+  ArrowRight,
+  ShieldCheck,
+  XCircle,
+  Calendar as CalendarIcon,
+} from 'lucide-react';
 import { format } from 'date-fns';
 
 type FieldChange = {
@@ -20,16 +31,144 @@ type AuditEntry = {
   user_name?: string;
 };
 
-const ACTION_META: Record<string, { label: string; icon: React.ComponentType<any>; tone: string }> = {
-  ccr_created: { label: 'Created', icon: Plus, tone: 'bg-green-100 text-green-800 border-green-200' },
-  ccr_updated: { label: 'Updated', icon: Pencil, tone: 'bg-blue-100 text-blue-800 border-blue-200' },
-  ccr_deleted: { label: 'Deleted', icon: Trash2, tone: 'bg-red-100 text-red-800 border-red-200' },
+type Meta = { label: string; icon: React.ComponentType<any>; tone: string; nodeTone: string };
+
+const ACTION_META: Record<string, Meta> = {
+  ccr_created: {
+    label: 'Created',
+    icon: FilePlus,
+    tone: 'bg-green-100 text-green-800 border-green-200',
+    nodeTone: 'bg-green-100 text-green-700 ring-green-200',
+  },
+  ccr_updated: {
+    label: 'Updated',
+    icon: Pencil,
+    tone: 'bg-blue-100 text-blue-800 border-blue-200',
+    nodeTone: 'bg-blue-100 text-blue-700 ring-blue-200',
+  },
+  ccr_deleted: {
+    label: 'Deleted',
+    icon: Trash2,
+    tone: 'bg-red-100 text-red-800 border-red-200',
+    nodeTone: 'bg-red-100 text-red-700 ring-red-200',
+  },
 };
+
+// For ccr_updated entries, refine the meta based on which fields changed so
+// the timeline conveys *what kind* of update happened at a glance.
+function inferUpdateMeta(changes: FieldChange[]): Meta {
+  if (changes.length === 0) return ACTION_META.ccr_updated;
+  const fields = changes.map((c) => c.field);
+  const has = (predicate: (f: string) => boolean) => fields.some(predicate);
+  const all = (predicate: (f: string) => boolean) => fields.every(predicate);
+
+  const isApprovalField = (f: string) =>
+    f.endsWith('_approved') || f.endsWith('_approved_at') || f.endsWith('_approved_by');
+  const isReviewerField = (f: string) => f.endsWith('_reviewer_id');
+
+  if (has((f) => f === 'status')) {
+    const statusChange = changes.find((c) => c.field === 'status');
+    const toVal = String(statusChange?.newValue ?? '').toLowerCase();
+    if (toVal === 'approved') {
+      return {
+        label: 'Approved',
+        icon: ShieldCheck,
+        tone: 'bg-emerald-100 text-emerald-800 border-emerald-200',
+        nodeTone: 'bg-emerald-100 text-emerald-700 ring-emerald-200',
+      };
+    }
+    if (toVal === 'rejected') {
+      return {
+        label: 'Rejected',
+        icon: XCircle,
+        tone: 'bg-red-100 text-red-800 border-red-200',
+        nodeTone: 'bg-red-100 text-red-700 ring-red-200',
+      };
+    }
+    if (toVal === 'closed') {
+      return {
+        label: 'Closed',
+        icon: XCircle,
+        tone: 'bg-slate-100 text-slate-800 border-slate-200',
+        nodeTone: 'bg-slate-100 text-slate-700 ring-slate-200',
+      };
+    }
+    return {
+      label: 'Status changed',
+      icon: ArrowRight,
+      tone: 'bg-indigo-100 text-indigo-800 border-indigo-200',
+      nodeTone: 'bg-indigo-100 text-indigo-700 ring-indigo-200',
+    };
+  }
+  if (all(isApprovalField)) {
+    return {
+      label: 'Approval recorded',
+      icon: CheckCircle2,
+      tone: 'bg-emerald-100 text-emerald-800 border-emerald-200',
+      nodeTone: 'bg-emerald-100 text-emerald-700 ring-emerald-200',
+    };
+  }
+  if (all(isReviewerField)) {
+    return {
+      label: 'Reviewers assigned',
+      icon: Users,
+      tone: 'bg-violet-100 text-violet-800 border-violet-200',
+      nodeTone: 'bg-violet-100 text-violet-700 ring-violet-200',
+    };
+  }
+  if (all((f) => TIMESTAMP_FIELDS.has(f))) {
+    return {
+      label: 'Date updated',
+      icon: CalendarIcon,
+      tone: 'bg-amber-100 text-amber-800 border-amber-200',
+      nodeTone: 'bg-amber-100 text-amber-700 ring-amber-200',
+    };
+  }
+  return ACTION_META.ccr_updated;
+}
 
 const HIDDEN_UPDATE_FIELDS = new Set([
   // Always change on touch — noisy in the diff list.
   // (created_at/updated_at/id are already excluded server-side.)
 ]);
+
+// Fields whose values are user UUIDs; render the user's name in the audit log.
+const USER_ID_FIELDS = new Set([
+  'technical_reviewer_id',
+  'quality_reviewer_id',
+  'regulatory_reviewer_id',
+  'technical_approved_by',
+  'quality_approved_by',
+  'regulatory_approved_by',
+  'owner_id',
+  'created_by',
+  'updated_by',
+]);
+
+// Fields whose values are ISO timestamps; render as locale date/time.
+const TIMESTAMP_FIELDS = new Set([
+  'technical_approved_at',
+  'quality_approved_at',
+  'regulatory_approved_at',
+  'submitted_at',
+  'approved_at',
+  'rejected_at',
+  'closed_at',
+  'implemented_date',
+  'verified_date',
+  'target_implementation_date',
+]);
+
+// Fields whose values are booleans; render as Yes/No (or Approved/Pending for *_approved).
+const BOOLEAN_FIELDS = new Set([
+  'technical_approved',
+  'quality_approved',
+  'regulatory_approved',
+  'regulatory_impact',
+]);
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}([T\s]\d{2}:\d{2}(:\d{2})?(\.\d+)?(Z|[+-]\d{2}:?\d{2})?)?$/;
 
 function formatFieldName(field: string): string {
   return field
@@ -42,6 +181,22 @@ function truncate(value: string | null | undefined, max = 120): string {
   if (value === null || value === undefined || value === '') return '—';
   const str = String(value);
   return str.length > max ? str.slice(0, max) + '…' : str;
+}
+
+function formatTimestamp(value: string): string {
+  try {
+    const d = new Date(value);
+    if (isNaN(d.getTime())) return value;
+    return format(d, 'MMM d, yyyy HH:mm');
+  } catch {
+    return value;
+  }
+}
+
+function formatBoolean(field: string, value: any): string {
+  const truthy = value === true || value === 'true';
+  if (field.endsWith('_approved')) return truthy ? 'Approved' : 'Pending';
+  return truthy ? 'Yes' : 'No';
 }
 
 interface CCRAuditLogProps {
@@ -72,26 +227,80 @@ export function CCRAuditLog({ ccrId }: CCRAuditLogProps) {
       }
 
       const rows = (data ?? []) as AuditEntry[];
-      const userIds = Array.from(new Set(rows.map((r) => r.user_id).filter(Boolean))) as string[];
+      const idsToResolve = new Set<string>();
+      try {
+        rows.forEach((r) => {
+          if (r.user_id) idsToResolve.add(r.user_id);
+          if (!Array.isArray(r.changes)) return;
+          r.changes.forEach((c) => {
+            if (!c || !USER_ID_FIELDS.has(c.field)) return;
+            [c.oldValue, c.newValue].forEach((v) => {
+              if (typeof v === 'string' && UUID_RE.test(v)) idsToResolve.add(v);
+            });
+          });
+        });
+      } catch (e) {
+        console.error('[CCRAuditLog] failed to scan audit changes for user IDs', e);
+      }
+
       let nameById = new Map<string, string>();
-      if (userIds.length > 0) {
-        const { data: profiles } = await supabase
+      if (idsToResolve.size > 0) {
+        const { data: profiles, error: profilesError } = await supabase
           .from('user_profiles')
           .select('id, first_name, last_name, email')
-          .in('id', userIds);
+          .in('id', Array.from(idsToResolve));
+        if (profilesError) {
+          console.error('[CCRAuditLog] failed to load user profiles', profilesError);
+        }
         nameById = new Map(
           (profiles ?? []).map((p: any) => {
             const full = `${p.first_name ?? ''} ${p.last_name ?? ''}`.trim();
-            return [p.id, full || p.email || 'Unknown user'];
+            const display = full && p.email
+              ? `${full} (${p.email})`
+              : full || p.email || 'Unknown user';
+            return [p.id, display];
           }),
         );
       }
 
+      const resolveValue = (field: string, value: any) => {
+        if (value === null || value === undefined || value === '') return value;
+        if (USER_ID_FIELDS.has(field)) {
+          if (typeof value === 'string' && UUID_RE.test(value)) {
+            return nameById.get(value) ?? value;
+          }
+          return value;
+        }
+        if (BOOLEAN_FIELDS.has(field) || typeof value === 'boolean') {
+          return formatBoolean(field, value);
+        }
+        if (TIMESTAMP_FIELDS.has(field) && typeof value === 'string' && ISO_DATE_RE.test(value)) {
+          return formatTimestamp(value);
+        }
+        return value;
+      };
+
+      if (cancelled) return;
       setEntries(
-        rows.map((r) => ({ ...r, user_name: r.user_id ? nameById.get(r.user_id) || 'Unknown user' : 'System' })),
+        rows.map((r) => ({
+          ...r,
+          user_name: r.user_id ? nameById.get(r.user_id) || 'Unknown user' : 'System',
+          changes: Array.isArray(r.changes)
+            ? r.changes.map((c) => ({
+                ...c,
+                oldValue: resolveValue(c.field, c.oldValue),
+                newValue: resolveValue(c.field, c.newValue),
+              }))
+            : r.changes,
+        })),
       );
       setLoading(false);
-    })();
+    })().catch((err) => {
+      if (cancelled) return;
+      console.error('[CCRAuditLog] unexpected loader failure', err);
+      setEntries([]);
+      setLoading(false);
+    });
     return () => {
       cancelled = true;
     };
@@ -108,28 +317,37 @@ export function CCRAuditLog({ ccrId }: CCRAuditLogProps) {
   }
 
   return (
-    <div className="space-y-4">
-      {entries.map((entry) => {
-        const meta = ACTION_META[entry.action] ?? {
-          label: entry.action,
-          icon: History,
-          tone: 'bg-muted text-muted-foreground border-border',
-        };
-        const Icon = meta.icon;
-        const visibleChanges =
-          entry.action === 'ccr_updated'
-            ? (entry.changes ?? []).filter((c) => !HIDDEN_UPDATE_FIELDS.has(c.field))
-            : [];
+    <div className="relative pl-10">
+      {/* Vertical timeline line */}
+      <div className="absolute left-4 top-2 bottom-2 w-px bg-border" aria-hidden />
+      <ol className="space-y-6">
+        {entries.map((entry) => {
+          const baseMeta: Meta = ACTION_META[entry.action] ?? {
+            label: entry.action,
+            icon: History,
+            tone: 'bg-muted text-muted-foreground border-border',
+            nodeTone: 'bg-muted text-muted-foreground ring-border',
+          };
+          const visibleChanges =
+            entry.action === 'ccr_updated'
+              ? (entry.changes ?? []).filter((c) => !HIDDEN_UPDATE_FIELDS.has(c.field))
+              : [];
+          const meta =
+            entry.action === 'ccr_updated' ? inferUpdateMeta(visibleChanges) : baseMeta;
+          const Icon = meta.icon;
 
-        return (
-          <div key={entry.id} className="flex items-start gap-4 pb-4 border-b last:border-0">
-            <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-              <Icon className="h-4 w-4 text-primary" />
-            </div>
-            <div className="flex-1 min-w-0">
+          return (
+            <li key={entry.id} className="relative">
+              {/* Timeline node — sits on the vertical line */}
+              <div
+                className={`absolute -left-10 top-0 h-7 w-7 rounded-full ring-4 ring-background flex items-center justify-center shadow-sm ${meta.nodeTone}`}
+              >
+                <Icon className="h-3.5 w-3.5" />
+              </div>
+
               <div className="flex items-center gap-2 flex-wrap">
                 <Badge variant="outline" className={meta.tone}>{meta.label}</Badge>
-                {entry.action === 'ccr_updated' && (
+                {entry.action === 'ccr_updated' && visibleChanges.length > 0 && (
                   <span className="text-xs text-muted-foreground">
                     {visibleChanges.length} field{visibleChanges.length === 1 ? '' : 's'} changed
                   </span>
@@ -140,25 +358,100 @@ export function CCRAuditLog({ ccrId }: CCRAuditLogProps) {
               </p>
 
               {entry.action === 'ccr_updated' && visibleChanges.length > 0 && (
-                <div className="mt-2 rounded-md border bg-muted/30 divide-y">
-                  {visibleChanges.map((change, idx) => (
-                    <div key={idx} className="px-3 py-2 text-sm">
-                      <div className="font-medium">{formatFieldName(change.field)}</div>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-1 mt-0.5 text-xs">
-                        <div>
-                          <span className="text-muted-foreground">From: </span>
-                          <span className="line-through opacity-70">{truncate(change.oldValue)}</span>
+                meta.label === 'Approval recorded' ? (
+                  <ApprovalSummary changes={visibleChanges} />
+                ) : (
+                  <div className="mt-2 rounded-md border bg-muted/30 divide-y">
+                    {visibleChanges.map((change, idx) => {
+                      const hasOld =
+                        change.oldValue !== null &&
+                        change.oldValue !== undefined &&
+                        change.oldValue !== '';
+                      return (
+                        <div key={idx} className="px-3 py-2 text-sm">
+                          <div className="font-medium">{formatFieldName(change.field)}</div>
+                          <div className={`grid grid-cols-1 ${hasOld ? 'md:grid-cols-2' : ''} gap-1 mt-0.5 text-xs`}>
+                            {hasOld && (
+                              <div>
+                                <span className="">From: </span>
+                                <span className="line-through opacity-70">{truncate(change.oldValue)}</span>
+                              </div>
+                            )}
+                            <div>
+                              <span className="">To: </span>
+                              <span className="text-muted-foreground">{truncate(change.newValue)}</span>
+                            </div>
+                          </div>
                         </div>
-                        <div>
-                          <span className="text-muted-foreground">To: </span>
-                          <span>{truncate(change.newValue)}</span>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                      );
+                    })}
+                  </div>
+                )
               )}
+            </li>
+          );
+        })}
+      </ol>
+    </div>
+  );
+}
+
+const GATE_LABELS: Record<string, string> = {
+  technical: 'Technical',
+  quality: 'Quality',
+  regulatory: 'Regulatory',
+};
+
+function ApprovalSummary({ changes }: { changes: FieldChange[] }) {
+  // Group changes by gate prefix (technical / quality / regulatory).
+  const gates = new Map<string, { approved?: any; approvedAt?: any; approvedBy?: any }>();
+  for (const c of changes) {
+    const m = c.field.match(/^(technical|quality|regulatory)_(approved|approved_at|approved_by)$/);
+    if (!m) continue;
+    const gate = m[1];
+    const kind = m[2] as 'approved' | 'approved_at' | 'approved_by';
+    const entry = gates.get(gate) ?? {};
+    if (kind === 'approved') entry.approved = c.newValue;
+    if (kind === 'approved_at') entry.approvedAt = c.newValue;
+    if (kind === 'approved_by') entry.approvedBy = c.newValue;
+    gates.set(gate, entry);
+  }
+  if (gates.size === 0) return null;
+
+  return (
+    <div className="mt-2 space-y-2">
+      {Array.from(gates.entries()).map(([gate, info]) => {
+        const isRevoked = info.approved === 'Pending' || info.approved === false || info.approved === 'false';
+        const label = GATE_LABELS[gate] ?? gate;
+        return (
+          <div
+            key={gate}
+            className={`rounded-md border px-3 py-2 ${isRevoked ? 'bg-amber-50 border-amber-200' : 'bg-emerald-50 border-emerald-200'}`}
+          >
+            <div className="flex items-center gap-2 text-sm">
+              {isRevoked ? (
+                <XCircle className="h-4 w-4 text-amber-600 shrink-0" />
+              ) : (
+                <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+              )}
+              <span className="font-medium">
+                {label} approval {isRevoked ? 'revoked' : 'recorded'}
+              </span>
             </div>
+            {!isRevoked && (info.approvedBy || info.approvedAt) && (
+              <div className="mt-1 ml-6 text-xs text-muted-foreground space-y-0.5">
+                {info.approvedBy && (
+                  <div>
+                    <span className="font-medium text-foreground">Approved by:</span> {info.approvedBy}
+                  </div>
+                )}
+                {info.approvedAt && (
+                  <div>
+                    <span className="font-medium text-foreground">At:</span> {info.approvedAt}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         );
       })}

@@ -1,44 +1,41 @@
-# Generalised role-driven training derivation
 
-The previous plan special-cased Marcus. Correcting course: the fix is structural — derive recommended training from each user's defined role on `user_company_access`, and where the role is undefined, force the user to define it before training can be recommended. No per-person backfills.
+## Two issues, two answers
 
-## Current data reality
-`user_company_access` already carries: `is_internal`, `department` (free text), `functional_area` (enum), `external_role` (enum). For Actiweight today:
-- 2 consultants → `external_role='consultant'`, no department.
-- Marcus → `is_internal=true`, `department='Internal'`, `functional_area=NULL`. "Internal" is a bucket, not a role; no job title is captured anywhere.
+### 1. SSOT — yes, it is wired correctly
 
-So the gap is universal: there is no field for the **job title / position** (CEO, Quality Manager, R&D Engineer…), and `functional_area` is optional.
+Every Venture Blueprint sub-step that uses an inline editor writes through `GenesisSsotEditor.tsx`, which `update`s a column on the `products` row (or a key inside the `intended_purpose_data` / `key_technology_characteristics` JSONB on `products`). That is the exact same store that Device Definition reads and writes from — there is no parallel "blueprint-only" table.
 
-## A. Schema (one migration)
-Add `job_title text` to `user_company_access` (nullable). No data backfill — users (or admins) fill it in via Settings.
+Concretely:
+- `binding.kind = 'product-column'` → `products.<column>` (e.g. `device_name`, `trl_level`, `intended_use`)
+- `binding.kind = 'product-jsonb'` → key inside `products.intended_purpose_data` or `products.key_technology_characteristics`
+- `binding.kind = 'open-module'` (Tier C: BOM, IP, Team, rNPV, Reimbursement, Target Markets…) → no shadow copy, the dedicated module is the SSOT
 
-## B. Settings — People editor
-In `AddStakeholderUserSheet` and the corresponding edit sheet, add a "Job title" input directly under the Functional Area select, for internal users. External users keep `external_role`.
+So filling TRL = 3 in the blueprint and TRL on Device Definition are the same row/column. No separate state, no duplication. I'll add a one-line note to memory confirming this so it stays the rule.
 
-## C. Label composition (`trainingGroups.ts`)
-`getInferredRoleLabel` returns:
-- internal + `job_title` + `functional_area` → `"<FunctionalArea> | <Job title>"` (e.g. `Management | CEO`).
-- internal + only `job_title` → `<Job title>` + amber "Set functional area".
-- internal + only `functional_area` → `<FunctionalArea>` + amber "Add job title".
-- internal + neither (only `department='Internal'`) → amber "Define role" badge with a CTA link to Settings → People for that user.
-- external → existing `external_role` label unchanged.
+### 2. Floating step pill — port the gap-analysis one
 
-`getRecommendedGroupsForUser` keeps using `functional_area` + `external_role` + keyword scan over `department` / `job_title`. Adding `job_title` to the keyword scan is the only behavioural change (so "CEO", "Quality Manager", etc. resolve even when functional_area is empty).
+You're right: `ProductGapItemDetailPage.tsx` (lines 720–765) renders a fixed bottom pill: `[← prev section] [current step (amber, Step X/Y)] [next section →]` with green dots when complete. Venture Blueprint's `BlueprintStepDetail.tsx` only has a plain inline ghost "Previous step / Next step" pair (lines 145–168). That's why it feels different.
 
-## D. Wizard — `PeopleRecommendationTable`
-- Render the new combined label.
-- When a row's role is undefined, disable "Apply" and show inline link "Define role in Settings → People" (deep link to that user's edit sheet).
-- Keep "Apply all" but it skips undefined-role rows and reports "<n> skipped — role undefined".
+I will lift the gap-analysis pill into a small shared component and use it in the blueprint detail view.
 
-## E. Copy fix
-Replace the `§` glyph with the word "Section" in the wizard empty-state alert (the "Russian letters" report — it is the section sign, not Cyrillic; English wording avoids the confusion).
+## Changes
 
-## Files
-- `supabase/migrations/*` — add `job_title` column.
-- `src/hooks/useCompanyUsers.ts` — select/update `job_title`, expose as `title`.
-- `src/components/settings/AddStakeholderUserSheet.tsx` (+ edit sheet) — Job title input.
-- `src/constants/trainingGroups.ts` — label + recommendation logic.
-- `src/components/training/TrainingSetupWizard.tsx` — disabled state, deep link, skip-count, copy fix.
+1. **New** `src/components/product/business-case/genesis/BlueprintStepFloatingNav.tsx`
+   - Visual + behavior copy of the pill in `ProductGapItemDetailPage.tsx` (fixed bottom, rounded, amber center, prev/next pills with dot + label + complete-state colors).
+   - Props: `currentLabel`, `currentIndex`, `totalSteps`, `currentComplete`, `prevLabel?`, `prevComplete?`, `onPrev?`, `nextLabel`, `nextComplete?`, `onNext`.
+
+2. **Edit** `src/components/product/business-case/genesis/BlueprintStepDetailView.tsx`
+   - Compute global step index across the flat list of all sub-steps (already has `flatSteps`).
+   - Resolve prev/next sub-step labels from `GENESIS_SECTIONS` and their completion from the `completion` map already passed in.
+   - Render `<BlueprintStepFloatingNav />` at the bottom; remove (or hide) the inline prev/next pair in `BlueprintStepDetail.tsx` to avoid duplication.
+
+3. **Edit** `src/components/product/business-case/genesis/BlueprintStepDetail.tsx`
+   - Remove the inline `Previous step / Next step` row (lines 144–168). The floating pill replaces it. Keep `onBack` / "Back to Venture Blueprint".
+
+4. **Memory**: add a short `mem://features/genesis/ssot-binding` confirming Venture Blueprint inline edits are SSOT-on-`products` (no shadow store), and Tier C steps defer to their dedicated module.
 
 ## Out of scope
-No backfill for Marcus or anyone else, no `company_roles` rewiring, no auth/RLS changes, no new tables.
+
+- No DB changes.
+- No changes to which step is "complete" (already fixed in the previous loop).
+- No restyle of the gap-analysis pill — we mirror it verbatim for visual consistency.

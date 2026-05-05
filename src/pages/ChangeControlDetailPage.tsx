@@ -38,6 +38,7 @@ import { CCRLinkedDocuments } from '@/components/change-control/CCRLinkedDocumen
 import { useCCRLinkedDocsDedupedCount } from '@/hooks/useCCRLinkedDocsDedupedCount';
 import { AppNotificationService } from '@/services/appNotificationService';
 import { ESignPopup } from '@/components/esign/ESignPopup';
+import { useAuth } from '@/context/AuthContext';
 
 // ---------------------------------------------------------------------------
 // Inline edit helpers (Draft-only)
@@ -161,6 +162,7 @@ export default function ChangeControlDetailPage() {
   const [searchParams, setSearchParams] = useSearchParams();
 
   const { lang } = useTranslation();
+  const { user: currentUser } = useAuth();
   const { data: ccr, isLoading: ccrLoading } = useCCRById(ccrId);
   const { data: transitions = [], isLoading: transitionsLoading } = useCCRTransitions(ccrId);
   const deleteCCR = useDeleteCCR();
@@ -773,67 +775,68 @@ export default function ChangeControlDetailPage() {
               </Card>
             </div>
 
-            {/* Approvals */}
-            <Card>
-              <CardHeader>
-                <div className="flex items-center justify-between">
-                  <CardTitle className="flex items-center gap-2">
-                    <CheckCircle className="h-5 w-5" />
-                    {lang('changeControl.approvals')}
-                  </CardTitle>
-                  {ccr.status === 'under_review' && (
-                    <p className="text-xs text-muted-foreground">
-                      Click a tile to record / revoke your approval
-                    </p>
-                  )}
-                </div>
-              </CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  {([
-                    { key: 'technical', label: lang('changeControl.technical'), approved: ccr.technical_approved, at: ccr.technical_approved_at, reviewerId: ccr.technical_reviewer_id },
-                    { key: 'quality', label: lang('changeControl.quality'), approved: ccr.quality_approved, at: ccr.quality_approved_at, reviewerId: ccr.quality_reviewer_id },
-                    { key: 'regulatory', label: lang('changeControl.regulatory'), approved: ccr.regulatory_approved, at: ccr.regulatory_approved_at, reviewerId: ccr.regulatory_reviewer_id },
-                  ] as const).map(({ key, label, approved, at, reviewerId }) => {
-                    const assigneeName = reviewerName(reviewerId);
-                    const interactive = ccr.status === 'under_review';
-                    return (
-                      <button
-                        key={key}
-                        type="button"
-                        disabled={!interactive || updateCCR.isPending}
-                        onClick={() => handleApprovalToggle(key)}
-                        className={`flex items-center gap-3 p-3 border rounded-lg text-left transition ${
-                          interactive ? 'hover:bg-muted/50 cursor-pointer' : 'cursor-default'
-                        } ${approved ? 'border-green-300' : ''}`}
-                      >
-                        <div className={`h-10 w-10 rounded-full flex items-center justify-center ${approved ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-400'}`}>
-                          <CheckCircle className="h-5 w-5" />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="font-medium">{label}</p>
-                          <p className="text-sm text-muted-foreground truncate">
-                            {approved
-                              ? `${lang('changeControl.approved')}${at ? ' • ' + format(new Date(at), 'MMM d, HH:mm') : ''}`
-                              : lang('changeControl.pending')}
-                          </p>
-                          {assigneeName && (
-                            <p className="text-xs text-muted-foreground truncate mt-0.5">
-                              Assigned: {assigneeName}
-                            </p>
-                          )}
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-                {ccr.status === 'under_review' && !allThreeApproved && (
-                  <p className="text-xs text-muted-foreground mt-3">
-                    All three gates must be approved before the CCR can be moved to Approved (ISO 13485 §7.3.9 / 21 CFR 820.30(i)).
-                  </p>
-                )}
-              </CardContent>
-            </Card>
+            {ccr.status === 'under_review' && currentUser?.id && (() => {
+              const myGates: Array<{ key: 'technical' | 'quality' | 'regulatory'; label: string }> = [];
+              if (ccr.technical_reviewer_id === currentUser.id) myGates.push({ key: 'technical', label: lang('changeControl.technical') });
+              if (ccr.quality_reviewer_id === currentUser.id) myGates.push({ key: 'quality', label: lang('changeControl.quality') });
+              if (ccr.regulatory_reviewer_id === currentUser.id) myGates.push({ key: 'regulatory', label: lang('changeControl.regulatory') });
+              if (myGates.length === 0) return null;
+              return (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <ShieldCheck className="h-5 w-5" />
+                      Your Approvals
+                    </CardTitle>
+                    <CardDescription>
+                      You're assigned as the reviewer for the gate{myGates.length === 1 ? '' : 's'} below. Approving requires an electronic signature (21 CFR Part 11).
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                      {myGates.map(({ key, label }) => {
+                        const approved = ccr[`${key}_approved` as const];
+                        const approvedAt = ccr[`${key}_approved_at` as const];
+                        return (
+                          <div
+                            key={key}
+                            className={`flex items-center justify-between gap-3 rounded-lg border p-3 ${approved ? 'border-green-300 bg-green-50' : 'bg-muted/30'}`}
+                          >
+                            <div className="min-w-0">
+                              <p className="font-medium text-sm">{label}</p>
+                              <p className="text-xs text-muted-foreground truncate">
+                                {approved
+                                  ? `${lang('changeControl.approved')}${approvedAt ? ' • ' + format(new Date(approvedAt), 'MMM d, HH:mm') : ''}`
+                                  : lang('changeControl.pending')}
+                              </p>
+                            </div>
+                            <Button
+                              size="sm"
+                              variant={approved ? 'outline' : 'default'}
+                              disabled={updateCCR.isPending}
+                              onClick={() => handleApprovalToggle(key)}
+                            >
+                              {approved ? (
+                                <>
+                                  <RotateCcw className="h-3.5 w-3.5 mr-1.5" />
+                                  Revoke
+                                </>
+                              ) : (
+                                <>
+                                  <Check className="h-3.5 w-3.5 mr-1.5" />
+                                  Approve & Sign
+                                </>
+                              )}
+                            </Button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })()}
+
           </TabsContent>
 
           <TabsContent value="impact" className="space-y-4">
@@ -985,9 +988,59 @@ export default function ChangeControlDetailPage() {
                           <p className="text-sm text-muted-foreground mt-1">
                             {transition.transitioner?.full_name || lang('changeControl.unknown')} • {format(new Date(transition.created_at), 'MMM d, yyyy HH:mm')}
                           </p>
-                          {transition.transition_reason && (
-                            <p className="text-sm mt-2">{transition.transition_reason}</p>
-                          )}
+                          {transition.transition_reason && (() => {
+                            const raw = transition.transition_reason;
+                            const marker = '\n\nAssigned reviewers — ';
+                            const idx = raw.indexOf(marker);
+                            const userReason = idx >= 0 ? raw.slice(0, idx).trim() : raw.trim();
+                            const reviewerBlock = idx >= 0 ? raw.slice(idx + marker.length).replace(/\.$/, '') : '';
+                            const reviewerEntries = reviewerBlock
+                              ? reviewerBlock.split(';').map((s) => {
+                                  const [gate, ...rest] = s.split(':');
+                                  return { gate: gate.trim(), name: rest.join(':').trim() };
+                                }).filter((r) => r.gate && r.name)
+                              : [];
+                            const gateMeta: Record<string, { icon: React.ComponentType<any>; tone: string }> = {
+                              Technical: { icon: Pencil, tone: 'bg-blue-50 text-blue-700 border-blue-200' },
+                              Quality: { icon: CheckCircle, tone: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+                              Regulatory: { icon: ShieldCheck, tone: 'bg-violet-50 text-violet-700 border-violet-200' },
+                            };
+                            return (
+                              <div className="mt-3 space-y-3">
+                                {userReason && (
+                                  <div className="border-l-2 border-muted-foreground/30 pl-3 py-0.5">
+                                    <p className="text-xs uppercase tracking-wide text-muted-foreground mb-0.5">Reason</p>
+                                    <p className="text-sm whitespace-pre-wrap">{userReason}</p>
+                                  </div>
+                                )}
+                                {reviewerEntries.length > 0 && (
+                                  <div>
+                                    <p className="text-xs uppercase tracking-wide text-muted-foreground mb-1.5">
+                                      Assigned reviewers
+                                    </p>
+                                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                                      {reviewerEntries.map((r) => {
+                                        const meta = gateMeta[r.gate] ?? { icon: Users, tone: 'bg-muted text-muted-foreground border-border' };
+                                        const Icon = meta.icon;
+                                        return (
+                                          <div
+                                            key={r.gate}
+                                            className={`flex items-start gap-2 rounded-md border px-3 py-2 ${meta.tone}`}
+                                          >
+                                            <Icon className="h-4 w-4 mt-0.5 shrink-0" />
+                                            <div className="min-w-0">
+                                              <p className="text-[11px] font-semibold uppercase tracking-wide opacity-80">{r.gate}</p>
+                                              <p className="text-sm font-medium text-foreground truncate" title={r.name}>{r.name}</p>
+                                            </div>
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })()}
                         </div>
                       </div>
                     ))}
@@ -1043,13 +1096,21 @@ export default function ChangeControlDetailPage() {
         ccr={ccr}
       />
 
-      {esignGate && (
+      {esignGate && currentUser?.id && (
         <ESignPopup
           open={!!esignGate}
           onOpenChange={(o) => { if (!o) setEsignGate(null); }}
           documentId={ccr.id}
           documentName={`${ccr.ccr_id} — ${esignGate[0].toUpperCase() + esignGate.slice(1)} Approval`}
           onComplete={handleGateSigned}
+          selfSigner={{
+            userId: currentUser.id,
+            displayName:
+              companyUsers.find((u) => u.id === currentUser.id)?.name ??
+              currentUser.email ??
+              'Reviewer',
+            meaning: 'approver',
+          }}
         />
       )}
 

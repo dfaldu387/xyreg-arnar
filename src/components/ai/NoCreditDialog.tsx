@@ -116,7 +116,7 @@ export function NoCreditDialog({ open, onOpenChange }: NoCreditDialogProps) {
         message: `${userName} has requested more AI credits. The team has run out of monthly credits and needs a Booster Pack to continue using AI features.`,
         priority: 'high' as const,
         entity_type: 'ai_credits',
-        action_url: `/app/company/${encodeURIComponent(companyName)}/settings?tab=general`,
+        action_url: `/app/company/${encodeURIComponent(companyName)}/profile?tab=addons`,
       }));
 
       const { error } = await notificationService.createBulkNotifications(notifications);

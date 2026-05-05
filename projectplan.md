@@ -212,3 +212,20 @@ Clicking the Devices L1 module should always open the device area, not leave the
 - Mission Control's Compliance Journey strip and `CompanyProductsPage` redirect now use the same canonical route.
 - `PlatformProfile` linked products now navigate to `/app/product/:id` instead of the non-existent `/app/company/:companyName/products/:id`.
 - `DualPhaseGanttChart` now lazy-loads `GanttChartV23` so the local gantt source (which imports several missing `@svar-ui/*` transitive packages) is no longer pulled into the ProductDashboard bundle. The readonly branch wraps it in `Suspense` with a small loader.
+
+---
+
+## Update — Venture Blueprint: Genesis-style eye drawer + investor setup
+
+### Done
+- [x] Added `Eye` icon button on each `BlueprintStepRow` (replaces the chevron-only affordance).
+- [x] Removed in-page detail takeover from `BlueprintLaunchView` — it always shows the section list now.
+- [x] New `BlueprintStepDrawer` (shadcn `Sheet`, right side) reuses the existing `BlueprintStepDetail` body (requirement card, response editor, prev/next, open-module CTA).
+- [x] `VentureBlueprint` now mounts the drawer; URL `?step=<id>` drives open/close, prev/next updates the URL in place. No cross-module redirects.
+- [x] Copied the Genesis investor setup onto the Blueprint landing: `XyregGenesisWelcome`, `GenesisProgressHeader` with Share with Investor + Share on Marketplace + Next CTA, and `EnhancedPitchBuilder` (the "what to share" configurator).
+- [x] Added the two share dialogs (`InvestorShareCard`, `MarketplaceShareCard`) wired to `companyId`/`companyName`/`productId`, exactly like `XyRegGenesis`.
+
+### Review
+The two visible parity issues are now fixed:
+- a) Clicking a Blueprint row no longer expands a B-Case panel inline. The eye icon opens a Genesis-style side drawer with the same requirement + response editor.
+- b) The Blueprint landing now mirrors the Genesis investor-share setup (welcome block, progress + share buttons, embedded Pitch Builder section toggles, share dialogs).

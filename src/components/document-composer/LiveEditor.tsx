@@ -1026,9 +1026,19 @@ interface LiveEditorProps {
     onShowVersions: () => void;
     hideVersioning: boolean;
   } | null) => void;
+  /** Hides the Configure document tab in the left rail (Super Admin "normal draft" mode). */
+  hideConfigure?: boolean;
+  /** Suppresses the "How would you like to start this draft?" empty-state chooser
+   * (and its Auto-fill / Copy-from-SOP entry points). Used in Super Admin master
+   * authoring where AI seed flows don't apply. */
+  disableEmptyStatePrompt?: boolean;
+  /** Hides the SOPDocumentHeader card (Company Name / SOP number / Effective Date /
+   * Document Owner / Issued-Reviewed-Approved By signature blocks) at the top of
+   * the document body. Used in Super Admin master content authoring. */
+  hideDocumentHeader?: boolean;
 }
 
-export function LiveEditor({ template, className = '', onContentUpdate, companyId, onDocumentSaved, isEditingExistingDocument = false, editingDocumentId = null, docxSourceDocumentId = null, onAIGenerate, onAddAutoNote, currentNotes = [], isUploadedDocument = false, uploadedDocumentSaved = false, onUploadedDocumentSaved, disabled = false, selectedScope = 'company', selectedProductId, uploadedFileInfo, onDocumentControlChange, companyLogoUrl, onPushToDeviceFields, onCustomSave, isRecord = false, recordId, nextReviewDate, documentNumber, changeControlRef, hideVersioning = false, isEditing: isEditingProp, showSectionNumbers = false, onShowSectionNumbersChange, onIsRecordChange , disableSopMentions = false, documentPhase = 'draft', onRegisterHeaderActions }: LiveEditorProps) {
+export function LiveEditor({ template, className = '', onContentUpdate, companyId, onDocumentSaved, isEditingExistingDocument = false, editingDocumentId = null, docxSourceDocumentId = null, onAIGenerate, onAddAutoNote, currentNotes = [], isUploadedDocument = false, uploadedDocumentSaved = false, onUploadedDocumentSaved, disabled = false, selectedScope = 'company', selectedProductId, uploadedFileInfo, onDocumentControlChange, companyLogoUrl, onPushToDeviceFields, onCustomSave, isRecord = false, recordId, nextReviewDate, documentNumber, changeControlRef, hideVersioning = false, isEditing: isEditingProp, showSectionNumbers = false, onShowSectionNumbersChange, onIsRecordChange , disableSopMentions = false, documentPhase = 'draft', onRegisterHeaderActions, hideConfigure = false, disableEmptyStatePrompt = false, hideDocumentHeader = false }: LiveEditorProps) {
   const { activeCompanyRole } = useCompanyRole();
   const aiAutoFillEnabled = useCustomerFeatureFlag('ai-auto-fill');
   const aiInlineSuggestionsEnabled = useCustomerFeatureFlag('ai-inline-suggestions');
@@ -2283,6 +2293,7 @@ export function LiveEditor({ template, className = '', onContentUpdate, companyI
   // eligible run so that parent re-renders (which often pass a new `sections`
   // array reference with the same contents) don't re-fire this.
   useEffect(() => {
+    if (disableEmptyStatePrompt) return;
     const templateId = template?.id;
     const sections = template?.sections || [];
     if (!templateId || sections.length === 0) return;
@@ -2310,7 +2321,7 @@ export function LiveEditor({ template, className = '', onContentUpdate, companyI
     if (allEmpty) {
       setShowEmptyStateModal(true);
     }
-  }, [template?.id, template?.sections?.length]);
+  }, [template?.id, template?.sections?.length, disableEmptyStatePrompt]);
 
   const handleEmptyStateAutoFill = useCallback(() => {
     setShowEmptyStateModal(false);
@@ -3185,6 +3196,7 @@ export function LiveEditor({ template, className = '', onContentUpdate, companyI
             configDisabled={disabled}
             onIsRecordChange={onIsRecordChange}
             template={template}
+            hideConfigure={hideConfigure}
           />
         )}
 
@@ -3206,6 +3218,7 @@ export function LiveEditor({ template, className = '', onContentUpdate, companyI
                 configDisabled={disabled}
                 onIsRecordChange={onIsRecordChange}
                 template={template}
+                hideConfigure={hideConfigure}
               />
             </div>
             <div className="flex-1 bg-black/30" />
@@ -3222,19 +3235,21 @@ export function LiveEditor({ template, className = '', onContentUpdate, companyI
             }}
           >
             {/* Professional SOP Header */}
-            <SOPDocumentHeader
-              documentControl={template?.documentControl}
-              companyName={activeCompanyRole?.companyName}
-              companyId={companyId}
-              companyLogoUrl={companyLogoUrl}
-              onFieldChange={onDocumentControlChange}
-              isRecord={isRecord}
-              recordId={recordId}
-              nextReviewDate={nextReviewDate}
-              documentNumber={documentNumber}
-              changeControlRef={changeControlRef}
-              className="mx-8 mt-8"
-            />
+            {!hideDocumentHeader && (
+              <SOPDocumentHeader
+                documentControl={template?.documentControl}
+                companyName={activeCompanyRole?.companyName}
+                companyId={companyId}
+                companyLogoUrl={companyLogoUrl}
+                onFieldChange={onDocumentControlChange}
+                isRecord={isRecord}
+                recordId={recordId}
+                nextReviewDate={nextReviewDate}
+                documentNumber={documentNumber}
+                changeControlRef={changeControlRef}
+                className="mx-8 mt-8"
+              />
+            )}
 
             {/* Document-level AI review bar */}
             {showDocumentAIBar && selectedSection && (
@@ -3583,13 +3598,15 @@ export function LiveEditor({ template, className = '', onContentUpdate, companyI
       />
 
       {/* Empty-state chooser shown when opening a draft with no content */}
-      <DraftEmptyStateModal
-        open={showEmptyStateModal}
-        onOpenChange={setShowEmptyStateModal}
-        onGenerateManually={() => setShowEmptyStateModal(false)}
-        onAutoFillByAI={handleEmptyStateAutoFill}
-        onCopyFromSOP={handleEmptyStateCopyFromSOP}
-      />
+      {!disableEmptyStatePrompt && (
+        <DraftEmptyStateModal
+          open={showEmptyStateModal}
+          onOpenChange={setShowEmptyStateModal}
+          onGenerateManually={() => setShowEmptyStateModal(false)}
+          onAutoFillByAI={handleEmptyStateAutoFill}
+          onCopyFromSOP={handleEmptyStateCopyFromSOP}
+        />
+      )}
 
       {/* SOP picker for Copy-from-SOP flow */}
       <SOPPickerModal

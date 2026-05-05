@@ -105,6 +105,7 @@ const SuperAdminDocuments = lazy(() => import("@/pages/SuperAdminDocuments"));
 const SuperAdminTemplates = lazy(() => import("@/pages/SuperAdminTemplates"));
 const SuperAdminReleases = lazy(() => import("@/pages/super-admin/SuperAdminReleases"));
 const SuperAdminAuditLog = lazy(() => import("@/pages/SuperAdminAuditLog"));
+const SuperAdminConsultingHours = lazy(() => import("@/pages/SuperAdminConsultingHours"));
 
 const SuperAdminFeedback = lazy(() => import("@/pages/SuperAdminFeedback"));
 
@@ -437,6 +438,15 @@ function App() {
                 <Suspense fallback={<PageLoader />}>
                   <ErrorBoundary level="component">
                     <SuperAdminTemplates />
+                  </ErrorBoundary>
+                </Suspense>
+              } />
+
+              {/* Super Admin Consulting Hours */}
+              <Route path="app/consulting-hours" element={
+                <Suspense fallback={<PageLoader />}>
+                  <ErrorBoundary level="component">
+                    <SuperAdminConsultingHours />
                   </ErrorBoundary>
                 </Suspense>
               } />

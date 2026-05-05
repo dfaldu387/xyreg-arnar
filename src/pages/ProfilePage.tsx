@@ -21,6 +21,20 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from "@/components/ui/accordion";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { PasswordExpirationService } from "@/services/passwordExpirationService";
 import {
   AlertDialog,
@@ -161,6 +175,7 @@ const ADD_ON_PRICING = {
   extraModule: { price: 100, name: "Extra Module Slot", description: "Unlock an additional module slot" },
   aiBooster: { price: 20, credits: 500, name: "AI Booster Pack", description: "500 additional AI credits — consumed per AI generation" },
   genesisAiBooster: { price: 20, credits: 500, name: "Genesis AI Pack", description: "500 AI credits — consumed per AI generation" },
+  consultingHours: { price: 300, hours: 8, name: "Consulting Hours", description: "8 hours of expert consulting hours" },
 };
 
 // Available modules configuration
@@ -252,7 +267,42 @@ export default function ProfilePage() {
     aiBoosterPacks: number;
   }>({ extraDevices: 0, extraModules: 0, aiBoosterPacks: 0 });
   const [addOnPurchaseLoading, setAddOnPurchaseLoading] = useState(false);
+  const [consultingQuantity, setConsultingQuantity] = useState(0);
+  const [consultingPurchaseLoading, setConsultingPurchaseLoading] = useState(false);
   const [activeModules, setActiveModules] = useState<string[]>([]);
+
+  // Consulting hours log dialog
+  interface ConsultingLogRow {
+    id: string;
+    type: "purchase" | "usage";
+    hours: number;
+    amount_paid: number | null;
+    description: string | null;
+    created_at: string;
+  }
+  const [consultingLogOpen, setConsultingLogOpen] = useState(false);
+  const [consultingLogs, setConsultingLogs] = useState<ConsultingLogRow[]>([]);
+  const [consultingLogLoading, setConsultingLogLoading] = useState(false);
+
+  const openConsultingLog = async () => {
+    if (!companyId) return;
+    setConsultingLogOpen(true);
+    setConsultingLogLoading(true);
+    try {
+      const { data, error } = await (supabase as any)
+        .from("consulting_hours_log")
+        .select("id, type, hours, amount_paid, description, created_at")
+        .eq("company_id", companyId)
+        .order("created_at", { ascending: false });
+      if (error) throw error;
+      setConsultingLogs((data ?? []) as ConsultingLogRow[]);
+    } catch (err: any) {
+      console.error("Failed to load consulting log:", err);
+      toast.error(err.message || "Failed to load consulting log");
+    } finally {
+      setConsultingLogLoading(false);
+    }
+  };
 
   // Purchased add-ons (from database)
   const [purchasedAddOns, setPurchasedAddOns] = useState<{
@@ -345,6 +395,33 @@ export default function ProfilePage() {
     } else if (boosterParam === "cancelled") {
       toast.info("Purchase cancelled", {
         description: "Your AI Booster Pack purchase was cancelled. No charge was made.",
+        duration: 4000,
+      });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
+
+  // Handle Stripe redirect params for consulting hours purchase outcome
+  const consultingToastShown = useRef(false);
+  useEffect(() => {
+    const consultingParam = searchParams.get("consulting");
+    if (!consultingParam || consultingToastShown.current) return;
+    consultingToastShown.current = true;
+
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.delete("consulting");
+    setSearchParams(nextParams, { replace: true });
+
+    setConsultingQuantity(0);
+
+    if (consultingParam === "success") {
+      toast.success("Consulting hours purchased!", {
+        description: "Your consulting hours have been added. It may take a few seconds to reflect.",
+        duration: 6000,
+      });
+    } else if (consultingParam === "cancelled") {
+      toast.info("Purchase cancelled", {
+        description: "Your consulting hours purchase was cancelled. No charge was made.",
         duration: 4000,
       });
     }
@@ -973,6 +1050,55 @@ export default function ProfilePage() {
       toast.error(error.message || "Failed to process add-on purchase");
     } finally {
       setAddOnPurchaseLoading(false);
+    }
+  };
+
+  // Handle consulting hours purchase
+  const handleConsultingPurchase = async () => {
+    if (consultingQuantity < 1) {
+      toast.error("Please select at least one consulting pack");
+      return;
+    }
+
+    setConsultingPurchaseLoading(true);
+    try {
+      if (!companyId) {
+        toast.error("No company found.");
+        return;
+      }
+
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+
+      const consultingPriceId = import.meta.env.VITE_STRIPE_PRICE_CONSULTING_HOURS;
+      if (!consultingPriceId) {
+        toast.error("Consulting hours not configured. Please contact support.");
+        return;
+      }
+
+      const { data, error } = await supabase.functions.invoke("create-consulting-checkout", {
+        body: {
+          companyId,
+          priceId: consultingPriceId,
+          quantity: consultingQuantity,
+          companyName: window.location.pathname.split("/company/")[1]?.split("/")[0] || "",
+        },
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
+      });
+
+      if (!error && data?.url) {
+        window.open(data.url, "_blank");
+        setConsultingQuantity(0);
+      } else {
+        toast.error(data?.error || "Failed to create checkout. Please contact support.");
+      }
+    } catch (error: any) {
+      console.error("Error purchasing consulting hours:", error);
+      toast.error(error.message || "Failed to process consulting hours purchase");
+    } finally {
+      setConsultingPurchaseLoading(false);
     }
   };
 
@@ -2032,6 +2158,51 @@ export default function ProfilePage() {
                     </div>
                   </AccordionContent>
                 </AccordionItem>
+
+                {/* Consulting Hours */}
+                <AccordionItem value="consulting">
+                  <AccordionTrigger className="hover:no-underline">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-full bg-emerald-500 flex items-center justify-center">
+                        <GraduationCap className="h-5 w-5 text-white" />
+                      </div>
+                      <div className="text-left">
+                        <h4 className="font-semibold">Consulting Hours</h4>
+                        <p className="text-sm text-muted-foreground">
+                          {newPricingPlan?.consulting_hours ?? 0}h available
+                        </p>
+                      </div>
+                      {(newPricingPlan?.consulting_hours ?? 0) > 0 && (
+                        <Badge variant="secondary" className="bg-emerald-100 text-emerald-700 ml-2">
+                          {newPricingPlan?.consulting_hours}h balance
+                        </Badge>
+                      )}
+                    </div>
+                  </AccordionTrigger>
+                  <AccordionContent>
+                    <div className="pt-4">
+                      <div className="p-4 rounded-lg border bg-emerald-50 dark:bg-emerald-900/20 flex items-center justify-between gap-3">
+                        <div>
+                          <p className="text-2xl font-bold text-emerald-700 dark:text-emerald-300">
+                            {newPricingPlan?.consulting_hours ?? 0}h
+                          </p>
+                          <p className="text-sm text-muted-foreground">
+                            Expert consulting hours
+                          </p>
+                        </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="shrink-0"
+                          onClick={openConsultingLog}
+                          disabled={!companyId}
+                        >
+                          View
+                        </Button>
+                      </div>
+                    </div>
+                  </AccordionContent>
+                </AccordionItem>
               </Accordion>
             </CardContent>
           </Card>
@@ -2051,7 +2222,7 @@ export default function ProfilePage() {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {/* Quick AI Credits */}
                 <div className="p-4 rounded-lg border bg-gradient-to-br from-purple-50 to-purple-100 dark:from-purple-900/20 dark:to-purple-800/20 border-purple-200 dark:border-purple-800">
                   <div className="flex items-center gap-3 mb-3">
@@ -2070,6 +2241,29 @@ export default function ProfilePage() {
                       €{getCurrentPlanTier() === "genesis" ? ADD_ON_PRICING.genesisAiBooster.price : ADD_ON_PRICING.aiBooster.price}
                     </span>
                     <Button size="sm" onClick={() => handleAddOnQuantityChange("aiBoosterPacks", 1)} className="bg-purple-600 hover:bg-purple-700">
+                      <Plus className="h-4 w-4 mr-1" /> Add
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Quick Consulting Hours */}
+                <div className="p-4 rounded-lg border bg-gradient-to-br from-emerald-50 to-emerald-100 dark:from-emerald-900/20 dark:to-emerald-800/20 border-emerald-200 dark:border-emerald-800">
+                  <div className="flex items-center gap-3 mb-3">
+                    <div className="w-10 h-10 rounded-full bg-emerald-500 flex items-center justify-center">
+                      <GraduationCap className="h-5 w-5 text-white" />
+                    </div>
+                    <div>
+                      <h4 className="font-semibold text-emerald-800 dark:text-emerald-200">Consulting</h4>
+                      <p className="text-xs text-emerald-600 dark:text-emerald-400">
+                        {ADD_ON_PRICING.consultingHours.hours}h expert consulting
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-lg font-bold text-emerald-700 dark:text-emerald-300">
+                      ${ADD_ON_PRICING.consultingHours.price}
+                    </span>
+                    <Button size="sm" onClick={() => setConsultingQuantity(prev => prev + 1)} className="bg-emerald-600 hover:bg-emerald-700">
                       <Plus className="h-4 w-4 mr-1" /> Add
                     </Button>
                   </div>
@@ -2295,6 +2489,76 @@ export default function ProfilePage() {
                   </Button>
                 </div>
               </div>
+              {/* Consulting Hours */}
+              <div className="flex items-center justify-between p-4 rounded-lg border">
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 rounded-lg bg-emerald-100 dark:bg-emerald-900 flex items-center justify-center">
+                    <GraduationCap className="h-6 w-6 text-emerald-600" />
+                  </div>
+                  <div>
+                    <h4 className="font-semibold">{ADD_ON_PRICING.consultingHours.name}</h4>
+                    <p className="text-sm text-muted-foreground">{ADD_ON_PRICING.consultingHours.description}</p>
+                    <p className="text-sm font-medium text-emerald-600">${ADD_ON_PRICING.consultingHours.price} per pack ({ADD_ON_PRICING.consultingHours.hours}h)</p>
+                    {newPricingPlan?.consulting_hours != null && newPricingPlan.consulting_hours > 0 && (
+                      <p className="text-xs text-emerald-700 dark:text-emerald-400 mt-1">
+                        Current balance: {newPricingPlan.consulting_hours}h available
+                      </p>
+                    )}
+                  </div>
+                </div>
+                <div className="flex items-center gap-3">
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    onClick={() => setConsultingQuantity(prev => Math.max(0, prev - 1))}
+                    disabled={consultingQuantity === 0}
+                  >
+                    <Minus className="h-4 w-4" />
+                  </Button>
+                  <span className="w-8 text-center font-semibold text-lg">{consultingQuantity}</span>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    onClick={() => setConsultingQuantity(prev => prev + 1)}
+                  >
+                    <Plus className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+
+              {/* Consulting Hours Purchase Button */}
+              {consultingQuantity > 0 && (
+                <div className="p-4 rounded-lg border border-emerald-200 bg-emerald-50 dark:bg-emerald-900/20 dark:border-emerald-800">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="font-medium">Consulting: {consultingQuantity} pack(s) = {consultingQuantity * ADD_ON_PRICING.consultingHours.hours}h</p>
+                      <p className="text-sm text-muted-foreground">One-time purchase</p>
+                    </div>
+                    <div className="flex items-center gap-4">
+                      <span className="text-lg font-bold text-emerald-700 dark:text-emerald-300">
+                        ${consultingQuantity * ADD_ON_PRICING.consultingHours.price}
+                      </span>
+                      <Button
+                        onClick={handleConsultingPurchase}
+                        disabled={consultingPurchaseLoading}
+                        className="bg-emerald-600 hover:bg-emerald-700"
+                      >
+                        {consultingPurchaseLoading ? (
+                          <>
+                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                            Processing...
+                          </>
+                        ) : (
+                          <>
+                            <GraduationCap className="h-4 w-4 mr-2" />
+                            Purchase
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              )}
             </CardContent>
 
             {/* Cart Summary */}
@@ -2330,6 +2594,115 @@ export default function ProfilePage() {
         </TabsContent>
 
       </Tabs>
+
+      {/* Consulting Hours Log Dialog */}
+      <Dialog open={consultingLogOpen} onOpenChange={setConsultingLogOpen}>
+        <DialogContent className="max-w-3xl max-h-[85vh] overflow-hidden">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base font-semibold">
+              <GraduationCap className="h-5 w-5 text-emerald-600" />
+              Consulting Hours — Activity Log
+            </DialogTitle>
+          </DialogHeader>
+
+          {(() => {
+            const purchased = consultingLogs
+              .filter((l) => l.type === "purchase")
+              .reduce((s, l) => s + Number(l.hours || 0), 0);
+            const used = consultingLogs
+              .filter((l) => l.type === "usage")
+              .reduce((s, l) => s + Number(l.hours || 0), 0);
+            const revenue = consultingLogs.reduce(
+              (s, l) => s + (l.amount_paid || 0),
+              0
+            );
+            const balance = newPricingPlan?.consulting_hours ?? 0;
+            return (
+              <div className="space-y-4 max-h-[calc(85vh-80px)] flex flex-col overflow-hidden">
+                <div className="flex gap-3 overflow-x-auto pb-2 shrink-0">
+                  <div className="rounded-lg border p-3 min-w-[120px] shrink-0">
+                    <p className="text-xs text-muted-foreground font-medium">Balance</p>
+                    <p className="text-xl font-bold text-emerald-600">{balance}h</p>
+                  </div>
+                  <div className="rounded-lg border p-3 min-w-[120px] shrink-0">
+                    <p className="text-xs text-muted-foreground font-medium">Purchased</p>
+                    <p className="text-xl font-bold">{purchased}h</p>
+                  </div>
+                  <div className="rounded-lg border p-3 min-w-[120px] shrink-0">
+                    <p className="text-xs text-muted-foreground font-medium">Used</p>
+                    <p className="text-xl font-bold text-blue-600">{used}h</p>
+                  </div>
+                  <div className="rounded-lg border p-3 min-w-[120px] shrink-0">
+                    <p className="text-xs text-muted-foreground font-medium">Revenue</p>
+                    <p className="text-xl font-bold">${(revenue / 100).toLocaleString()}</p>
+                  </div>
+                </div>
+
+                <div className="border rounded-lg overflow-y-auto flex-1 min-h-0">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="bg-muted/20 hover:bg-muted/20">
+                        <TableHead className="text-xs uppercase">Date</TableHead>
+                        <TableHead className="text-xs uppercase">Type</TableHead>
+                        <TableHead className="text-xs uppercase">Hours</TableHead>
+                        <TableHead className="text-xs uppercase">Amount</TableHead>
+                        <TableHead className="text-xs uppercase">Description</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {consultingLogLoading ? (
+                        <TableRow>
+                          <TableCell colSpan={5} className="text-center py-8 text-sm text-muted-foreground">
+                            <Loader2 className="h-5 w-5 animate-spin inline mr-2" />
+                            Loading…
+                          </TableCell>
+                        </TableRow>
+                      ) : consultingLogs.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={5} className="text-center py-6 text-sm text-muted-foreground">
+                            No consulting hours activity yet.
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        consultingLogs.map((l) => (
+                          <TableRow key={l.id}>
+                            <TableCell className="text-xs text-muted-foreground">
+                              {new Date(l.created_at).toLocaleString()}
+                            </TableCell>
+                            <TableCell>
+                              <span
+                                className={cn(
+                                  "inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium",
+                                  l.type === "purchase"
+                                    ? "bg-emerald-100 text-emerald-800"
+                                    : "bg-blue-100 text-blue-800"
+                                )}
+                              >
+                                {l.type === "purchase" ? "Purchase" : "Usage"}
+                              </span>
+                            </TableCell>
+                            <TableCell className="text-xs font-semibold">
+                              <span className={l.type === "purchase" ? "text-emerald-600" : "text-blue-600"}>
+                                {l.type === "purchase" ? "+" : "−"}{l.hours}h
+                              </span>
+                            </TableCell>
+                            <TableCell className="text-xs">
+                              {l.amount_paid ? `$${(l.amount_paid / 100).toFixed(2)}` : "—"}
+                            </TableCell>
+                            <TableCell className="text-xs text-muted-foreground max-w-[260px] truncate">
+                              {l.description || "—"}
+                            </TableCell>
+                          </TableRow>
+                        ))
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+              </div>
+            );
+          })()}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
