@@ -175,7 +175,41 @@ const ADD_ON_PRICING = {
   extraModule: { price: 100, name: "Extra Module Slot", description: "Unlock an additional module slot" },
   aiBooster: { price: 20, credits: 500, name: "AI Booster Pack", description: "500 additional AI credits — consumed per AI generation" },
   genesisAiBooster: { price: 20, credits: 500, name: "Genesis AI Pack", description: "500 AI credits — consumed per AI generation" },
-  consultingHours: { price: 300, hours: 8, name: "Consulting Hours", description: "8 hours of expert consulting hours" },
+};
+
+// Consulting package is dynamic — fetched from `dynamic_products` (DB) merged with
+// the linked Stripe Product/Price. Edits in Stripe Dashboard take effect on next read.
+interface DynamicConsultingPackage {
+  id: string;
+  name: string;
+  description: string | null;
+  price_cents: number;
+  currency: string;
+  hours_per_pack: number;
+}
+
+// AI Booster Pack — same dynamic pattern as the consulting package.
+interface DynamicAiBoosterPackage {
+  id: string;
+  name: string;
+  description: string | null;
+  price_cents: number;
+  currency: string;
+  credits: number;
+}
+
+const formatPrice = (cents: number, currency: string) => {
+  const amount = cents / 100;
+  try {
+    return new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: currency.toUpperCase(),
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 2,
+    }).format(amount);
+  } catch {
+    return `${amount} ${currency.toUpperCase()}`;
+  }
 };
 
 // Available modules configuration
@@ -269,6 +303,8 @@ export default function ProfilePage() {
   const [addOnPurchaseLoading, setAddOnPurchaseLoading] = useState(false);
   const [consultingQuantity, setConsultingQuantity] = useState(0);
   const [consultingPurchaseLoading, setConsultingPurchaseLoading] = useState(false);
+  const [consultingPackage, setConsultingPackage] = useState<DynamicConsultingPackage | null>(null);
+  const [aiBoosterPackage, setAiBoosterPackage] = useState<DynamicAiBoosterPackage | null>(null);
   const [activeModules, setActiveModules] = useState<string[]>([]);
 
   // Consulting hours log dialog
@@ -501,6 +537,64 @@ export default function ProfilePage() {
   useEffect(() => {
     fetchSubscriptionData();
   }, [user, companyId]);
+
+  // Fetch the active consulting package (DB row + Stripe data)
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data, error } = await supabase.functions.invoke("get-dynamic-products", {
+          body: { product_key: "consulting_hours" },
+        });
+        if (error) {
+          console.error("Failed to load consulting package:", error);
+          return;
+        }
+        const first = data?.products?.[0];
+        if (!first || cancelled) return;
+        setConsultingPackage({
+          id: first.id,
+          name: first.name,
+          description: first.description ?? null,
+          price_cents: first.price_cents,
+          currency: first.currency,
+          hours_per_pack: Number(first.metadata?.hours_per_pack ?? 0),
+        });
+      } catch (err) {
+        console.error("Failed to load consulting package:", err);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  // Fetch the active AI Booster Pack (DB row + Stripe data)
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data, error } = await supabase.functions.invoke("get-dynamic-products", {
+          body: { product_key: "ai_booster" },
+        });
+        if (error) {
+          console.error("Failed to load AI booster pack:", error);
+          return;
+        }
+        const first = data?.products?.[0];
+        if (!first || cancelled) return;
+        setAiBoosterPackage({
+          id: first.id,
+          name: first.name,
+          description: first.description ?? null,
+          price_cents: first.price_cents,
+          currency: first.currency,
+          credits: Number(first.metadata?.credits ?? 0),
+        });
+      } catch (err) {
+        console.error("Failed to load AI booster pack:", err);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   // Fetch purchased add-ons from checkout sessions
   useEffect(() => {
@@ -986,7 +1080,13 @@ export default function ProfilePage() {
     const currentTier = getCurrentPlanTier();
     const devicePrice = ADD_ON_PRICING.extraDevice.price;
     const modulePrice = ADD_ON_PRICING.extraModule.price;
-    const aiPrice = currentTier === "genesis" ? ADD_ON_PRICING.genesisAiBooster.price : ADD_ON_PRICING.aiBooster.price;
+    // AI booster price is dynamic (Stripe-synced via dynamic_products).
+    // Fall back to per-tier static defaults until the dynamic row loads.
+    const aiPrice = aiBoosterPackage
+      ? aiBoosterPackage.price_cents / 100
+      : currentTier === "genesis"
+        ? ADD_ON_PRICING.genesisAiBooster.price
+        : ADD_ON_PRICING.aiBooster.price;
 
     return (
       addOnCart.extraDevices * devicePrice +
@@ -1070,16 +1170,15 @@ export default function ProfilePage() {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) return;
 
-      const consultingPriceId = import.meta.env.VITE_STRIPE_PRICE_CONSULTING_HOURS;
-      if (!consultingPriceId) {
-        toast.error("Consulting hours not configured. Please contact support.");
+      if (!consultingPackage) {
+        toast.error("Consulting package not configured. Please contact support.");
         return;
       }
 
       const { data, error } = await supabase.functions.invoke("create-consulting-checkout", {
         body: {
           companyId,
-          priceId: consultingPriceId,
+          packageId: consultingPackage.id,
           quantity: consultingQuantity,
           companyName: window.location.pathname.split("/company/")[1]?.split("/")[0] || "",
         },
@@ -2040,7 +2139,7 @@ export default function ProfilePage() {
                       <div className="text-left">
                         <h4 className="font-semibold">AI Credits</h4>
                         {!usage ? <Skeleton className="h-4 w-28 mt-1" /> : <p className="text-sm text-muted-foreground">
-                          {Math.max(0, (usage.aiCredits.limit + addOnCart.aiBoosterPacks * 500) - usage.aiCredits.used)} credits left
+                          {Math.max(0, (usage.aiCredits.limit + addOnCart.aiBoosterPacks * (aiBoosterPackage?.credits ?? 500)) - usage.aiCredits.used)} credits left
                         </p>}
                       </div>
                       {purchasedAddOns.aiCredits > 0 && (
@@ -2050,7 +2149,7 @@ export default function ProfilePage() {
                       )}
                       {addOnCart.aiBoosterPacks > 0 && (
                         <Badge variant="secondary" className="bg-purple-100 text-purple-700 ml-2">
-                          +{addOnCart.aiBoosterPacks * (500)} in cart
+                          +{addOnCart.aiBoosterPacks * (aiBoosterPackage?.credits ?? 500)} in cart
                         </Badge>
                       )}
                     </div>
@@ -2058,7 +2157,7 @@ export default function ProfilePage() {
                   <AccordionContent>
                     <div className="pt-4">
                       <Progress
-                        value={((usage?.aiCredits.used || 0) / ((usage?.aiCredits.limit || 1) + addOnCart.aiBoosterPacks * (500))) * 100}
+                        value={((usage?.aiCredits.used || 0) / ((usage?.aiCredits.limit || 1) + addOnCart.aiBoosterPacks * (aiBoosterPackage?.credits ?? 500))) * 100}
                         className="h-3 mb-2"
                       />
                       <p className="text-sm text-muted-foreground">
@@ -2232,15 +2331,22 @@ export default function ProfilePage() {
                     <div>
                       <h4 className="font-semibold text-purple-800 dark:text-purple-200">AI Credits</h4>
                       <p className="text-xs text-purple-600 dark:text-purple-400">
-                        500 credits
+                        {aiBoosterPackage ? `${aiBoosterPackage.credits.toLocaleString()} credits` : "—"}
                       </p>
                     </div>
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-lg font-bold text-purple-700 dark:text-purple-300">
-                      €{getCurrentPlanTier() === "genesis" ? ADD_ON_PRICING.genesisAiBooster.price : ADD_ON_PRICING.aiBooster.price}
+                      {aiBoosterPackage
+                        ? formatPrice(aiBoosterPackage.price_cents, aiBoosterPackage.currency)
+                        : "—"}
                     </span>
-                    <Button size="sm" onClick={() => handleAddOnQuantityChange("aiBoosterPacks", 1)} className="bg-purple-600 hover:bg-purple-700">
+                    <Button
+                      size="sm"
+                      onClick={() => handleAddOnQuantityChange("aiBoosterPacks", 1)}
+                      disabled={!aiBoosterPackage}
+                      className="bg-purple-600 hover:bg-purple-700"
+                    >
                       <Plus className="h-4 w-4 mr-1" /> Add
                     </Button>
                   </div>
@@ -2253,17 +2359,26 @@ export default function ProfilePage() {
                       <GraduationCap className="h-5 w-5 text-white" />
                     </div>
                     <div>
-                      <h4 className="font-semibold text-emerald-800 dark:text-emerald-200">Consulting</h4>
+                      <h4 className="font-semibold text-emerald-800 dark:text-emerald-200">
+                        {consultingPackage?.name ?? "Consulting"}
+                      </h4>
                       <p className="text-xs text-emerald-600 dark:text-emerald-400">
-                        {ADD_ON_PRICING.consultingHours.hours}h expert consulting
+                        {consultingPackage?.hours_per_pack ?? "—"}h expert consulting
                       </p>
                     </div>
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-lg font-bold text-emerald-700 dark:text-emerald-300">
-                      ${ADD_ON_PRICING.consultingHours.price}
+                      {consultingPackage
+                        ? formatPrice(consultingPackage.price_cents, consultingPackage.currency)
+                        : "—"}
                     </span>
-                    <Button size="sm" onClick={() => setConsultingQuantity(prev => prev + 1)} className="bg-emerald-600 hover:bg-emerald-700">
+                    <Button
+                      size="sm"
+                      onClick={() => setConsultingQuantity(prev => prev + 1)}
+                      disabled={!consultingPackage}
+                      className="bg-emerald-600 hover:bg-emerald-700"
+                    >
                       <Plus className="h-4 w-4 mr-1" /> Add
                     </Button>
                   </div>
@@ -2460,13 +2575,15 @@ export default function ProfilePage() {
                   </div>
                   <div>
                     <h4 className="font-semibold">
-                      {getCurrentPlanTier() === "genesis" ? ADD_ON_PRICING.genesisAiBooster.name : ADD_ON_PRICING.aiBooster.name}
+                      {aiBoosterPackage?.name ?? "AI Booster Pack"}
                     </h4>
                     <p className="text-sm text-muted-foreground">
-                      {getCurrentPlanTier() === "genesis" ? ADD_ON_PRICING.genesisAiBooster.description : ADD_ON_PRICING.aiBooster.description}
+                      {aiBoosterPackage?.description ?? ""}
                     </p>
                     <p className="text-sm font-medium text-purple-600">
-                      €{getCurrentPlanTier() === "genesis" ? ADD_ON_PRICING.genesisAiBooster.price : ADD_ON_PRICING.aiBooster.price} per pack
+                      {aiBoosterPackage
+                        ? `${formatPrice(aiBoosterPackage.price_cents, aiBoosterPackage.currency)} per pack`
+                        : "—"}
                     </p>
                   </div>
                 </div>
@@ -2484,6 +2601,7 @@ export default function ProfilePage() {
                     variant="outline"
                     size="icon"
                     onClick={() => handleAddOnQuantityChange("aiBoosterPacks", 1)}
+                    disabled={!aiBoosterPackage}
                   >
                     <Plus className="h-4 w-4" />
                   </Button>
@@ -2496,9 +2614,15 @@ export default function ProfilePage() {
                     <GraduationCap className="h-6 w-6 text-emerald-600" />
                   </div>
                   <div>
-                    <h4 className="font-semibold">{ADD_ON_PRICING.consultingHours.name}</h4>
-                    <p className="text-sm text-muted-foreground">{ADD_ON_PRICING.consultingHours.description}</p>
-                    <p className="text-sm font-medium text-emerald-600">${ADD_ON_PRICING.consultingHours.price} per pack ({ADD_ON_PRICING.consultingHours.hours}h)</p>
+                    <h4 className="font-semibold">{consultingPackage?.name ?? "Consulting Hours"}</h4>
+                    <p className="text-sm text-muted-foreground">
+                      {consultingPackage?.description ?? ""}
+                    </p>
+                    <p className="text-sm font-medium text-emerald-600">
+                      {consultingPackage
+                        ? `${formatPrice(consultingPackage.price_cents, consultingPackage.currency)} per pack (${consultingPackage.hours_per_pack}h)`
+                        : "—"}
+                    </p>
                     {newPricingPlan?.consulting_hours != null && newPricingPlan.consulting_hours > 0 && (
                       <p className="text-xs text-emerald-700 dark:text-emerald-400 mt-1">
                         Current balance: {newPricingPlan.consulting_hours}h available
@@ -2531,12 +2655,16 @@ export default function ProfilePage() {
                 <div className="p-4 rounded-lg border border-emerald-200 bg-emerald-50 dark:bg-emerald-900/20 dark:border-emerald-800">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="font-medium">Consulting: {consultingQuantity} pack(s) = {consultingQuantity * ADD_ON_PRICING.consultingHours.hours}h</p>
+                      <p className="font-medium">
+                        Consulting: {consultingQuantity} pack(s) = {consultingQuantity * (consultingPackage?.hours_per_pack ?? 0)}h
+                      </p>
                       <p className="text-sm text-muted-foreground">One-time purchase</p>
                     </div>
                     <div className="flex items-center gap-4">
                       <span className="text-lg font-bold text-emerald-700 dark:text-emerald-300">
-                        ${consultingQuantity * ADD_ON_PRICING.consultingHours.price}
+                        {consultingPackage
+                          ? formatPrice(consultingQuantity * consultingPackage.price_cents, consultingPackage.currency)
+                          : "—"}
                       </span>
                       <Button
                         onClick={handleConsultingPurchase}

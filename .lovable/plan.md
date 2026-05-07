@@ -1,41 +1,43 @@
+# Make Super-Admin Templates Editable Via Doc Studio Side Drawer
 
-## Two issues, two answers
+## Why
+Today, clicking the pencil on a row in `Super Admin → Templates → Document Templates` opens a metadata-only upload dialog. The user wants the SAME inline authoring experience used in the company-side QMS (`TemplateManagementTab` → `DocumentDraftDrawer`), because the super-admin row IS the master that downstream companies inherit. This pattern already exists for the **FPD Catalog** tab (`FpdCatalogSection` → `DocumentDraftDrawer normalDraft initialSections={...}`) and the **WI Catalog** tab — we just need to extend it to the regular Document Templates tab.
 
-### 1. SSOT — yes, it is wired correctly
+## Scope of change
 
-Every Venture Blueprint sub-step that uses an inline editor writes through `GenesisSsotEditor.tsx`, which `update`s a column on the `products` row (or a key inside the `intended_purpose_data` / `key_technology_characteristics` JSONB on `products`). That is the exact same store that Device Definition reads and writes from — there is no parallel "blueprint-only" table.
+### 1. Schema — add inline section content to `default_document_templates`
+Add nullable JSONB column `sections` (array of `{ id, title, content }`). File-based templates keep working unchanged; section-based authoring is opt-in per template.
 
-Concretely:
-- `binding.kind = 'product-column'` → `products.<column>` (e.g. `device_name`, `trl_level`, `intended_use`)
-- `binding.kind = 'product-jsonb'` → key inside `products.intended_purpose_data` or `products.key_technology_characteristics`
-- `binding.kind = 'open-module'` (Tier C: BOM, IP, Team, rNPV, Reimbursement, Target Markets…) → no shadow copy, the dedicated module is the SSOT
+```text
+default_document_templates
+  + sections  jsonb null   -- master section content (Doc Studio shape)
+```
 
-So filling TRL = 3 in the blueprint and TRL on Device Definition are the same row/column. No separate state, no duplication. I'll add a one-line note to memory confirming this so it stays the rule.
+### 2. Service — `SuperAdminTemplateManagementService`
+- Extend `SuperAdminTemplate` type with `sections?: SectionBlock[] | null`.
+- New methods:
+  - `getTemplateSections(id)` — returns the array (defaulting to a sensible starter outline if null, derived from `document_type`, e.g. SOP 8-section template).
+  - `updateTemplateSections(id, sections)` — writes back.
 
-### 2. Floating step pill — port the gap-analysis one
+### 3. Page — `SuperAdminTemplates.tsx`
+- New state: `draftEditing: SuperAdminTemplate | null` and `draftDrawerOpen`.
+- Add an **"Author content"** button next to the existing pencil icon on each row (keeps the metadata-only Edit path intact for file uploads).
+- Render `<DocumentDraftDrawer normalDraft initialSections={…} documentName="<doc-number> — <title>" documentType={template.document_type} />` exactly like `FpdCatalogSection` does.
+- On save, persist via `updateTemplateSections` and reload.
 
-You're right: `ProductGapItemDetailPage.tsx` (lines 720–765) renders a fixed bottom pill: `[← prev section] [current step (amber, Step X/Y)] [next section →]` with green dots when complete. Venture Blueprint's `BlueprintStepDetail.tsx` only has a plain inline ghost "Previous step / Next step" pair (lines 145–168). That's why it feels different.
+### 4. Wire save-back
+`DocumentDraftDrawer` in `normalDraft` mode currently has no master save hook for arbitrary callers. Add an optional `onMasterSave?: (sections: SectionBlock[]) => Promise<void>` prop that, when provided, replaces the company-CI save path. Call it from the existing save action used in normalDraft mode. Falls back to current behaviour when omitted (so FPD/WI flows are untouched).
 
-I will lift the gap-analysis pill into a small shared component and use it in the blueprint detail view.
-
-## Changes
-
-1. **New** `src/components/product/business-case/genesis/BlueprintStepFloatingNav.tsx`
-   - Visual + behavior copy of the pill in `ProductGapItemDetailPage.tsx` (fixed bottom, rounded, amber center, prev/next pills with dot + label + complete-state colors).
-   - Props: `currentLabel`, `currentIndex`, `totalSteps`, `currentComplete`, `prevLabel?`, `prevComplete?`, `onPrev?`, `nextLabel`, `nextComplete?`, `onNext`.
-
-2. **Edit** `src/components/product/business-case/genesis/BlueprintStepDetailView.tsx`
-   - Compute global step index across the flat list of all sub-steps (already has `flatSteps`).
-   - Resolve prev/next sub-step labels from `GENESIS_SECTIONS` and their completion from the `completion` map already passed in.
-   - Render `<BlueprintStepFloatingNav />` at the bottom; remove (or hide) the inline prev/next pair in `BlueprintStepDetail.tsx` to avoid duplication.
-
-3. **Edit** `src/components/product/business-case/genesis/BlueprintStepDetail.tsx`
-   - Remove the inline `Previous step / Next step` row (lines 144–168). The floating pill replaces it. Keep `onBack` / "Back to Venture Blueprint".
-
-4. **Memory**: add a short `mem://features/genesis/ssot-binding` confirming Venture Blueprint inline edits are SSOT-on-`products` (no shadow store), and Tier C steps defer to their dedicated module.
+### 5. RLS
+Add an `UPDATE` policy on `default_document_templates` that allows super-admins (same JWT-claim check used elsewhere) to write the `sections` column. Read policies stay unchanged.
 
 ## Out of scope
+- Lifecycle (review/approve/sign), AI assistant, version history — `normalDraft` already strips these.
+- Migrating existing file-based templates to inline sections (opt-in per template).
+- Propagation to existing companies — same model as Global WI master: new companies inherit; existing companies opt in via a future "sync from master" action.
 
-- No DB changes.
-- No changes to which step is "complete" (already fixed in the previous loop).
-- No restyle of the gap-analysis pill — we mirror it verbatim for visual consistency.
+## Validation
+1. Open `/super-admin/app/templates` → Document Templates tab.
+2. Click "Author content" on a SOP row → side drawer opens with the same look-and-feel as the QMS Doc Studio (no lifecycle/AI/Configure tabs).
+3. Edit a section, click Save → toast confirms, drawer closes.
+4. Re-open → edits persisted. New company onboarding picks up the master sections (existing seeding pipeline already reads `default_document_templates`).

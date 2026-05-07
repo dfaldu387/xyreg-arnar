@@ -250,11 +250,13 @@ export function DocumentDraftDrawer({
     if (!resolvedCompanyId) return;
     supabase
       .from('companies')
-      .select('logo_url')
+      .select('logo_url, document_logo_url')
       .eq('id', resolvedCompanyId)
       .single()
       .then(({ data }) => {
-        if (data?.logo_url) setCompanyLogoUrl(data.logo_url);
+        const d = data as any;
+        const url = d?.document_logo_url || d?.logo_url;
+        if (url) setCompanyLogoUrl(url);
       });
   }, [resolvedCompanyId]);
 
@@ -1637,7 +1639,7 @@ export function DocumentDraftDrawer({
             <DocumentEditorSidebar
               collapsed={sidebarCollapsed}
               onToggleCollapse={() => setSidebarCollapsed(prev => !prev)}
-              widthClassName="w-[440px] min-w-[400px] max-w-[460px]"
+              widthClassName="w-[560px] min-w-[520px] max-w-[600px]"
               ciDocumentId={normalizedDocId || null}
               ciCompanyId={resolvedCompanyId}
               productId={productId}

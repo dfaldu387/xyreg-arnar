@@ -416,7 +416,7 @@ export const STRIPE_PRICES = {
     GENESIS_AI_BOOSTER: import.meta.env.VITE_STRIPE_PRICE_GENESIS_AI_BOOSTER, // €49/mo
 
     // Consulting Hours
-    CONSULTING_HOURS: import.meta.env.VITE_STRIPE_PRICE_CONSULTING_HOURS, // $800/pack (8h)
+    CONSULTING_HOURS: import.meta.env.VITE_STRIPE_PRICE_CONSULTING_HOURS, // €1,000/pack (8h)
 
     // Investor Add-ons
     INVESTOR_STARTER: import.meta.env.VITE_STRIPE_PRICE_INVESTOR_STARTER,

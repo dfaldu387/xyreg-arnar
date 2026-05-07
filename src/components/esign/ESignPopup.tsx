@@ -20,6 +20,7 @@ export function ESignPopup({ open, onOpenChange, documentId, documentName, onClo
   const [signatureRecord, setSignatureRecord] = useState<ESignRecord | null>(null);
   const [authMethod, setAuthMethod] = useState<AuthMethod | null>(null);
   const [bootstrapError, setBootstrapError] = useState<string | null>(null);
+  const [postSignError, setPostSignError] = useState<string | null>(null);
   const bootstrapInFlightRef = useRef(false);
   const { user } = useAuth();
 
@@ -31,6 +32,7 @@ export function ESignPopup({ open, onOpenChange, documentId, documentName, onClo
       setSignatureRecord(null);
       setAuthMethod(null);
       setBootstrapError(null);
+      setPostSignError(null);
       bootstrapInFlightRef.current = false;
     }
   }, [open]);
@@ -81,6 +83,7 @@ export function ESignPopup({ open, onOpenChange, documentId, documentName, onClo
     setSignRequest(null);
     setSignatureRecord(null);
     setAuthMethod(null);
+    setPostSignError(null);
     bootstrapInFlightRef.current = false;
     onOpenChange(false);
     onClose?.();
@@ -91,13 +94,34 @@ export function ESignPopup({ open, onOpenChange, documentId, documentName, onClo
     setCurrentStep(1);
   };
 
-  const handleSigned = (record: ESignRecord, method: AuthMethod) => {
+  const handleSigned = async (record: ESignRecord, method: AuthMethod) => {
     setSignatureRecord(record);
     setAuthMethod(method);
-    setCurrentStep(2);
-    if (signRequest) {
-      onComplete?.(signRequest);
+    setPostSignError(null);
+    if (signRequest && onComplete) {
+      try {
+        await onComplete(signRequest);
+      } catch (e) {
+        console.error('[ESignPopup] post-signature handler failed', e);
+        const extract = (err: unknown): string => {
+          if (!err) return 'Unknown error';
+          if (err instanceof Error) return err.message;
+          if (typeof err === 'string') return err;
+          if (typeof err === 'object') {
+            const o = err as Record<string, unknown>;
+            const parts = [o.message, o.details, o.hint, o.code]
+              .filter((x) => typeof x === 'string' && x.length > 0);
+            if (parts.length > 0) return parts.join(' — ');
+            try { return JSON.stringify(err); } catch { return String(err); }
+          }
+          return String(err);
+        };
+        setPostSignError(extract(e));
+        setCurrentStep(1);
+        return;
+      }
     }
+    setCurrentStep(2);
   };
 
   const signedCount = signRequest?.signers.filter(s => s.status === 'signed').length ?? 0;
@@ -138,13 +162,28 @@ export function ESignPopup({ open, onOpenChange, documentId, documentName, onClo
             />
           )}
           {currentStep === 1 && (
-            <SigningCeremony
-              documentName={documentName}
-              documentId={documentId}
-              signRequest={signRequest}
-              onSigned={handleSigned}
-              onBack={() => (selfSigner ? handleClose() : setCurrentStep(0))}
-            />
+            <>
+              {postSignError && (
+                <div className="mb-4 rounded-md border border-destructive/40 bg-destructive/10 p-3">
+                  <p className="text-sm font-medium text-destructive">
+                    Signature recorded, but the approval could not be saved.
+                  </p>
+                  <p className="text-xs text-destructive/80 mt-1 break-words">
+                    {postSignError}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Your e-signature is captured immutably; retrying will only re-attempt the gate update.
+                  </p>
+                </div>
+              )}
+              <SigningCeremony
+                documentName={documentName}
+                documentId={documentId}
+                signRequest={signRequest}
+                onSigned={handleSigned}
+                onBack={() => (selfSigner ? handleClose() : setCurrentStep(0))}
+              />
+            </>
           )}
           {currentStep === 2 && (
             <SignatureComplete

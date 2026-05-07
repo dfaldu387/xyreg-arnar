@@ -1,5 +1,5 @@
 import React from 'react';
-import { ArrowLeft, ExternalLink, CheckCircle2, Circle } from 'lucide-react';
+import { ArrowLeft, ExternalLink, CheckCircle2, Circle, Star } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
@@ -15,6 +15,8 @@ interface BlueprintStepDetailProps {
   subStep: GenesisSubStepConfig;
   subIndex: number;
   isComplete: boolean;
+  /** True when this sub-step is part of the investor-essential set. */
+  isInvestorEssential?: boolean;
   disabled?: boolean;
   onBack: () => void;
   /** Optional CTA: open the dedicated full-module editor in a new context. */
@@ -32,6 +34,7 @@ export function BlueprintStepDetail({
   subStep,
   subIndex,
   isComplete,
+  isInvestorEssential = false,
   disabled = false,
   onBack,
   onOpenFullEditor,
@@ -67,7 +70,15 @@ export function BlueprintStepDetail({
             <div className="text-xs font-medium uppercase tracking-wider text-muted-foreground mb-1">
               Section {sectionIndex + 1} · {section.title}
             </div>
-            <h2 className="text-lg font-bold text-foreground">{subStep.title}</h2>
+            <div className="flex items-center gap-2 flex-wrap">
+              <h2 className="text-lg font-bold text-foreground">{subStep.title}</h2>
+              {isInvestorEssential && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wider bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-700/50">
+                  <Star className="h-3 w-3 fill-amber-500 text-amber-500" />
+                  Investor essential
+                </span>
+              )}
+            </div>
           </div>
           <div className="flex-shrink-0 flex items-center gap-1.5 text-xs">
             {isComplete ? (

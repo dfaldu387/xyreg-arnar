@@ -41,6 +41,12 @@ import {
 } from './genesis';
 import { GENESIS_SECTIONS } from '@/config/genesisSections';
 import { Button } from '@/components/ui/button';
+import {
+  INVESTOR_ESSENTIAL_COMPLETION_KEYS,
+  INVESTOR_ESSENTIAL_TOTAL,
+  BLUEPRINT_TRACK_PARAM,
+} from '@/config/investorEssentialKeys';
+import { Star } from 'lucide-react';
 
 
 interface VentureBlueprintData {
@@ -306,6 +312,29 @@ export function VentureBlueprint({ disabled = false }: VentureBlueprintProps) {
   const selectedStepId = searchParams.get('step');
   const isDetailMode = Boolean(selectedStepId);
 
+  // Investor-essential completion (derived) — gates share actions.
+  const investorEssentialCompleted = Array.from(
+    INVESTOR_ESSENTIAL_COMPLETION_KEYS,
+  ).filter((k) => Boolean(completionMap[k])).length;
+  const investorEssentialRemaining =
+    INVESTOR_ESSENTIAL_TOTAL - investorEssentialCompleted;
+  const investorReady = investorEssentialRemaining <= 0;
+
+  const handleShareGuard = (open: () => void) => {
+    if (!investorReady) {
+      const next = new URLSearchParams(searchParams);
+      next.set(BLUEPRINT_TRACK_PARAM, 'investor');
+      next.delete('step');
+      setSearchParams(next, { replace: false });
+      toast({
+        title: 'Investor essentials incomplete',
+        description: `${investorEssentialRemaining} investor-essential step${investorEssentialRemaining === 1 ? '' : 's'} remaining. Switched to the Investor Essentials track.`,
+      });
+      return;
+    }
+    open();
+  };
+
   return (
     <div className="space-y-6">
       {/* Right-rail sidebar — mirrors Gap Analysis pattern */}
@@ -345,17 +374,35 @@ export function VentureBlueprint({ disabled = false }: VentureBlueprintProps) {
                 <Button
                   size="sm"
                   variant="outline"
-                  onClick={() => setIsInvestorDialogOpen(true)}
+                  onClick={() => handleShareGuard(() => setIsInvestorDialogOpen(true))}
                   disabled={disabled}
+                  title={
+                    investorReady
+                      ? undefined
+                      : `${investorEssentialRemaining} investor-essential step${investorEssentialRemaining === 1 ? '' : 's'} remaining`
+                  }
+                  className={!investorReady ? 'opacity-70' : undefined}
                 >
                   <Send className="h-3.5 w-3.5 mr-1.5" />
                   Share with Investor
+                  {!investorReady && (
+                    <span className="ml-1.5 inline-flex items-center gap-0.5 text-[10px] text-amber-600">
+                      <Star className="h-3 w-3 fill-amber-500 text-amber-500" />
+                      {investorEssentialCompleted}/{INVESTOR_ESSENTIAL_TOTAL}
+                    </span>
+                  )}
                 </Button>
                 <Button
                   size="sm"
                   variant="outline"
-                  onClick={() => setIsMarketplaceDialogOpen(true)}
+                  onClick={() => handleShareGuard(() => setIsMarketplaceDialogOpen(true))}
                   disabled={disabled}
+                  title={
+                    investorReady
+                      ? undefined
+                      : `${investorEssentialRemaining} investor-essential step${investorEssentialRemaining === 1 ? '' : 's'} remaining`
+                  }
+                  className={!investorReady ? 'opacity-70' : undefined}
                 >
                   <Globe className="h-3.5 w-3.5 mr-1.5" />
                   Marketplace

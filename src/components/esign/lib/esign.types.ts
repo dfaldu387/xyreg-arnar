@@ -57,7 +57,7 @@ export interface AuditLogEntry {
 export interface ESignPopupProps {
   documentId: string;
   documentName: string;
-  onComplete?: (request: ESignRequest) => void;
+  onComplete?: (request: ESignRequest) => void | Promise<void>;
   onClose?: () => void;
   open: boolean;
   onOpenChange: (open: boolean) => void;

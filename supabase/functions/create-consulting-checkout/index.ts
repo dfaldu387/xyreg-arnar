@@ -32,10 +32,56 @@ serve(async (req) => {
     }
 
     const body = await req.json();
-    const { companyId, priceId, quantity = 1 } = body;
+    const { companyId, packageId, quantity = 1 } = body;
+
+    if (!packageId) {
+      throw new Error("packageId is required");
+    }
+
+    // Service-role client for the package lookup — bypasses RLS so we can
+    // resolve the row even when the caller can't read it directly.
+    const supabaseService = createClient(
+      Deno.env.get("SUPABASE_URL") ?? "",
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
+    );
+
+    const { data: pkg, error: pkgError } = await supabaseService
+      .from("dynamic_products")
+      .select("id, product_key, stripe_product_id, metadata, is_active")
+      .eq("id", packageId)
+      .maybeSingle();
+
+    if (pkgError) {
+      throw new Error(`Product lookup failed: ${pkgError.message}`);
+    }
+    if (!pkg || !pkg.is_active) {
+      throw new Error("Product not found or inactive");
+    }
+    if (pkg.product_key !== "consulting_hours") {
+      throw new Error(
+        `Wrong checkout endpoint for product_key=${pkg.product_key}`
+      );
+    }
+
+    const hoursPerPack = Number(
+      (pkg.metadata as Record<string, unknown> | null)?.hours_per_pack ?? 0
+    );
+    if (!Number.isFinite(hoursPerPack) || hoursPerPack <= 0) {
+      throw new Error(
+        `Invalid hours_per_pack in metadata for product ${pkg.id}`
+      );
+    }
+
+    const product = await stripe.products.retrieve(pkg.stripe_product_id);
+    const priceId =
+      typeof product.default_price === "string"
+        ? product.default_price
+        : product.default_price?.id;
 
     if (!priceId) {
-      throw new Error("Price ID is required");
+      throw new Error(
+        `Stripe product ${pkg.stripe_product_id} has no default price configured`
+      );
     }
 
     // Find Stripe customer ID (same logic as create-booster-checkout)
@@ -97,6 +143,8 @@ serve(async (req) => {
         userId: userData.user.id,
         type: "consulting_hours",
         quantity: quantity.toString(),
+        packageId: pkg.id,
+        hoursPerPack: hoursPerPack.toString(),
       },
       success_url: `${origin}/app/company/${body.companyName || ""}/profile?tab=addons&consulting=success`,
       cancel_url: `${origin}/app/company/${body.companyName || ""}/profile?tab=addons&consulting=cancelled`,

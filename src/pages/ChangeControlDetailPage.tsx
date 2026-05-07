@@ -13,7 +13,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Calendar } from '@/components/ui/calendar';
 import { cn } from '@/lib/utils';
 import { CCRImpactAnalysis } from '@/components/change-control/CCRImpactAnalysis';
-import { useCCRById, useCCRTransitions, useDeleteCCR, useTransitionCCRState, useUpdateCCR } from '@/hooks/useChangeControlData';
+import { useCCRById, useCCRTransitions, useDeleteCCR, useTransitionCCRState, useUpdateCCR, resolveCurrentCCRProfileId } from '@/hooks/useChangeControlData';
 import { DeleteConfirmationDialog } from '@/components/ui/DeleteConfirmationDialog';
 import { CCRTransitionDialog } from '@/components/change-control/CCRTransitionDialog';
 import { CCRImpactEditDialog } from '@/components/change-control/CCRImpactEditDialog';
@@ -27,8 +27,19 @@ import {
   CCR_SOURCE_LABELS,
   RISK_IMPACT_LABELS,
   CCRStatus,
-  ChangeType
+  ChangeType,
+  CCR_PERSPECTIVE_LABELS,
+  CCR_PERSPECTIVE_ORDER,
+  suggestCCRPerspectives,
+  type CCRPerspective,
 } from '@/types/changeControl';
+import {
+  useCCRReviewerAssignments,
+  useReplaceCCRReviewers,
+  useApproveCCRPerspectives,
+  isCCRFullyApproved,
+  pendingPerspectivesForUser,
+} from '@/hooks/useCCRReviewerAssignments';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { format } from 'date-fns';
 import { useTranslation } from '@/hooks/useTranslation';
@@ -156,6 +167,134 @@ function EditableText({
   );
 }
 
+// ---------------------------------------------------------------------------
+// State Transition Timeline — shared between Details and History tabs.
+// ---------------------------------------------------------------------------
+
+type TimelineCcr = {
+  id: string;
+  created_at: string;
+  owner?: { full_name?: string } | null;
+  creator?: { full_name?: string } | null;
+};
+
+type TimelineTransition = {
+  id: string;
+  to_status: string;
+  transition_reason: string | null;
+  created_at: string;
+  transitioner?: { full_name?: string } | null;
+};
+
+function StateTransitionTimeline({
+  ccr,
+  transitions,
+  loading,
+  unknownLabel,
+}: {
+  ccr: TimelineCcr;
+  transitions: TimelineTransition[];
+  loading: boolean;
+  unknownLabel: string;
+}) {
+  if (loading) return <LoadingSpinner />;
+
+  type StatusKey = keyof typeof CCR_STATUS_LABELS | 'created';
+  const meta: Record<string, { ring: string; bg: string; iconColor: string; Icon: React.ComponentType<{ className?: string }> }> = {
+    draft: { ring: 'border-slate-400', bg: 'bg-slate-50', iconColor: 'text-slate-500', Icon: FileText },
+    under_review: { ring: 'border-amber-400', bg: 'bg-amber-50', iconColor: 'text-amber-600', Icon: Clock },
+    approved: { ring: 'border-blue-500', bg: 'bg-blue-50', iconColor: 'text-blue-600', Icon: ShieldCheck },
+    rejected: { ring: 'border-red-500', bg: 'bg-red-50', iconColor: 'text-red-600', Icon: XCircle },
+    implemented: { ring: 'border-orange-500', bg: 'bg-orange-50', iconColor: 'text-orange-600', Icon: PlayCircle },
+    verified: { ring: 'border-violet-500', bg: 'bg-violet-50', iconColor: 'text-violet-600', Icon: CheckCircle },
+    closed: { ring: 'border-slate-900', bg: 'bg-slate-100', iconColor: 'text-slate-800', Icon: Lock },
+    created: { ring: 'border-cyan-400', bg: 'bg-cyan-50', iconColor: 'text-cyan-600', Icon: FileText },
+  };
+
+  const stripReviewerSuffix = (raw: string | null | undefined) => {
+    if (!raw) return '';
+    const idx = raw.indexOf('\n\nAssigned reviewers — ');
+    return (idx >= 0 ? raw.slice(0, idx) : raw).trim();
+  };
+
+  type Item = {
+    id: string;
+    status: StatusKey;
+    title: string;
+    actor: string;
+    description: string;
+    timestamp: string;
+  };
+
+  // Chronological order: Created first, then transitions ascending
+  // (transitions arrive DESC from the hook).
+  const items: Item[] = [
+    {
+      id: `created-${ccr.id}`,
+      status: 'created',
+      title: 'CCR Created',
+      actor: ccr.creator?.full_name || ccr.owner?.full_name || unknownLabel,
+      description: 'CCR raised.',
+      timestamp: ccr.created_at,
+    },
+    ...[...transitions]
+      .reverse()
+      .map((t) => ({
+        id: t.id,
+        status: t.to_status as keyof typeof CCR_STATUS_LABELS,
+        title: CCR_STATUS_LABELS[t.to_status as keyof typeof CCR_STATUS_LABELS] ?? t.to_status,
+        actor: t.transitioner?.full_name || unknownLabel,
+        description: stripReviewerSuffix(t.transition_reason),
+        timestamp: t.created_at,
+      })),
+  ];
+
+  return (
+    <ol className="relative">
+      {items.map((item, i) => {
+        const m = meta[item.status as string] ?? meta.draft;
+        const Icon = m.Icon;
+        const isLast = i === items.length - 1;
+        return (
+          <li key={item.id} className="relative flex gap-3 pb-5 last:pb-0">
+            {!isLast && (
+              <span
+                aria-hidden
+                className="absolute left-[15px] top-8 bottom-0 w-px bg-border"
+              />
+            )}
+            <span
+              className={`relative z-10 mt-0.5 h-8 w-8 shrink-0 rounded-full border-2 ${m.ring} ${m.bg} flex items-center justify-center shadow-sm`}
+            >
+              <Icon className={`h-4 w-4 ${m.iconColor}`} />
+            </span>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold leading-tight text-foreground">
+                {item.title}
+              </p>
+              <p className="text-[11px] text-muted-foreground mt-0.5">
+                <span className="font-medium text-foreground/80">{item.actor}</span>
+                <span className="mx-1.5">•</span>
+                <span className="font-mono">
+                  {format(new Date(item.timestamp), 'MMM d, HH:mm')}
+                </span>
+              </p>
+              {item.description && item.description !== '—' && (
+                <p
+                  className="text-xs text-muted-foreground mt-1.5 break-words line-clamp-3"
+                  title={item.description}
+                >
+                  {item.description}
+                </p>
+              )}
+            </div>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
 export default function ChangeControlDetailPage() {
   const { ccrId } = useParams<{ ccrId: string }>();
   const navigate = useNavigate();
@@ -171,7 +310,8 @@ export default function ChangeControlDetailPage() {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [impactEditOpen, setImpactEditOpen] = useState(false);
   const [submitForReviewOpen, setSubmitForReviewOpen] = useState(false);
-  const [esignGate, setEsignGate] = useState<null | 'technical' | 'quality' | 'regulatory'>(null);
+  // null | assignment-id (sign just my pending perspectives for that assignment)
+  const [esignAssignmentId, setEsignAssignmentId] = useState<string | null>(null);
   const [visibleDocCount, setVisibleDocCount] = useState<number | null>(null);
   const dedupedDocsCount = useCCRLinkedDocsDedupedCount(
     ccr?.id ?? '',
@@ -190,6 +330,10 @@ export default function ChangeControlDetailPage() {
   const { users: companyUsers } = useCompanyUsers(ccr?.company_id);
   const reviewerName = (id?: string | null) =>
     id ? companyUsers.find((u) => u.id === id)?.name ?? 'Assigned reviewer' : null;
+
+  const { data: assignments = [] } = useCCRReviewerAssignments(ccrId);
+  const replaceReviewers = useReplaceCCRReviewers();
+  const approvePerspectives = useApproveCCRPerspectives();
 
   const activeTab = searchParams.get('tab') ?? 'details';
   const setActiveTab = (tab: string) => {
@@ -242,10 +386,13 @@ export default function ChangeControlDetailPage() {
     { label: ccr.ccr_id }
   ];
 
-  const allThreeApproved =
-    ccr.technical_approved && ccr.quality_approved && ccr.regulatory_approved;
-  const isLockedFromEdit = ccr.status !== 'draft' && ccr.status !== 'under_review';
-  const isTerminal = ccr.status === 'rejected' || ccr.status === 'closed';
+  const allApproved = isCCRFullyApproved(assignments);
+  const isEditable = ccr.status === 'draft' || ccr.status === 'rejected';
+  const isLockedFromEdit = ccr.status !== 'draft' && ccr.status !== 'under_review' && ccr.status !== 'rejected';
+  const isTerminal = ccr.status === 'closed';
+  const myPending = currentUser?.id
+    ? pendingPerspectivesForUser(assignments, currentUser.id)
+    : null;
 
   const openTransition = (config: {
     target: CCRStatus;
@@ -270,56 +417,71 @@ export default function ChangeControlDetailPage() {
     });
   };
 
-  const handleApprovalToggle = async (
-    field: 'technical' | 'quality' | 'regulatory'
-  ) => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-    const currentlyApproved = ccr[`${field}_approved` as const];
-    if (currentlyApproved) {
-      // Un-approval (reversal) — no e-signature required, just clear the gate.
-      await updateCCR.mutateAsync({
-        id: ccr.id,
-        [`${field}_approved`]: false,
-        [`${field}_approved_by`]: null,
-        [`${field}_approved_at`]: null,
-      } as any);
-      return;
+  const handleSignMyPerspectives = async () => {
+    const { data: { user }, error: userError } = await supabase.auth.getUser();
+    if (userError || !user) throw new Error('Your session has expired — please sign in again.');
+    if (!esignAssignmentId) throw new Error('No assignment to sign.');
+    const a = assignments.find((x) => x.id === esignAssignmentId);
+    if (!a) throw new Error('Assignment not found.');
+    if (a.user_id !== user.id) {
+      throw new Error(
+        `You're signed in as ${user.email}, but this review is assigned to a different reviewer.`,
+      );
     }
-    // Granting approval → require 21 CFR Part 11 e-signature via the existing module.
-    setEsignGate(field);
+    await resolveCurrentCCRProfileId();
+    const pending = a.perspectives.filter((p) => !a.approved_perspectives.includes(p));
+    await approvePerspectives.mutateAsync({
+      assignment_id: a.id,
+      ccr_id: ccr.id,
+      user_id: user.id,
+      perspectives: pending,
+    });
+    // If this signature completed the CCR, auto-transition to approved.
+    const updated = assignments.map((x) =>
+      x.id === a.id
+        ? { ...x, approved_perspectives: a.perspectives, approved_at: new Date().toISOString() }
+        : x,
+    );
+    if (isCCRFullyApproved(updated as any)) {
+      await transitionState.mutateAsync({
+        ccrId: ccr.id,
+        fromStatus: ccr.status,
+        toStatus: 'approved',
+        userId: user.id,
+        reason: 'All assigned reviewers have signed off on every perspective.',
+      });
+    }
+    setEsignAssignmentId(null);
   };
 
-  const handleGateSigned = async () => {
-    if (!esignGate) return;
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-    const nowIso = new Date().toISOString();
-    await updateCCR.mutateAsync({
-      id: ccr.id,
-      [`${esignGate}_approved`]: true,
-      [`${esignGate}_approved_by`]: user.id,
-      [`${esignGate}_approved_at`]: nowIso,
-    } as any);
-    setEsignGate(null);
-  };
+  const openRejectDialog = () =>
+    openTransition({
+      target: 'rejected',
+      title: 'Reject CCR',
+      description:
+        'Rejecting sends the CCR back to the author with a documented rationale. They can revise and resubmit.',
+      confirmLabel: 'Reject',
+      destructive: true,
+    });
 
   const handleSubmitForReview = async (payload: CCRSubmitForReviewPayload) => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
-    // 1. Persist reviewer assignments on the CCR
-    await updateCCR.mutateAsync({
-      id: ccr.id,
-      technical_reviewer_id: payload.technical_reviewer_id,
-      quality_reviewer_id: payload.quality_reviewer_id,
-      regulatory_reviewer_id: payload.regulatory_reviewer_id,
-    } as any);
-    // 2. Build a richer audit-trail reason that names the assigned reviewers
+    const resubmittingFromRejected = ccr.status === 'rejected';
+    // 1. Persist reviewer assignments
+    await replaceReviewers.mutateAsync({
+      ccr_id: ccr.id,
+      reviewers: payload.reviewers,
+      resetApprovals: resubmittingFromRejected,
+    });
+    // 2. Build a richer audit-trail reason that names assigned reviewers + perspectives
     const namedReason = (() => {
-      const t = companyUsers.find((u) => u.id === payload.technical_reviewer_id)?.name ?? payload.technical_reviewer_id;
-      const q = companyUsers.find((u) => u.id === payload.quality_reviewer_id)?.name ?? payload.quality_reviewer_id;
-      const r = companyUsers.find((u) => u.id === payload.regulatory_reviewer_id)?.name ?? payload.regulatory_reviewer_id;
-      return `${payload.reason}\n\nAssigned reviewers — Technical: ${t}; Quality: ${q}; Regulatory: ${r}.`;
+      const lines = payload.reviewers.map((r) => {
+        const name = companyUsers.find((u) => u.id === r.user_id)?.name ?? r.user_id;
+        const persps = r.perspectives.map((p) => CCR_PERSPECTIVE_LABELS[p]).join(', ');
+        return `• ${name} — ${persps}`;
+      });
+      return `${payload.reason}\n\nAssigned reviewers:\n${lines.join('\n')}`;
     })();
     // 3. Transition status
     await transitionState.mutateAsync({
@@ -329,41 +491,31 @@ export default function ChangeControlDetailPage() {
       userId: user.id,
       reason: namedReason,
     });
-    // 4. Notify the three assigned reviewers (in-app; surfaces in Mission Control)
+    // 4. Notify assigned reviewers
     try {
       const actorName =
         companyUsers.find((u) => u.id === user.id)?.name ?? 'A teammate';
       const actionUrl = `/app/change-control/${ccr.id}`;
-      const reviewers: Array<{ id: string; gate: string }> = [
-        { id: payload.technical_reviewer_id, gate: 'Technical' },
-        { id: payload.quality_reviewer_id, gate: 'Quality' },
-        { id: payload.regulatory_reviewer_id, gate: 'Regulatory' },
-      ];
-      // Group by user so a reviewer assigned to multiple gates gets one notice
-      const byUser = new Map<string, string[]>();
-      reviewers.forEach((r) => {
-        if (!r.id) return;
-        const arr = byUser.get(r.id) ?? [];
-        arr.push(r.gate);
-        byUser.set(r.id, arr);
+      const notifications = payload.reviewers.map((r) => {
+        const persps = r.perspectives.map((p) => CCR_PERSPECTIVE_LABELS[p]).join(' & ');
+        return {
+          user_id: r.user_id,
+          actor_id: user.id,
+          actor_name: actorName,
+          company_id: ccr.company_id,
+          product_id: ccr.product_id ?? undefined,
+          category: 'review' as const,
+          action: 'ccr_review_assigned' as const,
+          title: `Review requested: ${ccr.ccr_id}`,
+          message: `${actorName} assigned you as ${persps} reviewer on "${ccr.title}". Approve & e-sign in the CCR detail page.`,
+          priority: 'high' as const,
+          entity_type: 'change_control_request',
+          entity_id: ccr.id,
+          entity_name: ccr.ccr_id,
+          action_url: actionUrl,
+          metadata: { perspectives: r.perspectives, reason: payload.reason },
+        };
       });
-      const notifications = Array.from(byUser.entries()).map(([userId, gates]) => ({
-        user_id: userId,
-        actor_id: user.id,
-        actor_name: actorName,
-        company_id: ccr.company_id,
-        product_id: ccr.product_id ?? undefined,
-        category: 'review' as const,
-        action: 'ccr_review_assigned' as const,
-        title: `Review requested: ${ccr.ccr_id}`,
-        message: `${actorName} assigned you as ${gates.join(' & ')} reviewer on "${ccr.title}". Approve & e-sign in the CCR detail page.`,
-        priority: 'high' as const,
-        entity_type: 'change_control_request',
-        entity_id: ccr.id,
-        entity_name: ccr.ccr_id,
-        action_url: actionUrl,
-        metadata: { gates, reason: payload.reason },
-      }));
       if (notifications.length > 0) {
         await new AppNotificationService().createBulkNotifications(notifications);
       }
@@ -376,7 +528,7 @@ export default function ChangeControlDetailPage() {
     if (isTerminal) return null;
     const actions: React.ReactNode[] = [];
 
-    if (ccr.status === 'draft') {
+    if (ccr.status === 'draft' || ccr.status === 'rejected') {
       actions.push(
         <Button
           key="submit"
@@ -384,66 +536,36 @@ export default function ChangeControlDetailPage() {
           onClick={() => setSubmitForReviewOpen(true)}
         >
           <Send className="h-4 w-4 mr-2" />
-          Submit for Review
+          {ccr.status === 'rejected' ? 'Resubmit for Review' : 'Submit for Review'}
         </Button>
       );
     }
 
     if (ccr.status === 'under_review') {
-      actions.push(
-        <Button
-          key="approve"
-          size="sm"
-          disabled={!allThreeApproved}
-          title={allThreeApproved ? '' : 'All three approvals (Technical, Quality, Regulatory) are required before the CCR can be approved.'}
-          onClick={() =>
-            openTransition({
-              target: 'approved',
-              title: 'Approve CCR',
-              description:
-                'This locks the CCR for implementation. All three approval gates have been signed.',
-              confirmLabel: 'Approve CCR',
-            })
-          }
-        >
-          <ShieldCheck className="h-4 w-4 mr-2" />
-          Approve CCR
-        </Button>,
-        <Button
-          key="reject"
-          variant="outline"
-          size="sm"
-          className="text-destructive"
-          onClick={() =>
-            openTransition({
-              target: 'rejected',
-              title: 'Reject CCR',
-              description: 'Rejecting closes the CCR with a documented rationale. This cannot be undone.',
-              confirmLabel: 'Reject',
-              destructive: true,
-            })
-          }
-        >
-          <XCircle className="h-4 w-4 mr-2" />
-          Reject
-        </Button>,
-        <Button
-          key="return"
-          variant="outline"
-          size="sm"
-          onClick={() =>
-            openTransition({
-              target: 'draft',
-              title: 'Return to Draft',
-              description: 'Send the CCR back to the author for further edits before review.',
-              confirmLabel: 'Return to Draft',
-            })
-          }
-        >
-          <RotateCcw className="h-4 w-4 mr-2" />
-          Return to Draft
-        </Button>
-      );
+      // Final approve button — only if there are multiple reviewers AND
+      // every assigned reviewer has signed off on every perspective.
+      const multiReviewer = assignments.length > 1;
+      if (multiReviewer) {
+        actions.push(
+          <Button
+            key="approve"
+            size="sm"
+            disabled={!allApproved}
+            title={allApproved ? '' : 'Every assigned reviewer must sign off on every perspective before the CCR can be approved.'}
+            onClick={() =>
+              openTransition({
+                target: 'approved',
+                title: 'Approve CCR',
+                description: 'This locks the CCR for implementation. All assigned reviewers have signed off.',
+                confirmLabel: 'Approve CCR',
+              })
+            }
+          >
+            <ShieldCheck className="h-4 w-4 mr-2" />
+            Approve CCR
+          </Button>
+        );
+      }
     }
 
     if (ccr.status === 'approved') {
@@ -521,7 +643,7 @@ export default function ChangeControlDetailPage() {
             <Badge variant="outline" className={`text-${CCR_STATUS_COLORS[ccr.status]}-600`}>
               {CCR_STATUS_LABELS[ccr.status]}
             </Badge>
-            {ccr.status === 'draft' ? (
+            {isEditable ? (
               <Select
                 value={ccr.change_type}
                 onValueChange={(v) =>
@@ -560,28 +682,62 @@ export default function ChangeControlDetailPage() {
 
       <div className="px-2 space-y-6">
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-          <TabsList>
-            <TabsTrigger value="details">{lang('changeControl.detailsTab')}</TabsTrigger>
-            <TabsTrigger value="impact">{lang('changeControl.impactAssessmentTab')}</TabsTrigger>
-            <TabsTrigger value="documents">
-              Documents
-              {(() => {
-                const count = dedupedDocsCount;
-                return count > 0 ? (
-                  <Badge variant="secondary" className="ml-2 h-5 px-1.5 text-xs">
-                    {count}
-                  </Badge>
-                ) : null;
-              })()}
-            </TabsTrigger>
-            <TabsTrigger value="implementation">{lang('changeControl.implementationTab')}</TabsTrigger>
-            <TabsTrigger value="history">{lang('changeControl.historyTab')}</TabsTrigger>
-          </TabsList>
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <TabsList>
+              <TabsTrigger value="details">{lang('changeControl.detailsTab')}</TabsTrigger>
+              <TabsTrigger value="impact">{lang('changeControl.impactAssessmentTab')}</TabsTrigger>
+              <TabsTrigger value="documents">
+                Documents
+                {(() => {
+                  const count = dedupedDocsCount;
+                  return count > 0 ? (
+                    <Badge variant="secondary" className="ml-2 h-5 px-1.5 text-xs">
+                      {count}
+                    </Badge>
+                  ) : null;
+                })()}
+              </TabsTrigger>
+              <TabsTrigger value="implementation">{lang('changeControl.implementationTab')}</TabsTrigger>
+              <TabsTrigger value="history">{lang('changeControl.historyTab')}</TabsTrigger>
+            </TabsList>
+
+            {/* Reviewer-side quick actions, aligned with the tabs row.
+                Sole reviewer → one Accept&Sign covering all gates.
+                Multi-gate reviewer → one Approve button per pending gate.
+                Reject is shown for any user with at least one pending gate. */}
+            {ccr.status === 'under_review' && currentUser?.id && myPending && (
+              <div className="flex items-center gap-2 flex-wrap">
+                <Button
+                  size="sm"
+                  disabled={approvePerspectives.isPending || transitionState.isPending}
+                  onClick={() => setEsignAssignmentId(myPending.assignment.id)}
+                >
+                  <Check className="h-4 w-4 mr-2" />
+                  Approve &amp; Sign
+                  <span className="ml-1 text-xs opacity-80">
+                    ({myPending.pending.map((p) => CCR_PERSPECTIVE_LABELS[p]).join(', ')})
+                  </span>
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="text-destructive"
+                  disabled={approvePerspectives.isPending || transitionState.isPending}
+                  onClick={openRejectDialog}
+                >
+                  <XCircle className="h-4 w-4 mr-2" />
+                  Reject
+                </Button>
+              </div>
+            )}
+          </div>
 
           <TabsContent value="details" className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-start">
+              {/* Left column — primary content (Basic Info + Reviewer Approvals) */}
+              <div className="md:col-span-2 space-y-6">
               {/* Basic Information */}
-              <Card className="md:col-span-2">
+              <Card>
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
                     <FileText className="h-5 w-5" />
@@ -592,7 +748,7 @@ export default function ChangeControlDetailPage() {
                   <EditableText
                     label={lang('changeControl.titleLabel')}
                     value={ccr.title}
-                    editable={ccr.status === 'draft'}
+                    editable={isEditable}
                     saving={updateCCR.isPending}
                     onSave={(next) =>
                       updateCCR.mutate({ id: ccr.id, title: next || ccr.title })
@@ -602,7 +758,7 @@ export default function ChangeControlDetailPage() {
                     label={lang('changeControl.descriptionLabel')}
                     value={ccr.description}
                     multiline
-                    editable={ccr.status === 'draft'}
+                    editable={isEditable}
                     saving={updateCCR.isPending}
                     onSave={(next) =>
                       updateCCR.mutate({ id: ccr.id, description: next || ccr.description })
@@ -622,7 +778,7 @@ export default function ChangeControlDetailPage() {
                     label={lang('changeControl.justificationLabel')}
                     value={ccr.justification}
                     multiline
-                    editable={ccr.status === 'draft'}
+                    editable={isEditable}
                     saving={updateCCR.isPending}
                     emptyText="No justification provided"
                     onSave={(next) =>
@@ -658,8 +814,71 @@ export default function ChangeControlDetailPage() {
                 </CardContent>
               </Card>
 
+              {/* Reviewer Approvals — narrowed to fit alongside the right column */}
+              {(ccr.status === 'under_review' || ccr.status === 'approved' || ccr.status === 'implemented' || ccr.status === 'verified' || ccr.status === 'closed') && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <ShieldCheck className="h-5 w-5" />
+                      Reviewer Approvals
+                    </CardTitle>
+                    <CardDescription>
+                      Each assigned reviewer e-signs the perspectives they own (21 CFR Part 11).
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    {assignments.length === 0 ? (
+                      <p className="text-sm text-muted-foreground italic">No reviewers assigned.</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {assignments.map((a) => {
+                          const fullySigned = a.perspectives.every((p) => a.approved_perspectives.includes(p));
+                          return (
+                            <div
+                              key={a.id}
+                              className={`rounded-lg border p-3 ${fullySigned ? 'border-green-300 bg-green-50' : 'bg-muted/30'}`}
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <p className="font-medium text-sm">{reviewerName(a.user_id) ?? 'Reviewer'}</p>
+                                {fullySigned ? (
+                                  <Check className="h-4 w-4 text-green-600 shrink-0" />
+                                ) : (
+                                  <Clock className="h-4 w-4 text-muted-foreground shrink-0" />
+                                )}
+                              </div>
+                              <div className="mt-1 flex flex-wrap gap-1">
+                                {a.perspectives.map((p) => {
+                                  const ok = a.approved_perspectives.includes(p);
+                                  return (
+                                    <Badge
+                                      key={p}
+                                      variant={ok ? 'default' : 'secondary'}
+                                      className={ok ? 'bg-emerald-600' : ''}
+                                    >
+                                      {ok ? '✓ ' : ''}{CCR_PERSPECTIVE_LABELS[p]}
+                                    </Badge>
+                                  );
+                                })}
+                              </div>
+                              {a.approved_at && (
+                                <p className="text-xs text-muted-foreground mt-1">
+                                  Signed {format(new Date(a.approved_at), 'MMM d, HH:mm')}
+                                </p>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              )}
+
+              </div>
+              {/* Right column — secondary content (Ownership & Dates + State Transition History) */}
+              <div className="md:col-span-1 space-y-6">
               {/* Ownership & Dates */}
-              <Card className="md:col-span-1">
+              <Card>
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
                     <Users className="h-5 w-5" />
@@ -669,7 +888,7 @@ export default function ChangeControlDetailPage() {
                 <CardContent className="space-y-4">
                   <div className="group">
                     <label className="text-sm font-medium text-muted-foreground">{lang('changeControl.ownerField')}</label>
-                    {ccr.status === 'draft' ? (
+                    {isEditable ? (
                       <Select
                         value={ccr.owner_id ?? '__unassigned__'}
                         onValueChange={(v) =>
@@ -694,11 +913,20 @@ export default function ChangeControlDetailPage() {
                           ))}
                         </SelectContent>
                       </Select>
-                    ) : (
+                    ) : ccr.owner_id ? (
                       <p className="mt-1">
                         {ccr.owner?.full_name ||
                           reviewerName(ccr.owner_id) ||
                           lang('changeControl.notAssigned')}
+                      </p>
+                    ) : ccr.creator?.full_name ? (
+                      <p className="mt-1">
+                        {ccr.creator.full_name}{' '}
+                        <span className="text-xs text-muted-foreground">(creator)</span>
+                      </p>
+                    ) : (
+                      <p className="mt-1 text-muted-foreground">
+                        {lang('changeControl.notAssigned')}
                       </p>
                     )}
                   </div>
@@ -712,10 +940,10 @@ export default function ChangeControlDetailPage() {
                     <label className="text-sm font-medium text-muted-foreground">{lang('changeControl.createdField')}</label>
                     <p className="mt-1">{format(new Date(ccr.created_at), 'MMM d, yyyy HH:mm')}</p>
                   </div>
-                  {(ccr.status === 'draft' || ccr.target_implementation_date) && (
+                  {(isEditable || ccr.target_implementation_date) && (
                     <div>
                       <label className="text-sm font-medium text-muted-foreground">{lang('changeControl.targetImplementation')}</label>
-                      {ccr.status === 'draft' ? (
+                      {isEditable ? (
                         <Popover>
                           <PopoverTrigger asChild>
                             <Button
@@ -773,69 +1001,26 @@ export default function ChangeControlDetailPage() {
                   )}
                 </CardContent>
               </Card>
-            </div>
 
-            {ccr.status === 'under_review' && currentUser?.id && (() => {
-              const myGates: Array<{ key: 'technical' | 'quality' | 'regulatory'; label: string }> = [];
-              if (ccr.technical_reviewer_id === currentUser.id) myGates.push({ key: 'technical', label: lang('changeControl.technical') });
-              if (ccr.quality_reviewer_id === currentUser.id) myGates.push({ key: 'quality', label: lang('changeControl.quality') });
-              if (ccr.regulatory_reviewer_id === currentUser.id) myGates.push({ key: 'regulatory', label: lang('changeControl.regulatory') });
-              if (myGates.length === 0) return null;
-              return (
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <ShieldCheck className="h-5 w-5" />
-                      Your Approvals
-                    </CardTitle>
-                    <CardDescription>
-                      You're assigned as the reviewer for the gate{myGates.length === 1 ? '' : 's'} below. Approving requires an electronic signature (21 CFR Part 11).
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                      {myGates.map(({ key, label }) => {
-                        const approved = ccr[`${key}_approved` as const];
-                        const approvedAt = ccr[`${key}_approved_at` as const];
-                        return (
-                          <div
-                            key={key}
-                            className={`flex items-center justify-between gap-3 rounded-lg border p-3 ${approved ? 'border-green-300 bg-green-50' : 'bg-muted/30'}`}
-                          >
-                            <div className="min-w-0">
-                              <p className="font-medium text-sm">{label}</p>
-                              <p className="text-xs text-muted-foreground truncate">
-                                {approved
-                                  ? `${lang('changeControl.approved')}${approvedAt ? ' • ' + format(new Date(approvedAt), 'MMM d, HH:mm') : ''}`
-                                  : lang('changeControl.pending')}
-                              </p>
-                            </div>
-                            <Button
-                              size="sm"
-                              variant={approved ? 'outline' : 'default'}
-                              disabled={updateCCR.isPending}
-                              onClick={() => handleApprovalToggle(key)}
-                            >
-                              {approved ? (
-                                <>
-                                  <RotateCcw className="h-3.5 w-3.5 mr-1.5" />
-                                  Revoke
-                                </>
-                              ) : (
-                                <>
-                                  <Check className="h-3.5 w-3.5 mr-1.5" />
-                                  Approve & Sign
-                                </>
-                              )}
-                            </Button>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </CardContent>
-                </Card>
-              );
-            })()}
+              {/* State Transition History — compact timeline beneath Ownership & Dates */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Clock className="h-5 w-5" />
+                    {lang('changeControl.stateTransitionHistory')}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <StateTransitionTimeline
+                    ccr={ccr}
+                    transitions={transitions}
+                    loading={transitionsLoading}
+                    unknownLabel={lang('changeControl.unknown')}
+                  />
+                </CardContent>
+              </Card>
+              </div>
+            </div>
 
           </TabsContent>
 
@@ -941,127 +1126,92 @@ export default function ChangeControlDetailPage() {
           </TabsContent>
 
           <TabsContent value="history" className="space-y-4">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Clock className="h-5 w-5" />
-                  {lang('changeControl.stateTransitionHistory')}
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                {transitionsLoading ? (
-                  <LoadingSpinner />
-                ) : (
-                  <div className="space-y-4">
-                    {/* Synthetic creation entry — always shown as the origin of the audit trail */}
-                    <div className="flex items-start gap-4 pb-4 border-b last:border-0">
-                      <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-                        <FileText className="h-4 w-4 text-primary" />
-                      </div>
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2">
-                          <Badge variant="outline">Created</Badge>
-                          <span>→</span>
-                          <Badge variant="outline">{CCR_STATUS_LABELS[ccr.status as keyof typeof CCR_STATUS_LABELS]}</Badge>
-                        </div>
-                        <p className="text-sm text-muted-foreground mt-1">
-                          {ccr.owner?.full_name || lang('changeControl.unknown')} • {format(new Date(ccr.created_at), 'MMM d, yyyy HH:mm')}
-                        </p>
-                        <p className="text-sm mt-2">CCR raised.</p>
-                      </div>
-                    </div>
-                    {transitions.map((transition) => (
-                      <div key={transition.id} className="flex items-start gap-4 pb-4 border-b last:border-0">
-                        <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-                          <Clock className="h-4 w-4 text-primary" />
-                        </div>
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2">
-                            {transition.from_status && (
-                              <>
-                                <Badge variant="outline">{CCR_STATUS_LABELS[transition.from_status as keyof typeof CCR_STATUS_LABELS]}</Badge>
-                                <span>→</span>
-                              </>
-                            )}
-                            <Badge variant="outline">{CCR_STATUS_LABELS[transition.to_status as keyof typeof CCR_STATUS_LABELS]}</Badge>
+            <div className="grid grid-cols-1 lg:grid-cols-10 gap-4">
+              {/* Audit log — 70% */}
+              <Card className="lg:col-span-7">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Clock className="h-5 w-5" />
+                    Audit log
+                  </CardTitle>
+                  <CardDescription>
+                    Every create, update, and delete on this CCR — captured automatically at the database level.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <CCRAuditLog ccrId={ccr.id} />
+                </CardContent>
+              </Card>
+
+              {/* Right column — Reviewers card + State Transition History */}
+              <div className="lg:col-span-3 space-y-4">
+                {/* Assigned reviewers */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <Users className="h-5 w-5" />
+                      Reviewers
+                    </CardTitle>
+                    <CardDescription>
+                      Assigned approvers for this CCR.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-2">
+                    {assignments.length === 0 ? (
+                      <p className="text-xs text-muted-foreground italic">No reviewers assigned.</p>
+                    ) : (
+                      assignments.map((a) => {
+                        const fully = a.perspectives.every((p) => a.approved_perspectives.includes(p));
+                        return (
+                          <div
+                            key={a.id}
+                            className={`rounded-md border px-3 py-2 ${fully ? 'bg-emerald-50 border-emerald-200' : 'bg-muted/30'}`}
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <p className="text-sm font-medium truncate">{reviewerName(a.user_id) ?? 'Reviewer'}</p>
+                              <span
+                                className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                                  fully
+                                    ? 'bg-emerald-600 text-white'
+                                    : 'bg-amber-100 text-amber-800 border border-amber-300'
+                                }`}
+                              >
+                                {fully ? <><Check className="h-3 w-3" />Signed</> : <><Clock className="h-3 w-3" />Pending</>}
+                              </span>
+                            </div>
+                            <div className="mt-1 flex flex-wrap gap-1">
+                              {a.perspectives.map((p) => (
+                                <span key={p} className="text-[10px] px-1.5 py-0.5 rounded bg-background border">
+                                  {a.approved_perspectives.includes(p) ? '✓ ' : ''}{CCR_PERSPECTIVE_LABELS[p]}
+                                </span>
+                              ))}
+                            </div>
                           </div>
-                          <p className="text-sm text-muted-foreground mt-1">
-                            {transition.transitioner?.full_name || lang('changeControl.unknown')} • {format(new Date(transition.created_at), 'MMM d, yyyy HH:mm')}
-                          </p>
-                          {transition.transition_reason && (() => {
-                            const raw = transition.transition_reason;
-                            const marker = '\n\nAssigned reviewers — ';
-                            const idx = raw.indexOf(marker);
-                            const userReason = idx >= 0 ? raw.slice(0, idx).trim() : raw.trim();
-                            const reviewerBlock = idx >= 0 ? raw.slice(idx + marker.length).replace(/\.$/, '') : '';
-                            const reviewerEntries = reviewerBlock
-                              ? reviewerBlock.split(';').map((s) => {
-                                  const [gate, ...rest] = s.split(':');
-                                  return { gate: gate.trim(), name: rest.join(':').trim() };
-                                }).filter((r) => r.gate && r.name)
-                              : [];
-                            const gateMeta: Record<string, { icon: React.ComponentType<any>; tone: string }> = {
-                              Technical: { icon: Pencil, tone: 'bg-blue-50 text-blue-700 border-blue-200' },
-                              Quality: { icon: CheckCircle, tone: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
-                              Regulatory: { icon: ShieldCheck, tone: 'bg-violet-50 text-violet-700 border-violet-200' },
-                            };
-                            return (
-                              <div className="mt-3 space-y-3">
-                                {userReason && (
-                                  <div className="border-l-2 border-muted-foreground/30 pl-3 py-0.5">
-                                    <p className="text-xs uppercase tracking-wide text-muted-foreground mb-0.5">Reason</p>
-                                    <p className="text-sm whitespace-pre-wrap">{userReason}</p>
-                                  </div>
-                                )}
-                                {reviewerEntries.length > 0 && (
-                                  <div>
-                                    <p className="text-xs uppercase tracking-wide text-muted-foreground mb-1.5">
-                                      Assigned reviewers
-                                    </p>
-                                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                                      {reviewerEntries.map((r) => {
-                                        const meta = gateMeta[r.gate] ?? { icon: Users, tone: 'bg-muted text-muted-foreground border-border' };
-                                        const Icon = meta.icon;
-                                        return (
-                                          <div
-                                            key={r.gate}
-                                            className={`flex items-start gap-2 rounded-md border px-3 py-2 ${meta.tone}`}
-                                          >
-                                            <Icon className="h-4 w-4 mt-0.5 shrink-0" />
-                                            <div className="min-w-0">
-                                              <p className="text-[11px] font-semibold uppercase tracking-wide opacity-80">{r.gate}</p>
-                                              <p className="text-sm font-medium text-foreground truncate" title={r.name}>{r.name}</p>
-                                            </div>
-                                          </div>
-                                        );
-                                      })}
-                                    </div>
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          })()}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Clock className="h-5 w-5" />
-                  Audit log
-                </CardTitle>
-                <CardDescription>
-                  Every create, update, and delete on this CCR — captured automatically at the database level.
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <CCRAuditLog ccrId={ccr.id} />
-              </CardContent>
-            </Card>
+                        );
+                      })
+                    )}
+                  </CardContent>
+                </Card>
+
+                {/* State transition history — activity-timeline style */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <Clock className="h-5 w-5" />
+                      {lang('changeControl.stateTransitionHistory')}
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <StateTransitionTimeline
+                      ccr={ccr}
+                      transitions={transitions}
+                      loading={transitionsLoading}
+                      unknownLabel={lang('changeControl.unknown')}
+                    />
+                  </CardContent>
+                </Card>
+              </div>
+            </div>
           </TabsContent>
         </Tabs>
       </div>
@@ -1096,33 +1246,40 @@ export default function ChangeControlDetailPage() {
         ccr={ccr}
       />
 
-      {esignGate && currentUser?.id && (
-        <ESignPopup
-          open={!!esignGate}
-          onOpenChange={(o) => { if (!o) setEsignGate(null); }}
-          documentId={ccr.id}
-          documentName={`${ccr.ccr_id} — ${esignGate[0].toUpperCase() + esignGate.slice(1)} Approval`}
-          onComplete={handleGateSigned}
-          selfSigner={{
-            userId: currentUser.id,
-            displayName:
-              companyUsers.find((u) => u.id === currentUser.id)?.name ??
-              currentUser.email ??
-              'Reviewer',
-            meaning: 'approver',
-          }}
-        />
-      )}
+      {esignAssignmentId && currentUser?.id && (() => {
+        const a = assignments.find((x) => x.id === esignAssignmentId);
+        const persps = (a?.perspectives ?? [])
+          .filter((p) => !(a?.approved_perspectives ?? []).includes(p))
+          .map((p) => CCR_PERSPECTIVE_LABELS[p])
+          .join(', ');
+        return (
+          <ESignPopup
+            open={!!esignAssignmentId}
+            onOpenChange={(o) => { if (!o) setEsignAssignmentId(null); }}
+            documentId={ccr.id}
+            documentName={`${ccr.ccr_id} — Approve: ${persps || 'Reviewer'}`}
+            onComplete={handleSignMyPerspectives}
+            selfSigner={{
+              userId: currentUser.id,
+              displayName:
+                companyUsers.find((u) => u.id === currentUser.id)?.name ??
+                currentUser.email ??
+                'Reviewer',
+              meaning: 'approver',
+            }}
+          />
+        );
+      })()}
 
       <CCRSubmitForReviewDialog
         open={submitForReviewOpen}
         onOpenChange={setSubmitForReviewOpen}
         companyId={ccr.company_id}
-        initial={{
-          technical_reviewer_id: ccr.technical_reviewer_id,
-          quality_reviewer_id: ccr.quality_reviewer_id,
-          regulatory_reviewer_id: ccr.regulatory_reviewer_id,
-        }}
+        initial={assignments.map((a) => ({ user_id: a.user_id, perspectives: a.perspectives }))}
+        suggestedPerspectives={suggestCCRPerspectives({
+          change_type: ccr.change_type,
+          regulatory_impact: ccr.regulatory_impact,
+        })}
         onConfirm={handleSubmitForReview}
       />
     </div>

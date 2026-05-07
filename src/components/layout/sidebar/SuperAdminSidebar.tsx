@@ -1,7 +1,7 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { Sidebar, SidebarContent, SidebarHeader, SidebarMenu, SidebarMenuButton, SidebarMenuItem } from '@/components/ui/sidebar';
-import { Users, CreditCard, Settings, Shield, FileText, History, MessageSquare, Key, Layers, Ticket, Sparkles, DollarSign, Rocket, Coins, ToggleRight, GraduationCap } from 'lucide-react';
+import { Users, CreditCard, Settings, Shield, FileText, History, MessageSquare, Key, Layers, Ticket, Sparkles, DollarSign, Rocket, Coins, ToggleRight, GraduationCap, Building2 } from 'lucide-react';
 
 export default function SuperAdminSidebar() {
   const location = useLocation();
@@ -36,6 +36,12 @@ export default function SuperAdminSidebar() {
       label: 'Feature Flags',
       icon: ToggleRight,
       path: '/super-admin/app/feature-flags',
+    },
+    {
+      id: 'tenant-configs',
+      label: 'Tenants',
+      icon: Building2,
+      path: '/super-admin/app/tenant-configs',
     },
     {
       id: 'releases',
@@ -73,12 +79,12 @@ export default function SuperAdminSidebar() {
       icon: GraduationCap,
       path: '/super-admin/app/consulting-hours',
     },
-    {
-      id: 'audit-logs',
-      label: 'Audit Log',
-      icon: History,
-      path: '/super-admin/app/audit-logs',
-    },
+    // {
+    //   id: 'audit-logs',
+    //   label: 'Audit Log',
+    //   icon: History,
+    //   path: '/super-admin/app/audit-logs',
+    // },
     {
       id: 'whx-codes',
       label: 'WHX Event Codes',

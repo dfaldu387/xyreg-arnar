@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { GENESIS_SECTIONS } from '@/config/genesisSections';
 import { BlueprintStepDetail } from './BlueprintStepDetail';
 import { BlueprintStepFloatingNav } from './BlueprintStepFloatingNav';
+import { isInvestorEssentialSubstep } from '@/config/investorEssentialKeys';
 
 interface BlueprintStepDetailViewProps {
   /** completionKey -> isComplete */
@@ -93,6 +94,7 @@ export function BlueprintStepDetailView({
         subStep={selected.subStep}
         subIndex={selected.subIndex}
         isComplete={currentComplete}
+        isInvestorEssential={isInvestorEssentialSubstep(selected.subStep.id)}
         disabled={disabled}
         onBack={() => setStep(null)}
         onOpenFullEditor={
@@ -109,11 +111,14 @@ export function BlueprintStepDetailView({
         currentIndex={flatIdx}
         totalSteps={flatSteps.length}
         currentComplete={currentComplete}
+        currentEssential={isInvestorEssentialSubstep(selected.subStep.id)}
         prevLabel={prev?.title}
         prevComplete={prev ? Boolean(completion[prev.completionKey]) : undefined}
+        prevEssential={prev ? isInvestorEssentialSubstep(prev.id) : undefined}
         onPrev={prev ? () => setStep(prev.id) : undefined}
         nextLabel={next ? next.title : 'Back to Venture Blueprint'}
         nextComplete={next ? Boolean(completion[next.completionKey]) : undefined}
+        nextEssential={next ? isInvestorEssentialSubstep(next.id) : undefined}
         onNext={next ? () => setStep(next.id) : () => setStep(null)}
       />
     </>

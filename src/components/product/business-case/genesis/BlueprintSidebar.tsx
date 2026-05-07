@@ -1,12 +1,17 @@
 import React, { useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { CheckCircle, Circle, Home, ChevronRight, Target, Compass, Eye } from 'lucide-react';
+import { CheckCircle, Circle, Home, ChevronRight, Target, Compass, Eye, Star } from 'lucide-react';
 import { useInvestorPreview } from '@/contexts/InvestorPreviewContext';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { useRegisterRightRail } from '@/context/RightRailContext';
 import { GENESIS_SECTIONS } from '@/config/genesisSections';
+import {
+  isInvestorEssentialSubstep,
+  parseBlueprintTrack,
+  BLUEPRINT_TRACK_PARAM,
+} from '@/config/investorEssentialKeys';
 
 interface BlueprintSidebarProps {
   /** completionKey -> isComplete */
@@ -24,21 +29,26 @@ export function BlueprintSidebar({ completion, disabled = false }: BlueprintSide
   useRegisterRightRail();
   const [searchParams, setSearchParams] = useSearchParams();
   const activeStepId = searchParams.get('step');
+  const track = parseBlueprintTrack(searchParams.get(BLUEPRINT_TRACK_PARAM));
   const { isPreviewOpen, togglePreview } = useInvestorPreview();
 
-  // Flat list of steps (used for current/next).
+  // Flat list of steps respecting the active track filter (used for current/next).
   const flatSteps = useMemo(
     () =>
       GENESIS_SECTIONS.flatMap((section, sectionIdx) =>
-        section.subSteps.map((sub, subIdx) => ({
-          section,
-          sectionIdx,
-          sub,
-          subIdx,
-          isComplete: Boolean(completion[sub.completionKey]),
-        })),
+        section.subSteps
+          .filter(
+            (sub) => track === 'full' || isInvestorEssentialSubstep(sub.id),
+          )
+          .map((sub, subIdx) => ({
+            section,
+            sectionIdx,
+            sub,
+            subIdx,
+            isComplete: Boolean(completion[sub.completionKey]),
+          })),
       ),
-    [completion],
+    [completion, track],
   );
 
   const totalSteps = flatSteps.length;
@@ -244,10 +254,15 @@ export function BlueprintSidebar({ completion, disabled = false }: BlueprintSide
 
         <div className="space-y-4">
           {GENESIS_SECTIONS.map((section, sectionIdx) => {
-            const groupCompleted = section.subSteps.filter((sub) =>
+            const visibleSubs =
+              track === 'investor'
+                ? section.subSteps.filter((sub) => isInvestorEssentialSubstep(sub.id))
+                : section.subSteps;
+            if (visibleSubs.length === 0) return null;
+            const groupCompleted = visibleSubs.filter((sub) =>
               Boolean(completion[sub.completionKey]),
             ).length;
-            const groupTotal = section.subSteps.length;
+            const groupTotal = visibleSubs.length;
             const groupAllComplete = groupCompleted === groupTotal && groupTotal > 0;
             const isActiveSec = activeStep?.sectionIdx === sectionIdx;
 
@@ -269,9 +284,11 @@ export function BlueprintSidebar({ completion, disabled = false }: BlueprintSide
                   </span>
                 </div>
                 <div className="space-y-0.5">
-                  {section.subSteps.map((sub, subIdx) => {
+                  {visibleSubs.map((sub) => {
+                    const subIdx = section.subSteps.findIndex((x) => x.id === sub.id);
                     const isComplete = Boolean(completion[sub.completionKey]);
                     const isActive = sub.id === activeStepId;
+                    const essential = isInvestorEssentialSubstep(sub.id);
                     return (
                       <button
                         key={sub.id}
@@ -297,9 +314,15 @@ export function BlueprintSidebar({ completion, disabled = false }: BlueprintSide
                             )}
                           />
                         )}
-                        <span className="truncate">
+                        <span className="truncate flex-1">
                           §{sectionIdx + 1}.{subIdx + 1} {sub.title}
                         </span>
+                        {essential && track === 'full' && (
+                          <Star
+                            className="h-3 w-3 flex-shrink-0 fill-amber-500 text-amber-500"
+                            aria-label="Investor essential"
+                          />
+                        )}
                       </button>
                     );
                   })}

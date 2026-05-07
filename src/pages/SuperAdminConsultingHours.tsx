@@ -27,6 +27,8 @@ import {
   Loader2,
   Check,
   ChevronsUpDown,
+  Pencil,
+  Package as PackageIcon,
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
@@ -63,6 +65,18 @@ interface CompanySummary {
   totalSpent: number;
   transactions: number;
   lastActivity: string | null;
+}
+
+interface ConsultingPackageInfo {
+  id: string;
+  product_key: string;
+  stripe_product_id: string;
+  stripe_price_id: string;
+  name: string;
+  description: string | null;
+  price_cents: number;
+  currency: string;
+  hours_per_pack: number;
 }
 
 // --- Helpers ---
@@ -103,10 +117,121 @@ export default function SuperAdminConsultingHours() {
   // Detail dialog
   const [detailCompany, setDetailCompany] = useState<CompanySummary | null>(null);
 
+  // Consulting package settings
+  const [pkg, setPkg] = useState<ConsultingPackageInfo | null>(null);
+  const [pkgLoading, setPkgLoading] = useState(true);
+  const [pkgEditOpen, setPkgEditOpen] = useState(false);
+  const [pkgEditName, setPkgEditName] = useState("");
+  const [pkgEditDescription, setPkgEditDescription] = useState("");
+  const [pkgEditPrice, setPkgEditPrice] = useState("");
+  const [pkgEditHours, setPkgEditHours] = useState("");
+  const [pkgEditSubmitting, setPkgEditSubmitting] = useState(false);
+
+  const loadConsultingPackage = async () => {
+    setPkgLoading(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("get-dynamic-products", {
+        body: { product_key: "consulting_hours" },
+      });
+      if (error) {
+        console.error("Failed to load consulting package:", error);
+        return;
+      }
+      const first = data?.products?.[0];
+      if (!first) {
+        setPkg(null);
+        return;
+      }
+      setPkg({
+        id: first.id,
+        product_key: first.product_key,
+        stripe_product_id: first.stripe_product_id,
+        stripe_price_id: first.stripe_price_id,
+        name: first.name,
+        description: first.description ?? null,
+        price_cents: first.price_cents,
+        currency: first.currency,
+        hours_per_pack: Number(first.metadata?.hours_per_pack ?? 0),
+      });
+    } catch (err) {
+      console.error("Failed to load consulting package:", err);
+    } finally {
+      setPkgLoading(false);
+    }
+  };
+
+  const openPackageEdit = () => {
+    if (!pkg) return;
+    setPkgEditName(pkg.name);
+    setPkgEditDescription(pkg.description ?? "");
+    setPkgEditPrice((pkg.price_cents / 100).toString());
+    setPkgEditHours(String(pkg.hours_per_pack));
+    setPkgEditOpen(true);
+  };
+
+  const submitPackageEdit = async () => {
+    if (!pkg) return;
+    const newPriceUnits = parseFloat(pkgEditPrice);
+    const newHours = parseInt(pkgEditHours, 10);
+    if (!Number.isFinite(newPriceUnits) || newPriceUnits <= 0) {
+      toast.error("Price must be a positive number");
+      return;
+    }
+    if (!Number.isInteger(newHours) || newHours <= 0) {
+      toast.error("Hours per pack must be a positive integer");
+      return;
+    }
+
+    const payload: Record<string, unknown> = { id: pkg.id };
+    if (pkgEditName.trim() && pkgEditName.trim() !== pkg.name) {
+      payload.name = pkgEditName.trim();
+    }
+    if ((pkgEditDescription ?? "") !== (pkg.description ?? "")) {
+      payload.description = pkgEditDescription;
+    }
+    const newPriceCents = Math.round(newPriceUnits * 100);
+    if (newPriceCents !== pkg.price_cents) {
+      payload.price_cents = newPriceCents;
+    }
+    if (newHours !== pkg.hours_per_pack) {
+      payload.hours_per_pack = newHours;
+    }
+    if (Object.keys(payload).length === 1) {
+      toast.info("No changes to save");
+      return;
+    }
+
+    setPkgEditSubmitting(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("update-dynamic-product", {
+        body: payload,
+      });
+      if (error) {
+        throw new Error(error.message ?? "Update failed");
+      }
+      if (data?.error) {
+        throw new Error(data.error);
+      }
+      toast.success("Consulting package updated");
+      setPkgEditOpen(false);
+      await loadConsultingPackage();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Update failed";
+      console.error("Package update failed:", err);
+      toast.error(msg);
+    } finally {
+      setPkgEditSubmitting(false);
+    }
+  };
+
   // --- Fetch ---
   useEffect(() => {
     loadData();
   }, [dateFrom, dateTo]);
+
+  useEffect(() => {
+    loadConsultingPackage();
+  }, []);
 
   const loadData = async () => {
     setIsLoading(true);
@@ -394,6 +519,70 @@ export default function SuperAdminConsultingHours() {
           </Button>
         </div>
       </div>
+
+      {/* Consulting Package Settings */}
+      <Card>
+        <CardContent className="p-4">
+          <div className="flex items-start justify-between gap-4 flex-wrap">
+            <div className="flex items-start gap-3 flex-1 min-w-[260px]">
+              <div className="w-10 h-10 rounded-lg bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center flex-shrink-0">
+                <PackageIcon className="w-5 h-5 text-emerald-600" />
+              </div>
+              <div className="flex-1">
+                <h2 className="text-base font-semibold">Consulting Package</h2>
+                {pkgLoading ? (
+                  <p className="text-sm text-muted-foreground mt-1">Loading…</p>
+                ) : !pkg ? (
+                  <p className="text-sm text-muted-foreground mt-1">
+                    No active consulting package configured.
+                  </p>
+                ) : (
+                  <div className="mt-2 grid grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-2 text-sm">
+                    <div>
+                      <p className="text-xs text-muted-foreground uppercase tracking-wide">Name</p>
+                      <p className="font-medium truncate">{pkg.name}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground uppercase tracking-wide">Price</p>
+                      <p className="font-medium">
+                        {new Intl.NumberFormat("en-US", {
+                          style: "currency",
+                          currency: pkg.currency.toUpperCase(),
+                          minimumFractionDigits: 0,
+                          maximumFractionDigits: 2,
+                        }).format(pkg.price_cents / 100)}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground uppercase tracking-wide">Hours / pack</p>
+                      <p className="font-medium">{pkg.hours_per_pack}h</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground uppercase tracking-wide">Currency</p>
+                      <p className="font-medium uppercase">{pkg.currency}</p>
+                    </div>
+                    {pkg.description && (
+                      <div className="col-span-full">
+                        <p className="text-xs text-muted-foreground uppercase tracking-wide">Description</p>
+                        <p className="text-sm">{pkg.description}</p>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={openPackageEdit}
+              disabled={!pkg || pkgLoading}
+              className="gap-1.5"
+            >
+              <Pencil className="w-3.5 h-3.5" /> Edit
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Summary Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -888,6 +1077,85 @@ export default function SuperAdminConsultingHours() {
                 <><Plus className="h-4 w-4 mr-2" /> Add {formatHM(addHoursAmount, addMinutesAmount)}</>
               ) : (
                 <><Minus className="h-4 w-4 mr-2" /> Deduct {formatHM(addHoursAmount, addMinutesAmount)}</>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit consulting package dialog */}
+      <Dialog open={pkgEditOpen} onOpenChange={setPkgEditOpen}>
+        <DialogContent className="sm:max-w-[480px]">
+          <DialogHeader>
+            <DialogTitle>Edit Consulting Package</DialogTitle>
+            <DialogDescription>
+              Name, description, and price write to Stripe. Price changes create a new
+              Stripe Price and set it as the Product default; the previous Price is archived.
+              Hours per pack is stored locally.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <div>
+              <Label htmlFor="pkg-name">Name</Label>
+              <Input
+                id="pkg-name"
+                value={pkgEditName}
+                onChange={(e) => setPkgEditName(e.target.value)}
+                disabled={pkgEditSubmitting}
+              />
+            </div>
+            <div>
+              <Label htmlFor="pkg-desc">Description</Label>
+              <Textarea
+                id="pkg-desc"
+                value={pkgEditDescription}
+                onChange={(e) => setPkgEditDescription(e.target.value)}
+                disabled={pkgEditSubmitting}
+                rows={2}
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label htmlFor="pkg-price">
+                  Price ({pkg?.currency.toUpperCase() ?? "EUR"})
+                </Label>
+                <Input
+                  id="pkg-price"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={pkgEditPrice}
+                  onChange={(e) => setPkgEditPrice(e.target.value)}
+                  disabled={pkgEditSubmitting}
+                />
+              </div>
+              <div>
+                <Label htmlFor="pkg-hours">Hours per pack</Label>
+                <Input
+                  id="pkg-hours"
+                  type="number"
+                  step="1"
+                  min="1"
+                  value={pkgEditHours}
+                  onChange={(e) => setPkgEditHours(e.target.value)}
+                  disabled={pkgEditSubmitting}
+                />
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setPkgEditOpen(false)}
+              disabled={pkgEditSubmitting}
+            >
+              Cancel
+            </Button>
+            <Button onClick={submitPackageEdit} disabled={pkgEditSubmitting}>
+              {pkgEditSubmitting ? (
+                <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Saving…</>
+              ) : (
+                <>Save changes</>
               )}
             </Button>
           </DialogFooter>

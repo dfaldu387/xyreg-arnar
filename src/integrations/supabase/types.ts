@@ -2451,6 +2451,50 @@ export type Database = {
           },
         ]
       }
+      ccr_reviewer_assignments: {
+        Row: {
+          approved_at: string | null
+          approved_by: string | null
+          approved_perspectives: string[]
+          ccr_id: string
+          created_at: string
+          id: string
+          perspectives: string[]
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          approved_at?: string | null
+          approved_by?: string | null
+          approved_perspectives?: string[]
+          ccr_id: string
+          created_at?: string
+          id?: string
+          perspectives?: string[]
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          approved_at?: string | null
+          approved_by?: string | null
+          approved_perspectives?: string[]
+          ccr_id?: string
+          created_at?: string
+          id?: string
+          perspectives?: string[]
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ccr_reviewer_assignments_ccr_id_fkey"
+            columns: ["ccr_id"]
+            isOneToOne: false
+            referencedRelation: "change_control_requests"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       certifications: {
         Row: {
           comments: Json | null
@@ -3901,11 +3945,14 @@ export type Database = {
           default_markets: Json | null
           department_structure: Json | null
           description: string | null
+          document_logo_original_url: string | null
+          document_logo_url: string | null
           email: string | null
           id: string
           importers: Json | null
           inserted_at: string
           is_archived: boolean
+          logo_original_url: string | null
           logo_url: string | null
           name: string
           notified_body_id: string | null
@@ -3941,11 +3988,14 @@ export type Database = {
           default_markets?: Json | null
           department_structure?: Json | null
           description?: string | null
+          document_logo_original_url?: string | null
+          document_logo_url?: string | null
           email?: string | null
           id?: string
           importers?: Json | null
           inserted_at?: string
           is_archived?: boolean
+          logo_original_url?: string | null
           logo_url?: string | null
           name: string
           notified_body_id?: string | null
@@ -3981,11 +4031,14 @@ export type Database = {
           default_markets?: Json | null
           department_structure?: Json | null
           description?: string | null
+          document_logo_original_url?: string | null
+          document_logo_url?: string | null
           email?: string | null
           id?: string
           importers?: Json | null
           inserted_at?: string
           is_archived?: boolean
+          logo_original_url?: string | null
           logo_url?: string | null
           name?: string
           notified_body_id?: string | null
@@ -6385,6 +6438,7 @@ export type Database = {
           name: string
           public_url: string | null
           scope: string | null
+          sections: Json | null
           tech_applicability: string | null
           template_category: string | null
           updated_at: string | null
@@ -6407,6 +6461,7 @@ export type Database = {
           name: string
           public_url?: string | null
           scope?: string | null
+          sections?: Json | null
           tech_applicability?: string | null
           template_category?: string | null
           updated_at?: string | null
@@ -6429,6 +6484,7 @@ export type Database = {
           name?: string
           public_url?: string | null
           scope?: string | null
+          sections?: Json | null
           tech_applicability?: string | null
           template_category?: string | null
           updated_at?: string | null
@@ -26148,6 +26204,75 @@ export type Database = {
           },
         ]
       }
+      tenant_configs: {
+        Row: {
+          allow_company_ids: string[]
+          branch_name: string | null
+          company_id: string | null
+          github_base_branch: string | null
+          id: string
+          inserted_at: string
+          key: string
+          last_pr_created_at: string | null
+          last_pr_number: number | null
+          last_pr_url: string | null
+          name: string
+          pr_automation_enabled: boolean
+          stripe_id: string | null
+          updated_at: string
+          url: string | null
+        }
+        Insert: {
+          allow_company_ids?: string[]
+          branch_name?: string | null
+          company_id?: string | null
+          github_base_branch?: string | null
+          id?: string
+          inserted_at?: string
+          key: string
+          last_pr_created_at?: string | null
+          last_pr_number?: number | null
+          last_pr_url?: string | null
+          name: string
+          pr_automation_enabled?: boolean
+          stripe_id?: string | null
+          updated_at?: string
+          url?: string | null
+        }
+        Update: {
+          allow_company_ids?: string[]
+          branch_name?: string | null
+          company_id?: string | null
+          github_base_branch?: string | null
+          id?: string
+          inserted_at?: string
+          key?: string
+          last_pr_created_at?: string | null
+          last_pr_number?: number | null
+          last_pr_url?: string | null
+          name?: string
+          pr_automation_enabled?: boolean
+          stripe_id?: string | null
+          updated_at?: string
+          url?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tenant_configs_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tenant_configs_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "company_dashboard_summary"
+            referencedColumns: ["company_id"]
+          },
+        ]
+      }
       tenants: {
         Row: {
           admin_email: string
@@ -29244,6 +29369,10 @@ export type Database = {
           product_name: string
           version: string
         }[]
+      }
+      get_tenant_allow_company_ids: {
+        Args: { tenant_key: string }
+        Returns: string[]
       }
       get_user_role_in_company: {
         Args: { p_company_id: string; p_user_id: string }

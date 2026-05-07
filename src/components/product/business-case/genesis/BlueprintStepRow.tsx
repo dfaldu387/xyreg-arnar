@@ -1,5 +1,5 @@
 import React from 'react';
-import { Eye } from 'lucide-react';
+import { Eye, Star } from 'lucide-react';
 import { CircularProgress } from '@/components/common/CircularProgress';
 import { cn } from '@/lib/utils';
 
@@ -9,6 +9,8 @@ interface BlueprintStepRowProps {
   title: string;
   subtitle?: string;
   isComplete: boolean;
+  /** True when this row is part of the investor-essential set. */
+  isInvestorEssential?: boolean;
   /** Called when the row is clicked — opens the in-place detail panel. */
   onSelect: () => void;
   disabled?: boolean;
@@ -24,6 +26,7 @@ export function BlueprintStepRow({
   title,
   subtitle,
   isComplete,
+  isInvestorEssential = false,
   onSelect,
   disabled = false,
 }: BlueprintStepRowProps) {
@@ -59,7 +62,18 @@ export function BlueprintStepRow({
       </div>
 
       <div className="flex-1 min-w-0">
-        <h4 className="font-medium text-sm truncate">{title}</h4>
+        <div className="flex items-center gap-2">
+          <h4 className="font-medium text-sm truncate">{title}</h4>
+          {isInvestorEssential && (
+            <span
+              title="Investor essential"
+              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-semibold uppercase tracking-wider bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 border border-amber-300/70 dark:border-amber-700/50 flex-shrink-0"
+            >
+              <Star className="h-2.5 w-2.5 fill-amber-500 text-amber-500" />
+              Investor
+            </span>
+          )}
+        </div>
         {subtitle && (
           <p className="text-xs text-muted-foreground line-clamp-2">
             {subtitle}

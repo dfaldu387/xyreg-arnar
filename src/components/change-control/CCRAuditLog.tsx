@@ -1,5 +1,12 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
+import {
+  CCR_STATUS_LABELS,
+  CHANGE_TYPE_LABELS,
+  CCR_SOURCE_LABELS,
+  RISK_IMPACT_LABELS,
+} from '@/types/changeControl';
 import { LoadingSpinner } from '@/components/ui/loading-spinner';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -167,13 +174,22 @@ const BOOLEAN_FIELDS = new Set([
   'regulatory_impact',
 ]);
 
+// Fields whose values are enum strings; render the human label instead of the
+// raw underscore-separated database value (`under_review` → `Under Review`).
+const ENUM_LABELS: Record<string, Record<string, string>> = {
+  status: CCR_STATUS_LABELS as Record<string, string>,
+  change_type: CHANGE_TYPE_LABELS as Record<string, string>,
+  source_type: CCR_SOURCE_LABELS as Record<string, string>,
+  risk_impact: RISK_IMPACT_LABELS as Record<string, string>,
+};
+
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}([T\s]\d{2}:\d{2}(:\d{2})?(\.\d+)?(Z|[+-]\d{2}:?\d{2})?)?$/;
 
 function formatFieldName(field: string): string {
   return field
     .replace(/_/g, ' ')
-    .replace(/\bid\b/gi, 'ID')
+    .replace(/\bid\b/gi, '')
     .replace(/^./, (c) => c.toUpperCase());
 }
 
@@ -204,13 +220,11 @@ interface CCRAuditLogProps {
 }
 
 export function CCRAuditLog({ ccrId }: CCRAuditLogProps) {
-  const [entries, setEntries] = useState<AuditEntry[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      setLoading(true);
+  // Use react-query so the audit log auto-refetches when callers
+  // invalidate ['ccr-audit-log'] (e.g. after CCR transitions / updates).
+  const { data: entries = [], isLoading: loading } = useQuery({
+    queryKey: ['ccr-audit-log', ccrId],
+    queryFn: async () => {
       const { data, error } = await supabase
         .from('audit_trail_logs')
         .select('id, action, created_at, user_id, changes')
@@ -218,12 +232,9 @@ export function CCRAuditLog({ ccrId }: CCRAuditLogProps) {
         .eq('entity_id', ccrId)
         .order('created_at', { ascending: false });
 
-      if (cancelled) return;
       if (error) {
         console.error('[CCRAuditLog] failed to load audit entries', error);
-        setEntries([]);
-        setLoading(false);
-        return;
+        return [] as AuditEntry[];
       }
 
       const rows = (data ?? []) as AuditEntry[];
@@ -255,10 +266,7 @@ export function CCRAuditLog({ ccrId }: CCRAuditLogProps) {
         nameById = new Map(
           (profiles ?? []).map((p: any) => {
             const full = `${p.first_name ?? ''} ${p.last_name ?? ''}`.trim();
-            const display = full && p.email
-              ? `${full} (${p.email})`
-              : full || p.email || 'Unknown user';
-            return [p.id, display];
+            return [p.id, full || p.email || 'Unknown user'];
           }),
         );
       }
@@ -277,34 +285,27 @@ export function CCRAuditLog({ ccrId }: CCRAuditLogProps) {
         if (TIMESTAMP_FIELDS.has(field) && typeof value === 'string' && ISO_DATE_RE.test(value)) {
           return formatTimestamp(value);
         }
+        const enumMap = ENUM_LABELS[field];
+        if (enumMap && typeof value === 'string' && enumMap[value]) {
+          return enumMap[value];
+        }
         return value;
       };
 
-      if (cancelled) return;
-      setEntries(
-        rows.map((r) => ({
-          ...r,
-          user_name: r.user_id ? nameById.get(r.user_id) || 'Unknown user' : 'System',
-          changes: Array.isArray(r.changes)
-            ? r.changes.map((c) => ({
-                ...c,
-                oldValue: resolveValue(c.field, c.oldValue),
-                newValue: resolveValue(c.field, c.newValue),
-              }))
-            : r.changes,
-        })),
-      );
-      setLoading(false);
-    })().catch((err) => {
-      if (cancelled) return;
-      console.error('[CCRAuditLog] unexpected loader failure', err);
-      setEntries([]);
-      setLoading(false);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [ccrId]);
+      return rows.map((r) => ({
+        ...r,
+        user_name: r.user_id ? nameById.get(r.user_id) || 'Unknown user' : 'System',
+        changes: Array.isArray(r.changes)
+          ? r.changes.map((c) => ({
+              ...c,
+              oldValue: resolveValue(c.field, c.oldValue),
+              newValue: resolveValue(c.field, c.newValue),
+            }))
+          : r.changes,
+      })) as AuditEntry[];
+    },
+    enabled: !!ccrId,
+  });
 
   if (loading) return <LoadingSpinner />;
 
@@ -317,82 +318,96 @@ export function CCRAuditLog({ ccrId }: CCRAuditLogProps) {
   }
 
   return (
-    <div className="relative pl-10">
-      {/* Vertical timeline line */}
-      <div className="absolute left-4 top-2 bottom-2 w-px bg-border" aria-hidden />
-      <ol className="space-y-6">
-        {entries.map((entry) => {
-          const baseMeta: Meta = ACTION_META[entry.action] ?? {
-            label: entry.action,
-            icon: History,
-            tone: 'bg-muted text-muted-foreground border-border',
-            nodeTone: 'bg-muted text-muted-foreground ring-border',
-          };
-          const visibleChanges =
-            entry.action === 'ccr_updated'
-              ? (entry.changes ?? []).filter((c) => !HIDDEN_UPDATE_FIELDS.has(c.field))
-              : [];
-          const meta =
-            entry.action === 'ccr_updated' ? inferUpdateMeta(visibleChanges) : baseMeta;
-          const Icon = meta.icon;
+    <ol className="space-y-2">
+      {entries.map((entry) => {
+        const baseMeta: Meta = ACTION_META[entry.action] ?? {
+          label: entry.action,
+          icon: History,
+          tone: 'bg-muted text-muted-foreground border-border',
+          nodeTone: 'bg-muted text-muted-foreground ring-border',
+        };
+        const visibleChanges =
+          entry.action === 'ccr_updated'
+            ? (entry.changes ?? []).filter((c) => !HIDDEN_UPDATE_FIELDS.has(c.field))
+            : [];
+        const meta =
+          entry.action === 'ccr_updated' ? inferUpdateMeta(visibleChanges) : baseMeta;
+        const Icon = meta.icon;
+        const isApprovalRow = meta.label === 'Approval recorded';
 
-          return (
-            <li key={entry.id} className="relative">
-              {/* Timeline node — sits on the vertical line */}
+        return (
+          <li
+            key={entry.id}
+            className="rounded-lg border bg-card hover:bg-muted/30 transition-colors px-3 py-2.5"
+          >
+            <div className="flex items-start gap-3">
               <div
-                className={`absolute -left-10 top-0 h-7 w-7 rounded-full ring-4 ring-background flex items-center justify-center shadow-sm ${meta.nodeTone}`}
+                className={`h-8 w-8 shrink-0 rounded-full flex items-center justify-center ${meta.nodeTone}`}
               >
-                <Icon className="h-3.5 w-3.5" />
+                <Icon className="h-4 w-4" />
               </div>
-
-              <div className="flex items-center gap-2 flex-wrap">
-                <Badge variant="outline" className={meta.tone}>{meta.label}</Badge>
-                {entry.action === 'ccr_updated' && visibleChanges.length > 0 && (
-                  <span className="text-xs text-muted-foreground">
-                    {visibleChanges.length} field{visibleChanges.length === 1 ? '' : 's'} changed
+              <div className="flex-1 min-w-0">
+                {/* Top row: badge + actor inline on the left, timestamp on right */}
+                <div className="flex items-center justify-between gap-3 flex-wrap">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <Badge variant="outline" className={`${meta.tone} shrink-0`}>
+                      {meta.label}
+                    </Badge>
+                    <span className="text-sm font-medium text-foreground truncate">
+                      {entry.user_name}
+                    </span>
+                  </div>
+                  <span className="text-xs font-mono text-muted-foreground whitespace-nowrap">
+                    {format(new Date(entry.created_at), 'MMM d, yyyy · HH:mm')}
                   </span>
+                </div>
+
+                {/* Detail body: change summary */}
+                {entry.action === 'ccr_updated' && visibleChanges.length > 0 && (
+                  <div className="mt-1.5">
+                    {isApprovalRow ? (
+                      <ApprovalSummary changes={visibleChanges} />
+                    ) : (
+                      <ul className="space-y-0.5 text-sm">
+                        {visibleChanges.map((change, idx) => {
+                          const hasOld =
+                            change.oldValue !== null &&
+                            change.oldValue !== undefined &&
+                            change.oldValue !== '';
+                          return (
+                            <li
+                              key={idx}
+                              className="flex items-baseline gap-2 leading-snug"
+                            >
+                              <span className="font-medium text-foreground/70 shrink-0 text-xs uppercase tracking-wide">
+                                {formatFieldName(change.field)}
+                              </span>
+                              <span className="text-muted-foreground break-words text-sm">
+                                {hasOld && (
+                                  <>
+                                    <span className="line-through opacity-60">
+                                      {truncate(change.oldValue, 60)}
+                                    </span>
+                                    <span className="mx-1.5 text-muted-foreground/60">→</span>
+                                  </>
+                                )}
+                                <span className="text-foreground font-medium">
+                                  {truncate(change.newValue, 80)}
+                                </span>
+                              </span>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    )}
+                  </div>
                 )}
               </div>
-              <p className="text-sm text-muted-foreground mt-1">
-                {entry.user_name} • {format(new Date(entry.created_at), 'MMM d, yyyy HH:mm')}
-              </p>
-
-              {entry.action === 'ccr_updated' && visibleChanges.length > 0 && (
-                meta.label === 'Approval recorded' ? (
-                  <ApprovalSummary changes={visibleChanges} />
-                ) : (
-                  <div className="mt-2 rounded-md border bg-muted/30 divide-y">
-                    {visibleChanges.map((change, idx) => {
-                      const hasOld =
-                        change.oldValue !== null &&
-                        change.oldValue !== undefined &&
-                        change.oldValue !== '';
-                      return (
-                        <div key={idx} className="px-3 py-2 text-sm">
-                          <div className="font-medium">{formatFieldName(change.field)}</div>
-                          <div className={`grid grid-cols-1 ${hasOld ? 'md:grid-cols-2' : ''} gap-1 mt-0.5 text-xs`}>
-                            {hasOld && (
-                              <div>
-                                <span className="">From: </span>
-                                <span className="line-through opacity-70">{truncate(change.oldValue)}</span>
-                              </div>
-                            )}
-                            <div>
-                              <span className="">To: </span>
-                              <span className="text-muted-foreground">{truncate(change.newValue)}</span>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )
-              )}
-            </li>
-          );
-        })}
-      </ol>
-    </div>
+            </div>
+          </li>
+        );
+      })}
+    </ol>
   );
 }
 
@@ -419,39 +434,20 @@ function ApprovalSummary({ changes }: { changes: FieldChange[] }) {
   if (gates.size === 0) return null;
 
   return (
-    <div className="mt-2 space-y-2">
+    <div className="mt-1 text-sm text-muted-foreground">
       {Array.from(gates.entries()).map(([gate, info]) => {
-        const isRevoked = info.approved === 'Pending' || info.approved === false || info.approved === 'false';
+        const isRevoked =
+          info.approved === 'Pending' || info.approved === false || info.approved === 'false';
         const label = GATE_LABELS[gate] ?? gate;
+        const verb = isRevoked ? 'revoked' : 'approved';
+        const tone = isRevoked ? 'text-amber-700' : 'text-emerald-700';
         return (
-          <div
-            key={gate}
-            className={`rounded-md border px-3 py-2 ${isRevoked ? 'bg-amber-50 border-amber-200' : 'bg-emerald-50 border-emerald-200'}`}
-          >
-            <div className="flex items-center gap-2 text-sm">
-              {isRevoked ? (
-                <XCircle className="h-4 w-4 text-amber-600 shrink-0" />
-              ) : (
-                <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
-              )}
-              <span className="font-medium">
-                {label} approval {isRevoked ? 'revoked' : 'recorded'}
-              </span>
-            </div>
-            {!isRevoked && (info.approvedBy || info.approvedAt) && (
-              <div className="mt-1 ml-6 text-xs text-muted-foreground space-y-0.5">
-                {info.approvedBy && (
-                  <div>
-                    <span className="font-medium text-foreground">Approved by:</span> {info.approvedBy}
-                  </div>
-                )}
-                {info.approvedAt && (
-                  <div>
-                    <span className="font-medium text-foreground">At:</span> {info.approvedAt}
-                  </div>
-                )}
-              </div>
-            )}
+          <div key={gate} className="flex items-baseline gap-1.5">
+            <span className={`font-medium ${tone}`}>{label}</span>
+            <span>
+              {verb}
+              {!isRevoked && info.approvedBy ? ` by ${info.approvedBy}` : ''}
+            </span>
           </div>
         );
       })}

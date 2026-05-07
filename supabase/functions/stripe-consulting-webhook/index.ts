@@ -16,8 +16,6 @@ const supabase = createClient(
   Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
 );
 
-const HOURS_PER_PACK = 8;
-
 serve(async (req) => {
   const signature = req.headers.get("stripe-signature");
 
@@ -74,6 +72,7 @@ async function handleConsultingCheckoutCompleted(
   const companyId = session.metadata?.companyId;
   const quantityStr = session.metadata?.quantity ?? "1";
   const quantity = parseInt(quantityStr, 10);
+  const packageId = session.metadata?.packageId;
 
   if (!companyId) {
     console.error("[consulting-webhook] No companyId in session metadata:", session.id);
@@ -85,9 +84,36 @@ async function handleConsultingCheckoutCompleted(
     return;
   }
 
-  const hoursToAdd = quantity * HOURS_PER_PACK;
+  // Resolve hours_per_pack: prefer metadata (set at checkout creation),
+  // fall back to a fresh DB lookup if missing (e.g. older sessions).
+  let hoursPerPack = parseInt(session.metadata?.hoursPerPack ?? "", 10);
+  if ((isNaN(hoursPerPack) || hoursPerPack <= 0) && packageId) {
+    const { data: pkg, error: pkgError } = await supabase
+      .from("dynamic_products")
+      .select("metadata")
+      .eq("id", packageId)
+      .maybeSingle();
+
+    if (pkgError) {
+      console.error("[consulting-webhook] Failed to fetch package:", pkgError.message);
+    } else if (pkg) {
+      hoursPerPack = Number(
+        (pkg.metadata as Record<string, unknown> | null)?.hours_per_pack ?? 0
+      );
+    }
+  }
+
+  if (!Number.isFinite(hoursPerPack) || hoursPerPack <= 0) {
+    console.error(
+      "[consulting-webhook] Could not resolve hoursPerPack for session:",
+      session.id
+    );
+    throw new Error("Missing or invalid hoursPerPack");
+  }
+
+  const hoursToAdd = quantity * hoursPerPack;
   console.log(
-    `[consulting-webhook] Adding ${quantity} pack(s) = ${hoursToAdd} hours for company ${companyId}`
+    `[consulting-webhook] Adding ${quantity} pack(s) × ${hoursPerPack}h = ${hoursToAdd} hours for company ${companyId}`
   );
 
   // 1. Read current value
@@ -150,7 +176,8 @@ async function handleConsultingCheckoutCompleted(
         currency: session.currency || "usd",
         metadata: {
           quantity,
-          hours_per_pack: HOURS_PER_PACK,
+          hours_per_pack: hoursPerPack,
+          package_id: packageId ?? null,
           previous_balance: currentHours,
           new_balance: newHours,
         },

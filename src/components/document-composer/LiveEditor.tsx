@@ -1369,6 +1369,70 @@ export function LiveEditor({ template, className = '', onContentUpdate, companyI
   // Keep ref in sync so callbacks can access the editor
   editorInstanceRef.current = unifiedEditor;
 
+  // Click-to-upload for WI screenshot placeholders. The seeder emits
+  // `<figure class="wi-image-placeholder" data-hint="...">` blocks; clicking
+  // one opens a file picker, uploads the image, and swaps the placeholder
+  // for an <img> with the hint preserved as alt text.
+  useEffect(() => {
+    if (!unifiedEditor) return;
+    const root: HTMLElement | null = unifiedEditor.view?.dom ?? null;
+    if (!root) return;
+    const onClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null;
+      const placeholder = target?.closest?.('.wi-image-placeholder') as HTMLElement | null;
+      if (!placeholder || !root.contains(placeholder)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const hint = placeholder.getAttribute('data-hint') ?? '';
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = 'image/*';
+      input.onchange = async () => {
+        const file = input.files?.[0];
+        if (!file) return;
+        if (!file.type.startsWith('image/')) {
+          toast.error('Please select an image file');
+          return;
+        }
+        if (file.size > 5 * 1024 * 1024) {
+          toast.error('Image must be less than 5MB');
+          return;
+        }
+        try {
+          const fileExt = file.name.split('.').pop();
+          const fileName = `${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
+          const filePath = `wi-screenshots/${fileName}`;
+          const { error: upErr } = await supabase.storage
+            .from('document-templates')
+            .upload(filePath, file);
+          if (upErr) throw upErr;
+          const { data: { publicUrl } } = supabase.storage
+            .from('document-templates')
+            .getPublicUrl(filePath);
+          const altAttr = hint ? ` alt="${hint.replace(/"/g, '&quot;')}"` : '';
+          const replacement = `<img src="${publicUrl}"${altAttr} class="wi-screenshot" />`;
+          placeholder.outerHTML = replacement;
+          // Sync TipTap state from the mutated DOM so changes persist on save.
+          try {
+            const html = root.innerHTML;
+            programmaticUpdateRef.current = true;
+            unifiedEditor.commands.setContent(html);
+            programmaticUpdateRef.current = false;
+            handleSaveRef.current?.(true);
+          } catch (err) {
+            console.warn('[LiveEditor] placeholder swap sync failed', err);
+          }
+        } catch (err) {
+          console.error('Screenshot upload failed', err);
+          toast.error('Failed to upload screenshot');
+        }
+      };
+      input.click();
+    };
+    root.addEventListener('click', onClick);
+    return () => root.removeEventListener('click', onClick);
+  }, [unifiedEditor]);
+
   // ---------- @mention popup: Google Docs-style categorized picker ----------
   const docMentionItems = useCompanyDocumentMentions(
     companyId || activeCompanyRole?.companyId,
@@ -1713,8 +1777,22 @@ export function LiveEditor({ template, className = '', onContentUpdate, companyI
         return;
       }
       // Genuine external URL — open in a new tab.
-      if (/^https?:\/\//i.test(href) || /^mailto:/i.test(href)) {
+      if (/^https?:\/\//i.test(href) || /^mailto:/i.test(href) || /^tel:/i.test(href)) {
         window.open(href, '_blank', 'noopener,noreferrer');
+        return;
+      }
+      // Last-resort fallback for anything URL-like that wasn't a fragment/JS
+      // (relative paths, protocol-relative URLs, etc.). Without this, clicks
+      // that fall through every classifier above were silently swallowed
+      // because preventDefault has already blocked the native link — that's
+      // what made hyperlink navigation feel intermittent.
+      if (href && href !== '#' && !href.startsWith('#') && !/^javascript:/i.test(href)) {
+        try {
+          const absolute = new URL(href, window.location.origin).toString();
+          window.open(absolute, '_blank', 'noopener,noreferrer');
+        } catch {
+          /* unparseable href — give up silently */
+        }
       }
     };
     editorEl.addEventListener('click', handler);
@@ -2285,7 +2363,7 @@ export function LiveEditor({ template, className = '', onContentUpdate, companyI
     } catch (err) {
       console.warn('[LiveEditor] ref-annotation failed', err);
     }
-  }, [unifiedEditor, knownRefs, refreshTrigger]);
+  }, [unifiedEditor, knownRefs]);
 
   // Auto-open the draft empty-state modal (Generate Manually / Auto-fill by AI
   // / Copy from SOP) when the draft has no filled sections. Fires once per
@@ -2391,6 +2469,10 @@ export function LiveEditor({ template, className = '', onContentUpdate, companyI
         detail: { docId, quotedText: text, anchor: { from, to } },
       }),
     );
+    // Ensure the right-side panel (Comments tab) is visible so the
+    // user can immediately type their comment.
+    setRightPanelOpen(true);
+    setNarrowRightOpen(true);
     toast.success('Add your comment in the Comments panel');
   }, [editingDocumentId, currentDocumentId]);
 
