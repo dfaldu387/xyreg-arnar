@@ -9006,6 +9006,39 @@ export type Database = {
         }
         Relationships: []
       }
+      dynamic_products: {
+        Row: {
+          created_at: string
+          id: string
+          is_active: boolean
+          metadata: Json
+          product_key: string
+          sort_order: number
+          stripe_product_id: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          metadata?: Json
+          product_key: string
+          sort_order?: number
+          stripe_product_id: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          metadata?: Json
+          product_key?: string
+          sort_order?: number
+          stripe_product_id?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       ehds_anonymization_profiles: {
         Row: {
           applied_by: string | null
@@ -11558,6 +11591,7 @@ export type Database = {
       gap_template_items: {
         Row: {
           applicability_rationale: string | null
+          applicability_rule: Json | null
           applicable_phases: Json | null
           applicable_standards: Json | null
           associated_standards: string | null
@@ -11581,11 +11615,13 @@ export type Database = {
           labeling_owner: string | null
           mfg_ops_owner: string | null
           other_owner: string | null
+          parent_item_id: string | null
           priority: string | null
           qa_ra_owner: string | null
           question_number: string | null
           rd_owner: string | null
           recommended_teams: string | null
+          regulatory_dna_attributes: Json | null
           requirement_summary: string | null
           requirement_text: string
           sort_order: number | null
@@ -11595,6 +11631,7 @@ export type Database = {
         }
         Insert: {
           applicability_rationale?: string | null
+          applicability_rule?: Json | null
           applicable_phases?: Json | null
           applicable_standards?: Json | null
           associated_standards?: string | null
@@ -11618,11 +11655,13 @@ export type Database = {
           labeling_owner?: string | null
           mfg_ops_owner?: string | null
           other_owner?: string | null
+          parent_item_id?: string | null
           priority?: string | null
           qa_ra_owner?: string | null
           question_number?: string | null
           rd_owner?: string | null
           recommended_teams?: string | null
+          regulatory_dna_attributes?: Json | null
           requirement_summary?: string | null
           requirement_text: string
           sort_order?: number | null
@@ -11632,6 +11671,7 @@ export type Database = {
         }
         Update: {
           applicability_rationale?: string | null
+          applicability_rule?: Json | null
           applicable_phases?: Json | null
           applicable_standards?: Json | null
           associated_standards?: string | null
@@ -11655,11 +11695,13 @@ export type Database = {
           labeling_owner?: string | null
           mfg_ops_owner?: string | null
           other_owner?: string | null
+          parent_item_id?: string | null
           priority?: string | null
           qa_ra_owner?: string | null
           question_number?: string | null
           rd_owner?: string | null
           recommended_teams?: string | null
+          regulatory_dna_attributes?: Json | null
           requirement_summary?: string | null
           requirement_text?: string
           sort_order?: number | null
@@ -11668,6 +11710,13 @@ export type Database = {
           updated_at?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "gap_template_items_parent_item_id_fkey"
+            columns: ["parent_item_id"]
+            isOneToOne: false
+            referencedRelation: "gap_template_items"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "gap_template_items_template_id_fkey"
             columns: ["template_id"]

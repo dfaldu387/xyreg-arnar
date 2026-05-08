@@ -30,7 +30,7 @@ interface BoosterPack {
 }
 
 function formatBoosterPrice(p: BoosterPack | null): string {
-  if (!p) return '$20';
+  if (!p) return '';
   try {
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
@@ -54,10 +54,13 @@ export function NoCreditDialog({ open, onOpenChange }: NoCreditDialogProps) {
   const [loading, setLoading] = useState(false);
   const [requestSent, setRequestSent] = useState(false);
   const [boosterPack, setBoosterPack] = useState<BoosterPack | null>(null);
+  const [boosterLoading, setBoosterLoading] = useState(false);
 
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
+    setBoosterPack(null);
+    setBoosterLoading(true);
     (async () => {
       try {
         const { data, error } = await supabase.functions.invoke('get-dynamic-products', {
@@ -73,6 +76,8 @@ export function NoCreditDialog({ open, onOpenChange }: NoCreditDialogProps) {
         });
       } catch (err) {
         console.error('Failed to load AI booster pack:', err);
+      } finally {
+        if (!cancelled) setBoosterLoading(false);
       }
     })();
     return () => { cancelled = true; };
@@ -196,16 +201,18 @@ export function NoCreditDialog({ open, onOpenChange }: NoCreditDialogProps) {
           <AlertDialogTitle className="text-center">You're out of AI credits</AlertDialogTitle>
           <AlertDialogDescription className="text-center">
             {isAdmin
-              ? `Your monthly AI credits have been fully used. Top up with an AI Booster Pack (${creditsLabel} credits for ${priceLabel}) to keep using AI-powered features like document generation, suggestions, and analysis.`
+              ? boosterLoading || !boosterPack
+                ? 'Your monthly AI credits have been fully used. Loading AI Booster Pack pricing...'
+                : `Your monthly AI credits have been fully used. Top up with an AI Booster Pack (${creditsLabel} credits for ${priceLabel}) to keep using AI-powered features like document generation, suggestions, and analysis.`
               : 'Your monthly AI credits have been fully used. Request your admin to top up with an AI Booster Pack so your team can continue using AI-powered features.'
             }
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter className="flex-col gap-2 sm:flex-col">
           {isAdmin ? (
-            <Button onClick={handleBuyCredits} disabled={loading} className="w-full bg-purple-600 hover:bg-purple-700">
-              {loading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Sparkles className="h-4 w-4 mr-2" />}
-              {loading ? 'Processing...' : 'Get More Credits - $20'}
+            <Button onClick={handleBuyCredits} disabled={loading || boosterLoading || !boosterPack} className="w-full bg-purple-600 hover:bg-purple-700">
+              {loading || boosterLoading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Sparkles className="h-4 w-4 mr-2" />}
+              {loading ? 'Processing...' : boosterLoading || !boosterPack ? 'Loading price...' : `Get More Credits - ${priceLabel}`}
             </Button>
           ) : requestSent ? (
             <Button disabled className="w-full bg-green-600 hover:bg-green-600">

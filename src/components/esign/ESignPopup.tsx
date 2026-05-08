@@ -131,16 +131,20 @@ export function ESignPopup({ open, onOpenChange, documentId, documentName, onClo
     <Dialog open={open} onOpenChange={(isOpen) => { if (!isOpen) handleClose(); else onOpenChange(true); }}>
       <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <div className="flex items-center justify-between">
-            <DialogTitle className="flex items-center gap-2">
-              <PenTool className="h-5 w-5 text-primary" />
-              E-Signature — {documentName}
+          <div className="flex items-start justify-between gap-3 pr-8">
+            <DialogTitle className="flex items-start gap-2 min-w-0 flex-1">
+              <PenTool className="h-5 w-5 text-primary shrink-0 mt-0.5" />
+              <span className="break-words leading-snug">
+                E-Signature — {documentName}
+              </span>
             </DialogTitle>
-            <SignatureStatusBadge
-              status={signRequest?.status ?? (currentStep === 0 ? 'pending' : currentStep === 1 ? 'in_progress' : 'completed')}
-              signedCount={signedCount}
-              totalCount={totalCount}
-            />
+            <div className="shrink-0">
+              <SignatureStatusBadge
+                status={signRequest?.status ?? (currentStep === 0 ? 'pending' : currentStep === 1 ? 'in_progress' : 'completed')}
+                signedCount={signedCount}
+                totalCount={totalCount}
+              />
+            </div>
           </div>
         </DialogHeader>
 

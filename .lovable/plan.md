@@ -1,43 +1,62 @@
-# Make Super-Admin Templates Editable Via Doc Studio Side Drawer
+## Plan: Foundation SOP correction + CCR description sync
 
-## Why
-Today, clicking the pencil on a row in `Super Admin → Templates → Document Templates` opens a metadata-only upload dialog. The user wants the SAME inline authoring experience used in the company-side QMS (`TemplateManagementTab` → `DocumentDraftDrawer`), because the super-admin row IS the master that downstream companies inherit. This pattern already exists for the **FPD Catalog** tab (`FpdCatalogSection` → `DocumentDraftDrawer normalDraft initialSections={...}`) and the **WI Catalog** tab — we just need to extend it to the regular Document Templates tab.
+Two independent fixes addressing what you saw on `/change-control/a1fa29dd-…`.
 
-## Scope of change
+---
 
-### 1. Schema — add inline section content to `default_document_templates`
-Add nullable JSONB column `sections` (array of `{ id, title, content }`). File-based templates keep working unchanged; section-based authoring is opt-in per template.
+### Part 1 — Fix the Foundation SOP set
 
-```text
-default_document_templates
-  + sections  jsonb null   -- master section content (Doc Studio shape)
-```
+**Problem.** SOPs that should be universal (Risk Management, UDI, Identification & Traceability) are classified as Tier B `'always'` triggers, so they're not auto-seeded at company onboarding. SOP-002 Document Control IS in Tier A but renders below the fold, which made it look missing.
 
-### 2. Service — `SuperAdminTemplateManagementService`
-- Extend `SuperAdminTemplate` type with `sections?: SectionBlock[] | null`.
-- New methods:
-  - `getTemplateSections(id)` — returns the array (defaulting to a sensible starter outline if null, derived from `document_type`, e.g. SOP 8-section template).
-  - `updateTemplateSections(id, sections)` — writes back.
+**Change.** In `src/constants/sopAutoSeedTiers.ts`, promote three SOPs from Tier B → Tier A:
 
-### 3. Page — `SuperAdminTemplates.tsx`
-- New state: `draftEditing: SuperAdminTemplate | null` and `draftDrawerOpen`.
-- Add an **"Author content"** button next to the existing pencil icon on each row (keeps the metadata-only Edit path intact for file uploads).
-- Render `<DocumentDraftDrawer normalDraft initialSections={…} documentName="<doc-number> — <title>" documentType={template.document_type} />` exactly like `FpdCatalogSection` does.
-- On save, persist via `updateTemplateSections` and reload.
+| SOP | Title | Current | New |
+|---|---|---|---|
+| SOP-015 | Risk Management (ISO 14971) | Tier B (`always`) | **Tier A** |
+| SOP-019 | Identification, Traceability & UDI | Tier B (`always`) | **Tier A** |
+| SOP-045 | UDI Management | Tier B (`always`) | **Tier A** |
 
-### 4. Wire save-back
-`DocumentDraftDrawer` in `normalDraft` mode currently has no master save hook for arbitrary callers. Add an optional `onMasterSave?: (sections: SectionBlock[]) => Promise<void>` prop that, when provided, replaces the company-CI save path. Call it from the existing save action used in normalDraft mode. Falls back to current behaviour when omitted (so FPD/WI flows are untouched).
+Result: foundation grows from 28 → **31 SOPs**. All three are mandatory under ISO 13485 / EU MDR / 21 CFR 820 regardless of pathway, so the `'always'` trigger was a tell that they were misclassified.
 
-### 5. RLS
-Add an `UPDATE` policy on `default_document_templates` that allows super-admins (same JWT-claim check used elsewhere) to write the `sections` column. Read policies stay unchanged.
+**Files touched**
+- `src/constants/sopAutoSeedTiers.ts` — move three entries, add justification strings.
+- `mem://features/sop/tiered-auto-seed-classification` — update count from 28 to 31, list new entries.
 
-## Out of scope
-- Lifecycle (review/approve/sign), AI assistant, version history — `normalDraft` already strips these.
-- Migrating existing file-based templates to inline sections (opt-in per template).
-- Propagation to existing companies — same model as Global WI master: new companies inherit; existing companies opt in via a future "sync from master" action.
+**Backfill for existing companies.** New companies get them automatically. For existing companies (like David Health Solutions Oy), add a one-time idempotent backfill via the existing seed routine. Two options to pick at implement time, but default: surface a "Seed missing foundation SOPs (3)" banner in Document Control when any of the three are absent, so admins opt in rather than auto-mutating their QMS.
 
-## Validation
-1. Open `/super-admin/app/templates` → Document Templates tab.
-2. Click "Author content" on a SOP row → side drawer opens with the same look-and-feel as the QMS Doc Studio (no lifecycle/AI/Configure tabs).
-3. Edit a section, click Save → toast confirms, drawer closes.
-4. Re-open → edits persisted. New company onboarding picks up the master sections (existing seeding pipeline already reads `default_document_templates`).
+---
+
+### Part 2 — CCR description ↔ Connected Documents reconciliation
+
+**Problem.** The CCR `description` / `scope` field is authored once (often AI-assisted) and then drifts as users add/remove documents on the Documents tab. The text can reference docs that are no longer linked, or omit ones that were added later.
+
+**Change.** Two-layer fix:
+
+**(a) Drift detection (read-only badge).**
+- Add a lightweight `useCCRDescriptionDrift(ccrId)` hook that:
+  - tokenises the `description` for SOP/document references (regex: `SOP-[A-Z]{0,3}-?\d{3}`, document_reference patterns)
+  - compares against the live `change_control_affected_documents` set
+  - returns `{ missing: string[], stale: string[] }`
+- In `ChangeControlDetailPage.tsx`, render an amber pill next to the description: **"Description out of sync — N referenced doc(s) no longer linked, M linked doc(s) not mentioned"** with a "Refresh from linked documents" action.
+
+**(b) Refresh action (Draft only).**
+- Button calls a new `regenerateCCRDescriptionFromLinkedDocs(ccrId)` service that:
+  - fetches all `change_control_affected_documents` rows joined to `documents`
+  - calls the existing Gemini AI assist (already wired via `AiAssistPopover`) with a deterministic prompt: *"Rewrite this CCR scope so every linked document is referenced and no unlinked doc is mentioned. Preserve the original change rationale."*
+  - opens the result in the existing inline EditableText with diff preview (no auto-write — user confirms)
+- Restricted to CCRs in `Draft` status (matches existing edit gating on line ~70).
+
+**Files touched**
+- New `src/hooks/useCCRDescriptionDrift.ts`
+- New service method in `src/services/ccrLinkedDocsService.ts`: `extractReferencedDocs(description)` + `regenerateCCRDescriptionFromLinkedDocs(ccrId)`
+- `src/pages/ChangeControlDetailPage.tsx` — render drift badge + action button next to description block.
+- Mission Control surface: per the core rule "any flag must also surface in Mission Control" — add CCRs with description drift to the existing CCR widget as a sub-status pill.
+
+**No DB schema changes.** Pure frontend + service layer.
+
+---
+
+### Out of scope (call out, don't build)
+- Promoting Tier B `manufacturing`-triggered SOPs (017, 018, 043, 051) — these genuinely depend on whether the company manufactures.
+- Auto-rewriting the description without user confirmation — drift detection is advisory only.
+- Renumbering SOPs to remove the gap between 002 and the rest of the list (would break audit trails).

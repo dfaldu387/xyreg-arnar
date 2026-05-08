@@ -18,6 +18,9 @@ import {
   Popover, PopoverContent, PopoverTrigger,
 } from "@/components/ui/popover";
 import {
+  Tooltip, TooltipContent, TooltipProvider, TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
   Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList,
 } from "@/components/ui/command";
 import {
@@ -217,6 +220,7 @@ export default function SuperAdminTenantConfigs() {
 
       {/* Tenants Table */}
       <div className="border rounded-lg overflow-hidden bg-background">
+        <TooltipProvider delayDuration={150}>
         <Table>
           <TableHeader>
             <TableRow className="hover:bg-transparent">
@@ -225,11 +229,9 @@ export default function SuperAdminTenantConfigs() {
               <TableHead><span className="font-medium">Branch</span></TableHead>
               <TableHead><span className="font-medium">URL</span></TableHead>
               <TableHead><span className="font-medium">Last Updated</span></TableHead>
+              <TableHead><span className="font-medium">Allowed Companies</span></TableHead>
               {isDevMode && (
-                <>
-                  <TableHead><span className="font-medium">Allowed Companies</span></TableHead>
-                  <TableHead><span className="font-medium">PR Auto</span></TableHead>
-                </>
+                <TableHead><span className="font-medium">PR Auto</span></TableHead>
               )}
               <TableHead className="text-center"><span className="font-medium">Actions</span></TableHead>
             </TableRow>
@@ -237,7 +239,7 @@ export default function SuperAdminTenantConfigs() {
           <TableBody>
             {rows.length === 0 && (
               <TableRow>
-                <TableCell colSpan={isDevMode ? 8 : 6} className="text-center py-8 text-muted-foreground">
+                <TableCell colSpan={isDevMode ? 8 : 7} className="text-center py-8 text-muted-foreground">
                   No tenants yet{isDevMode ? <>. Click <strong>Add tenant</strong> to create one.</> : "."}
                 </TableCell>
               </TableRow>
@@ -274,21 +276,41 @@ export default function SuperAdminTenantConfigs() {
                 <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
                   {row.last_pr_created_at ? formatDate(row.last_pr_created_at) : "—"}
                 </TableCell>
+                <TableCell>
+                  {row.allow_company_ids?.length > 0 ? (
+                    <Tooltip delayDuration={150}>
+                      <TooltipTrigger asChild>
+                        <Badge variant="secondary" className="cursor-default">
+                          {row.allow_company_ids.length} allowed
+                        </Badge>
+                      </TooltipTrigger>
+                      <TooltipContent side="top" align="start" className="max-w-xs">
+                        <ol className="text-xs leading-5 list-decimal pl-4">
+                          {row.allow_company_ids.map(id => (
+                            <li key={id}>
+                              {companyById.get(id)?.name ?? <span className="opacity-60">Unknown ({id.slice(0, 8)}…)</span>}
+                            </li>
+                          ))}
+                        </ol>
+                      </TooltipContent>
+                    </Tooltip>
+                  ) : (
+                    <Tooltip delayDuration={150}>
+                      <TooltipTrigger asChild>
+                        <Badge variant="outline" className="cursor-default">Allow all</Badge>
+                      </TooltipTrigger>
+                      <TooltipContent side="top" align="start">
+                        <span className="text-xs">No restriction</span>
+                      </TooltipContent>
+                    </Tooltip>
+                  )}
+                </TableCell>
                 {isDevMode && (
-                  <>
-                    <TableCell>
-                      {row.allow_company_ids?.length > 0 ? (
-                        <Badge variant="secondary">{row.allow_company_ids.length} allowed</Badge>
-                      ) : (
-                        <Badge variant="outline">Allow all</Badge>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      {row.pr_automation_enabled
-                        ? <Badge>On</Badge>
-                        : <Badge variant="outline">Off</Badge>}
-                    </TableCell>
-                  </>
+                  <TableCell>
+                    {row.pr_automation_enabled
+                      ? <Badge>On</Badge>
+                      : <Badge variant="outline">Off</Badge>}
+                  </TableCell>
                 )}
                 <TableCell className="text-center">
                   <div className="inline-flex items-center gap-1">
@@ -307,6 +329,7 @@ export default function SuperAdminTenantConfigs() {
             ))}
           </TableBody>
         </Table>
+        </TooltipProvider>
       </div>
 
       <Sheet open={!!editing} onOpenChange={(open) => { if (!open) setEditing(null); }}>

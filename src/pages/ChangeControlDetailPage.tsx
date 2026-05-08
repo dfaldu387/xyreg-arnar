@@ -1,5 +1,8 @@
 import React, { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { fetchLinkedDocs } from '@/services/ccrLinkedDocsService';
 import { ConsistentPageHeader } from '@/components/layout/ConsistentPageHeader';
 import { LoadingSpinner } from '@/components/ui/loading-spinner';
 import { Button } from '@/components/ui/button';
@@ -47,7 +50,9 @@ import { AiAssistPopover } from '@/components/change-control/AiAssistPopover';
 import { CCRAuditLog } from '@/components/change-control/CCRAuditLog';
 import { CCRLinkedDocuments } from '@/components/change-control/CCRLinkedDocuments';
 import { useCCRLinkedDocsDedupedCount } from '@/hooks/useCCRLinkedDocsDedupedCount';
+import { useCCRDescriptionDrift } from '@/hooks/useCCRDescriptionDrift';
 import { AppNotificationService } from '@/services/appNotificationService';
+import { postmarkService } from '@/services/resendMailService';
 import { ESignPopup } from '@/components/esign/ESignPopup';
 import { useAuth } from '@/context/AuthContext';
 
@@ -317,6 +322,24 @@ export default function ChangeControlDetailPage() {
     ccr?.id ?? '',
     Array.isArray(ccr?.affected_documents) ? ccr.affected_documents : []
   );
+  const linkedDocIds = Array.isArray(ccr?.affected_documents)
+    ? (ccr!.affected_documents as string[])
+    : [];
+  const { data: linkedDocsForGate = [] } = useQuery({
+    queryKey: ['ccr-linked-docs', ccr?.id ?? '', linkedDocIds.join(',')],
+    queryFn: () => fetchLinkedDocs(linkedDocIds),
+    enabled: linkedDocIds.length > 0,
+  });
+  const unapprovedLinkedDocs = linkedDocsForGate.filter(
+    (d) => (d.status || '').toLowerCase() !== 'approved'
+  );
+  // No docs → nothing to gate on. Docs present → all must be approved.
+  // While the query is loading, treat as not-approved so the button stays
+  // locked rather than briefly enabling.
+  const allLinkedDocsApproved =
+    linkedDocIds.length === 0 ||
+    (linkedDocsForGate.length > 0 && unapprovedLinkedDocs.length === 0);
+  const descriptionDrift = useCCRDescriptionDrift(ccr?.description, linkedDocsForGate);
   const [transitionDialog, setTransitionDialog] = useState<{
     open: boolean;
     title: string;
@@ -404,17 +427,77 @@ export default function ChangeControlDetailPage() {
     setTransitionDialog({ open: true, ...config });
   };
 
+  const sendCCRStatusEmails = async (
+    kind: 'approved' | 'rejected',
+    actorUserId: string,
+    reason: string,
+  ) => {
+    try {
+      const { data: company } = await supabase
+        .from('companies')
+        .select('name, app_url')
+        .eq('id', ccr.company_id)
+        .single();
+      const baseUrl = company?.app_url || window.location.origin || 'https://app.xyreg.com';
+      const actionUrl = `${baseUrl}/app/change-control/${ccr.id}`;
+      const companyName = company?.name || 'your company';
+      const actorName =
+        companyUsers.find((u) => u.id === actorUserId)?.name ?? 'A teammate';
+
+      const ownerOrCreatorId = ccr.owner_id ?? ccr.created_by;
+      const recipientIds = new Set<string>();
+      if (ownerOrCreatorId) recipientIds.add(ownerOrCreatorId);
+      if (kind === 'approved') {
+        for (const a of assignments) recipientIds.add(a.user_id);
+      }
+
+      const recipients = Array.from(recipientIds)
+        .map((id) => companyUsers.find((u) => u.id === id))
+        .filter((u): u is NonNullable<typeof u> => !!u && !!u.email && u.email !== 'No email');
+
+      if (recipients.length === 0) {
+        console.warn('CCR status email: no resolvable recipients', { kind, ccrId: ccr.id });
+        return;
+      }
+
+      await Promise.all(
+        recipients.map(async (r) => {
+          const result = await postmarkService.sendCCRStatusEmail({
+            kind,
+            recipientEmail: r.email,
+            recipientName: r.name,
+            actorName,
+            companyName,
+            ccrId: ccr.ccr_id,
+            ccrTitle: ccr.title,
+            reason,
+            actionUrl,
+          });
+          if (!result.success) {
+            console.warn('CCR status email failed for', r.email, result.error);
+          }
+        }),
+      );
+    } catch (e) {
+      console.error('Failed to email CCR status update', e);
+    }
+  };
+
   const handleTransitionConfirm = async (reason: string) => {
     if (!transitionDialog.target) return;
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
+    const target = transitionDialog.target;
     await transitionState.mutateAsync({
       ccrId: ccr.id,
       fromStatus: ccr.status,
-      toStatus: transitionDialog.target,
+      toStatus: target,
       userId: user.id,
       reason,
     });
+    if (target === 'approved' || target === 'rejected') {
+      await sendCCRStatusEmails(target, user.id, reason);
+    }
   };
 
   const handleSignMyPerspectives = async () => {
@@ -443,13 +526,15 @@ export default function ChangeControlDetailPage() {
         : x,
     );
     if (isCCRFullyApproved(updated as any)) {
+      const autoReason = 'All assigned reviewers have signed off on every perspective.';
       await transitionState.mutateAsync({
         ccrId: ccr.id,
         fromStatus: ccr.status,
         toStatus: 'approved',
         userId: user.id,
-        reason: 'All assigned reviewers have signed off on every perspective.',
+        reason: autoReason,
       });
+      await sendCCRStatusEmails('approved', user.id, autoReason);
     }
     setEsignAssignmentId(null);
   };
@@ -522,6 +607,41 @@ export default function ChangeControlDetailPage() {
     } catch (e) {
       console.error('Failed to notify CCR reviewers', e);
     }
+    // 5. Email assigned reviewers
+    try {
+      const actorName =
+        companyUsers.find((u) => u.id === user.id)?.name ?? 'A teammate';
+      const { data: company } = await supabase
+        .from('companies')
+        .select('name, app_url')
+        .eq('id', ccr.company_id)
+        .single();
+      const baseUrl = company?.app_url || window.location.origin || 'https://app.xyreg.com';
+      const actionUrl = `${baseUrl}/app/change-control/${ccr.id}`;
+      const companyName = company?.name || 'your company';
+      await Promise.all(
+        payload.reviewers.map(async (r) => {
+          const reviewer = companyUsers.find((u) => u.id === r.user_id);
+          if (!reviewer?.email || reviewer.email === 'No email') return;
+          const result = await postmarkService.sendCCRReviewEmail({
+            recipientEmail: reviewer.email,
+            recipientName: reviewer.name,
+            inviterName: actorName,
+            companyName,
+            ccrId: ccr.ccr_id,
+            ccrTitle: ccr.title,
+            perspectives: r.perspectives.map((p) => CCR_PERSPECTIVE_LABELS[p]),
+            reason: payload.reason,
+            actionUrl,
+          });
+          if (!result.success) {
+            console.warn('CCR review email failed for', reviewer.email, result.error);
+          }
+        }),
+      );
+    } catch (e) {
+      console.error('Failed to email CCR reviewers', e);
+    }
   };
 
   const renderWorkflowActions = () => {
@@ -569,10 +689,11 @@ export default function ChangeControlDetailPage() {
     }
 
     if (ccr.status === 'approved') {
-      actions.push(
+      const implementBtn = (
         <Button
           key="implement"
           size="sm"
+          disabled={!allLinkedDocsApproved}
           onClick={() =>
             openTransition({
               target: 'implemented',
@@ -582,10 +703,42 @@ export default function ChangeControlDetailPage() {
             })
           }
         >
-          <PlayCircle className="h-4 w-4 mr-2" />
+          {allLinkedDocsApproved ? (
+            <PlayCircle className="h-4 w-4 mr-2" />
+          ) : (
+            <Lock className="h-4 w-4 mr-2" />
+          )}
           Mark Implemented
         </Button>
       );
+
+      if (!allLinkedDocsApproved) {
+        const total = linkedDocIds.length;
+        const pending = total > 0 ? unapprovedLinkedDocs.length : 0;
+        actions.push(
+          <TooltipProvider key="implement" delayDuration={150}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                {/* span wrapper lets the tooltip show even when the button is disabled */}
+                <span tabIndex={0} className="inline-flex">
+                  {implementBtn}
+                </span>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" className="max-w-xs">
+                <p className="font-medium mb-1">Locked — connected documents pending approval</p>
+                <p className="text-xs leading-relaxed">
+                  {linkedDocsForGate.length === 0
+                    ? `Loading the ${total} connected document${total === 1 ? '' : 's'}…`
+                    : `${pending} of ${linkedDocsForGate.length} connected document${linkedDocsForGate.length === 1 ? ' is' : 's are'} not yet approved.`}
+                  {' '}Open the <span className="font-medium">Documents</span> tab and move every linked document to <span className="font-medium">Approved</span> to enable Mark Implemented.
+                </p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        );
+      } else {
+        actions.push(implementBtn);
+      }
     }
 
     if (ccr.status === 'implemented') {
@@ -774,6 +927,23 @@ export default function ChangeControlDetailPage() {
                       />
                     }
                   />
+                  {descriptionDrift.hasDrift && (
+                    <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+                      <div className="font-medium">Description out of sync with linked documents</div>
+                      {descriptionDrift.stale.length > 0 && (
+                        <div className="mt-1">
+                          Mentioned but not linked:{' '}
+                          <span className="font-mono">{descriptionDrift.stale.join(', ')}</span>
+                        </div>
+                      )}
+                      {descriptionDrift.missing.length > 0 && (
+                        <div className="mt-1">
+                          Linked but not mentioned:{' '}
+                          <span className="font-mono">{descriptionDrift.missing.join(', ')}</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
                   <EditableText
                     label={lang('changeControl.justificationLabel')}
                     value={ccr.justification}

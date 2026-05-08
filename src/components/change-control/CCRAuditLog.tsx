@@ -152,6 +152,26 @@ const USER_ID_FIELDS = new Set([
   'updated_by',
 ]);
 
+// Fields whose values are arrays of document UUIDs; render the document names.
+const DOCUMENT_ID_ARRAY_FIELDS = new Set(['affected_documents']);
+
+function parseDocIdArray(value: any): string[] {
+  if (!value) return [];
+  if (Array.isArray(value)) return value.filter((v): v is string => typeof v === 'string');
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      if (Array.isArray(parsed)) {
+        return parsed.filter((v): v is string => typeof v === 'string');
+      }
+    } catch {
+      // Not JSON; fall through and treat as single id.
+    }
+    return UUID_RE.test(value) ? [value] : [];
+  }
+  return [];
+}
+
 // Fields whose values are ISO timestamps; render as locale date/time.
 const TIMESTAMP_FIELDS = new Set([
   'technical_approved_at',
@@ -239,15 +259,23 @@ export function CCRAuditLog({ ccrId }: CCRAuditLogProps) {
 
       const rows = (data ?? []) as AuditEntry[];
       const idsToResolve = new Set<string>();
+      const docIdsToResolve = new Set<string>();
       try {
         rows.forEach((r) => {
           if (r.user_id) idsToResolve.add(r.user_id);
           if (!Array.isArray(r.changes)) return;
           r.changes.forEach((c) => {
-            if (!c || !USER_ID_FIELDS.has(c.field)) return;
-            [c.oldValue, c.newValue].forEach((v) => {
-              if (typeof v === 'string' && UUID_RE.test(v)) idsToResolve.add(v);
-            });
+            if (!c) return;
+            if (USER_ID_FIELDS.has(c.field)) {
+              [c.oldValue, c.newValue].forEach((v) => {
+                if (typeof v === 'string' && UUID_RE.test(v)) idsToResolve.add(v);
+              });
+            }
+            if (DOCUMENT_ID_ARRAY_FIELDS.has(c.field)) {
+              [c.oldValue, c.newValue].forEach((v) => {
+                parseDocIdArray(v).forEach((id) => docIdsToResolve.add(id));
+              });
+            }
           });
         });
       } catch (e) {
@@ -271,6 +299,24 @@ export function CCRAuditLog({ ccrId }: CCRAuditLogProps) {
         );
       }
 
+      let docNameById = new Map<string, string>();
+      if (docIdsToResolve.size > 0) {
+        const { data: docs, error: docsError } = await supabase
+          .from('phase_assigned_document_template')
+          .select('id, name, document_reference, document_number')
+          .in('id', Array.from(docIdsToResolve));
+        if (docsError) {
+          console.error('[CCRAuditLog] failed to load document names', docsError);
+        }
+        docNameById = new Map(
+          (docs ?? []).map((d: any) => {
+            const ref = d.document_reference || d.document_number || '';
+            const name = d.name || 'Untitled document';
+            return [d.id, ref ? `${ref} ${name}`.trim() : name];
+          }),
+        );
+      }
+
       const resolveValue = (field: string, value: any) => {
         if (value === null || value === undefined || value === '') return value;
         if (USER_ID_FIELDS.has(field)) {
@@ -278,6 +324,11 @@ export function CCRAuditLog({ ccrId }: CCRAuditLogProps) {
             return nameById.get(value) ?? value;
           }
           return value;
+        }
+        if (DOCUMENT_ID_ARRAY_FIELDS.has(field)) {
+          const ids = parseDocIdArray(value);
+          if (ids.length === 0) return value;
+          return ids.map((id) => docNameById.get(id) ?? id).join(', ');
         }
         if (BOOLEAN_FIELDS.has(field) || typeof value === 'boolean') {
           return formatBoolean(field, value);
