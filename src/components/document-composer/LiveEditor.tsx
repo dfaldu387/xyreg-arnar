@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { FileText, Download, Share, History, Sparkles, StickyNote, Wand2, GitBranch, MoreHorizontal, ArrowUpFromLine, Eye, EyeOff, Pencil, ShieldCheck, Bold, Italic, Strikethrough, Link2, List, ListOrdered, Type, ImagePlus, Undo, Redo, Heading1, Heading2, Heading3, Quote, AlignJustify, MessageSquare, ZoomIn, ZoomOut, PanelRight, Loader2, CheckCircle2, AlertCircle, Minus, Table as TableIcon } from 'lucide-react';
+import { FileText, Download, Share, History, Sparkles, StickyNote, Wand2, GitBranch, MoreHorizontal, ArrowUpFromLine, Eye, EyeOff, Pencil, ShieldCheck, Bold, Italic, Strikethrough, Link2, List, ListOrdered, Type, ImagePlus, Upload, Undo, Redo, Heading1, Heading2, Heading3, Quote, AlignJustify, MessageSquare, ZoomIn, ZoomOut, PanelRight, Loader2, CheckCircle2, AlertCircle, Minus, Table as TableIcon } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -30,6 +30,7 @@ import { AIContentRecommendationService } from '@/services/aiContentRecommendati
 import { AISuggestionService } from '@/services/aiSuggestionService';
 import { DocumentStudioPersistenceService } from '@/services/documentStudioPersistenceService';
 import { AIAutoFillDialog } from './AIAutoFillDialog';
+import { AIAutoFillFromDocxDialog } from './AIAutoFillFromDocxDialog';
 import { useCustomerFeatureFlag } from '@/hooks/useCustomerFeatureFlag';
 import { AIDocumentValidationDialog } from './AIDocumentValidationDialog';
 import { DraftEmptyStateModal } from './DraftEmptyStateModal';
@@ -1054,6 +1055,7 @@ export function LiveEditor({ template, className = '', onContentUpdate, companyI
   const [showAIModal, setShowAIModal] = useState(false);
   const [selectedSection, setSelectedSection] = useState<{title: string, content: string} | null>(null);
   const [showAutoFillDialog, setShowAutoFillDialog] = useState(false);
+  const [showAutoFillFromDocxDialog, setShowAutoFillFromDocxDialog] = useState(false);
   const [showEmptyStateModal, setShowEmptyStateModal] = useState(false);
   const [showSopPickerModal, setShowSopPickerModal] = useState(false);
   // Inline "Edit with AI" popover — captured snapshot of the selection.
@@ -2411,6 +2413,16 @@ export function LiveEditor({ template, className = '', onContentUpdate, companyI
     setShowSopPickerModal(true);
   }, []);
 
+  const handleEmptyStateUploadDocx = useCallback(() => {
+    setShowEmptyStateModal(false);
+    setShowAutoFillFromDocxDialog(true);
+  }, []);
+
+  // Toolbar entry — always available.
+  const handleToolbarUploadDocx = useCallback(() => {
+    setShowAutoFillFromDocxDialog(true);
+  }, []);
+
   // Keep the ProseMirror highlight decoration in sync with the popover state.
   useEffect(() => {
     const editor = editorInstanceRef.current;
@@ -3034,6 +3046,17 @@ export function LiveEditor({ template, className = '', onContentUpdate, companyI
               }
             }}
           />
+
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handleToolbarUploadDocx}
+            className="h-7 px-2 gap-1"
+            title="Import from Word (.docx)"
+          >
+            <Upload className="w-3.5 h-3.5" />
+            <span className="text-xs">Upload .docx</span>
+          </Button>
 
           <Button
             variant="ghost"
@@ -3679,15 +3702,27 @@ export function LiveEditor({ template, className = '', onContentUpdate, companyI
         onBack={() => setShowEmptyStateModal(true)}
       />
 
+      {/* AI Auto-Fill from Uploaded .docx Dialog */}
+      <AIAutoFillFromDocxDialog
+        open={showAutoFillFromDocxDialog}
+        onOpenChange={setShowAutoFillFromDocxDialog}
+        template={template}
+        companyId={companyId}
+        productId={selectedProductId}
+        onContentUpdate={onContentUpdate}
+        onBack={() => setShowEmptyStateModal(true)}
+      />
+
       {/* Empty-state chooser shown when opening a draft with no content */}
       {!disableEmptyStatePrompt && (
         <DraftEmptyStateModal
-          open={showEmptyStateModal}
-          onOpenChange={setShowEmptyStateModal}
-          onGenerateManually={() => setShowEmptyStateModal(false)}
-          onAutoFillByAI={handleEmptyStateAutoFill}
-          onCopyFromSOP={handleEmptyStateCopyFromSOP}
-        />
+            open={showEmptyStateModal}
+            onOpenChange={setShowEmptyStateModal}
+            onGenerateManually={() => setShowEmptyStateModal(false)}
+            onAutoFillByAI={handleEmptyStateAutoFill}
+            onCopyFromSOP={handleEmptyStateCopyFromSOP}
+            onUploadDocx={handleEmptyStateUploadDocx}
+          />
       )}
 
       {/* SOP picker for Copy-from-SOP flow */}
