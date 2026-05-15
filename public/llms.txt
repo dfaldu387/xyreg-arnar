@@ -1,0 +1,15 @@
+# XYREG
+
+> Medical device regulatory management platform for QMS, design controls, risk management, and global market submissions (MDR, FDA, PMDA, ANVISA, and more).
+
+XYREG helps medtech companies plan, document, and submit medical devices across global markets through an integrated quality management system, design control workflows, risk management (ISO 14971), and a regulatory dossier engine.
+
+## Pages
+
+- [Home](/): Platform overview and value proposition for medtech regulatory teams.
+- [Pricing](/pricing): Subscription plans and pricing for XYREG.
+- [Register](/register): Create a XYREG account.
+
+## Optional
+
+- [Investor register](/investor/register): Sign-up for investor access.

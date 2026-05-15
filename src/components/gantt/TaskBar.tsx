@@ -19,6 +19,7 @@ interface TaskBarProps {
     rowHeight: number;
     selected?: boolean;
     onSelect?: (id: GanttTask['id']) => void;
+    onDoubleSelect?: (id: GanttTask['id']) => void;
     onBarDragStart?: (taskId: GanttTask['id'], mode: DragMode, startX: number) => void;
     onLinkDragStart?: (
         taskId: GanttTask['id'],
@@ -126,6 +127,7 @@ export function TaskBar({
     rowHeight,
     selected,
     onSelect,
+    onDoubleSelect,
     onBarDragStart,
     onLinkDragStart,
     showProgress = false,
@@ -182,7 +184,7 @@ export function TaskBar({
         };
 
     if (isMilestone) {
-        const size = BAR_HEIGHT;
+        const size = 18;
         const milestoneTop = (rowHeight - size) / 2;
         return (
             <TooltipProvider delayDuration={150}>
@@ -192,6 +194,7 @@ export function TaskBar({
                             type="button"
                             data-task-id={task.id}
                             onClick={() => onSelect?.(task.id)}
+                            onDoubleClick={() => onDoubleSelect?.(task.id)}
                             onPointerDown={handleBodyPointerDown}
                             className={cn(
                                 'pointer-events-auto absolute flex items-center justify-center rounded-sm bg-amber-500 border-2 border-amber-700 hover:bg-amber-400 transition-colors cursor-grab active:cursor-grabbing',
@@ -233,6 +236,7 @@ export function TaskBar({
                             type="button"
                             data-task-id={task.id}
                             onClick={() => onSelect?.(task.id)}
+                            onDoubleClick={() => onDoubleSelect?.(task.id)}
                             onPointerDown={handleBodyPointerDown}
                             className={cn(
                                 // `peer` lets the connector-dot siblings react to

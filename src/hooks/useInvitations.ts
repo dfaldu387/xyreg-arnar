@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { postmarkService } from '@/services/resendMailService';
+import { AuditTrailService } from '@/services/auditTrailService';
 
 export interface UserInvitation {
   id: string;
@@ -160,9 +161,31 @@ export async function sendInvitationDirect(
     );
 
     if (emailResult.success) {
-      
+
     } else {
       console.warn('[sendInvitationDirect] Email failed to send, but invitation was created');
+    }
+
+    // AL-13: log new-user invitation (best-effort).
+    try {
+      const fullName = `${invitationData.firstName || ''} ${invitationData.lastName || ''}`.trim();
+      await AuditTrailService.logUserAccessEvent({
+        userId: currentUser.user.id,
+        companyId,
+        action: 'user_invited',
+        entityName: fullName || invitationData.email,
+        reason: `Invited ${invitationData.email} as ${invitationData.access_level}`,
+        actionDetails: {
+          invited_email: invitationData.email,
+          invited_first_name: invitationData.firstName,
+          invited_last_name: invitationData.lastName,
+          access_level: invitationData.access_level,
+          is_internal: invitationData.is_internal,
+          invitation_id: data.id,
+        },
+      });
+    } catch (auditErr) {
+      console.error('[sendInvitationDirect] Failed to write user-invited audit log:', auditErr);
     }
 
     return { success: true, invitationId: data.id };
@@ -366,6 +389,28 @@ export function useInvitations(companyId?: string) {
       } else {
         console.warn('[useInvitations] Email failed to send, but invitation was created');
         toast.warning('Invitation created but email failed to send. Please share the link manually.');
+      }
+
+      // AL-13: log new-user invitation (best-effort).
+      try {
+        const fullName = `${invitationData.firstName || ''} ${invitationData.lastName || ''}`.trim();
+        await AuditTrailService.logUserAccessEvent({
+          userId: currentUser.user.id,
+          companyId,
+          action: 'user_invited',
+          entityName: fullName || invitationData.email,
+          reason: `Invited ${invitationData.email} as ${invitationData.access_level}`,
+          actionDetails: {
+            invited_email: invitationData.email,
+            invited_first_name: invitationData.firstName,
+            invited_last_name: invitationData.lastName,
+            access_level: invitationData.access_level,
+            is_internal: invitationData.is_internal,
+            invitation_id: data.id,
+          },
+        });
+      } catch (auditErr) {
+        console.error('[useInvitations] Failed to write user-invited audit log:', auditErr);
       }
 
       await fetchInvitations(); // Refresh the list

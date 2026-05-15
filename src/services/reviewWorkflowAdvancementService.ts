@@ -1,5 +1,6 @@
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
+import { AuditTrailService } from '@/services/auditTrailService';
 
 export class ReviewWorkflowAdvancementService {
   /**
@@ -213,6 +214,17 @@ export class ReviewWorkflowAdvancementService {
           return;
       }
 
+      // Capture previous status for audit (best-effort).
+      let previousStatus: string | null = null;
+      try {
+        const { data: prevRow } = await supabase
+          .from(tableName as any)
+          .select(statusField)
+          .eq('id', recordId)
+          .maybeSingle();
+        previousStatus = (prevRow as any)?.[statusField] ?? null;
+      } catch {}
+
       const { error } = await supabase
         .from(tableName as any)
         .update({
@@ -229,6 +241,72 @@ export class ReviewWorkflowAdvancementService {
           recordId,
           status: statusValue
         });
+
+        // AL-04 / AL-05: log status change for document workflow transitions.
+        if (recordType === 'document') {
+          try {
+            const { data: { user: auditUser } } = await supabase.auth.getUser();
+            const { data: docRow } = await supabase
+              .from('phase_assigned_document_template')
+              .select('company_id, name')
+              .eq('id', recordId)
+              .maybeSingle();
+            const companyId = (docRow as any)?.company_id;
+            const entityName = (docRow as any)?.name || 'Document';
+            if (auditUser && companyId) {
+              const action = status === 'approved'
+                ? 'document_approved' as const
+                : status === 'rejected'
+                  ? 'document_rejected' as const
+                  : 'document_status_changed' as const;
+              const reason = status === 'approved'
+                ? 'Document approved via review workflow'
+                : status === 'rejected'
+                  ? 'Document rejected via review workflow'
+                  : 'Document status changed via review workflow';
+              await AuditTrailService.logDocumentRecordEvent({
+                userId: auditUser.id,
+                companyId,
+                action,
+                entityType: 'document',
+                entityId: recordId,
+                entityName,
+                reason,
+                changes: [{
+                  field: 'Status',
+                  oldValue: previousStatus || 'In Review',
+                  newValue: statusValue,
+                }],
+              });
+            }
+          } catch (auditErr) {
+            console.error('[ReviewWorkflowAdvancement] Failed to write audit log:', auditErr);
+          }
+        }
+      }
+
+      // When a document is approved, stamp the Effective Date onto the
+      // linked Document Studio draft so the controlled-document header
+      // reflects the real go-live date instead of the draft-creation date.
+      if (recordType === 'document' && status === 'approved') {
+        try {
+          const today = new Date().toISOString();
+          const { data: drafts } = await supabase
+            .from('document_studio_templates')
+            .select('id, document_control')
+            .eq('template_id', recordId);
+          for (const d of drafts || []) {
+            const dc = (d.document_control as any) || {};
+            if (dc.effectiveDate) continue; // respect already-set date
+            const next = { ...dc, effectiveDate: today };
+            await supabase
+              .from('document_studio_templates')
+              .update({ document_control: next as any })
+              .eq('id', d.id);
+          }
+        } catch (e) {
+          console.error('[ReviewWorkflowAdvancement] Failed to stamp effective date:', e);
+        }
       }
     } catch (error) {
       console.error('[ReviewWorkflowAdvancement] Error in updateRecordStatus:', error);

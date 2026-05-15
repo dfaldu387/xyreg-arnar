@@ -11,6 +11,7 @@ import { useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
 import { useSuperAdminAuditLogs } from '@/hooks/useSuperAdminAuditLogs';
 import { LoadingSpinner } from '@/components/ui/loading-spinner';
+import { FormatAuditIp } from '@/components/audit-log/formatAuditIp';
 
 export default function SuperAdminAuditLog() {
   const navigate = useNavigate();
@@ -283,7 +284,7 @@ export default function SuperAdminAuditLog() {
                         </div>
                       </td>
                       <td className="p-2 text-sm text-muted-foreground">
-                        {log.ipAddress}
+                        <FormatAuditIp ip={log.ipAddress} />
                       </td>
                       <td className="p-2 text-sm">
                         {log.duration_seconds ? `${log.duration_seconds}s` : '-'}

@@ -10,6 +10,7 @@ import { format } from 'date-fns';
 import { useProductAuditLogs } from '@/hooks/useProductAuditLogs';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { useTranslation } from '@/hooks/useTranslation';
+import { FormatAuditIp } from '@/components/audit-log/formatAuditIp';
 
 interface AuditLogTabProps {
   productId: string;
@@ -294,7 +295,7 @@ export function AuditLogTab({ productId, companyId, disabled = false }: AuditLog
                         </div>
                       </TableCell>
                       <TableCell className="text-xs font-mono text-muted-foreground">
-                        {log.ipAddress}
+                        <FormatAuditIp ip={log.ipAddress} />
                       </TableCell>
                     </TableRow>
                   ))

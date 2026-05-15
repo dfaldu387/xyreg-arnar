@@ -1,5 +1,5 @@
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { PageHeader } from "@/components/ui/page-header";
 import { AuditLogTable } from "@/components/audit-log/AuditLogTable";
 import { AuditLogFilters } from "@/components/audit-log/AuditLogFilters";
@@ -15,6 +15,27 @@ import { useTranslation } from '@/hooks/useTranslation';
 import { AuditTrailService } from '@/services/auditTrailService';
 import { Shield } from 'lucide-react';
 import type { AuditTrailFilters as AuditTrailFiltersType } from '@/types/auditTrail';
+import {
+  Pagination,
+  PaginationContent,
+  PaginationItem,
+  PaginationLink,
+  PaginationNext,
+  PaginationPrevious,
+  PaginationEllipsis,
+} from '@/components/ui/pagination';
+import {
+  Select as PageSizeSelect,
+  SelectContent as PageSizeSelectContent,
+  SelectItem as PageSizeSelectItem,
+  SelectTrigger as PageSizeSelectTrigger,
+  SelectValue as PageSizeSelectValue,
+} from '@/components/ui/select';
+
+const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
+// AL-25: fetch a large window so the displayed count reflects new actions
+// (default 200 was masking AL-25 once the table reached the cap).
+const AUDIT_FETCH_LIMIT = 2000;
 
 export default function AuditLogPage() {
   const { lang } = useTranslation();
@@ -34,17 +55,50 @@ export default function AuditLogPage() {
   const [startDate, setStartDate] = useState<Date | undefined>(undefined);
   const [endDate, setEndDate] = useState<Date | undefined>(undefined);
 
-  // Build filters for the hook
+  const normalizedStart = useMemo(() => {
+    if (!startDate) return undefined;
+    const d = new Date(startDate);
+    d.setHours(0, 0, 0, 0);
+    return d;
+  }, [startDate]);
+  const normalizedEnd = useMemo(() => {
+    if (!endDate) return undefined;
+    const d = new Date(endDate);
+    d.setHours(23, 59, 59, 999);
+    return d;
+  }, [endDate]);
+
   const filters: AuditTrailFiltersType = useMemo(() => ({
     category: activeCategory !== 'All' ? activeCategory as AuditTrailFiltersType['category'] : undefined,
     userId: selectedUser !== 'All' ? selectedUser : undefined,
-    startDate,
-    endDate,
+    startDate: normalizedStart,
+    endDate: normalizedEnd,
     searchTerm: searchTerm || undefined,
-  }), [activeCategory, selectedUser, startDate, endDate, searchTerm]);
+  }), [activeCategory, selectedUser, normalizedStart, normalizedEnd, searchTerm]);
 
-  // Fetch unified audit trail
-  const { entries, isLoading, error } = useAuditTrail({ filters, limit: 200 });
+  // Fetch unified audit trail. The fetched window is paginated below so the
+  // table only renders one page (default 25) at a time.
+  const { entries, isLoading, error } = useAuditTrail({ filters, limit: AUDIT_FETCH_LIMIT });
+
+  // Pagination state (mirrors ProductAuditLogPage for visual consistency).
+  const [pageSize, setPageSize] = useState(25);
+  const [currentPage, setCurrentPage] = useState(1);
+  const totalPages = Math.max(1, Math.ceil(entries.length / pageSize));
+
+  // Reset to page 1 whenever the filtered result set or page size changes.
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [activeCategory, searchTerm, selectedUser, normalizedStart, normalizedEnd, pageSize]);
+
+  // Clamp current page if it falls past the new total.
+  useEffect(() => {
+    if (currentPage > totalPages) setCurrentPage(totalPages);
+  }, [totalPages, currentPage]);
+
+  const paginatedEntries = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return entries.slice(start, start + pageSize);
+  }, [entries, currentPage, pageSize]);
 
   // Handle CSV export
   const handleExportCSV = () => {
@@ -114,12 +168,14 @@ export default function AuditLogPage() {
             <div className="flex items-center justify-between">
               <h3 className="text-lg font-medium">{lang('auditLog.activityLog')}</h3>
               <div className="text-sm text-muted-foreground">
-                {lang('auditLog.showingEntries', { count: entries.length })}
+                {entries.length === 0
+                  ? 'Showing 0 entries'
+                  : `Showing ${(currentPage - 1) * pageSize + 1}–${Math.min(currentPage * pageSize, entries.length)} of ${entries.length} entries`}
                 {activeRole === 'editor' && ` ${lang('auditLog.yourActionsOnly')}`}
               </div>
             </div>
             <AuditLogTable
-              entries={entries}
+              entries={paginatedEntries}
               isLoading={isLoading}
             />
             {error && (
@@ -127,9 +183,92 @@ export default function AuditLogPage() {
                 {lang('auditLog.errorLoading')} {error}
               </div>
             )}
+
+            {/* Pagination controls — matches the product audit log layout */}
+            {entries.length > 0 && (
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2">
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <span>Rows per page</span>
+                  <PageSizeSelect value={String(pageSize)} onValueChange={(v) => setPageSize(Number(v))}>
+                    <PageSizeSelectTrigger className="w-20 h-8">
+                      <PageSizeSelectValue />
+                    </PageSizeSelectTrigger>
+                    <PageSizeSelectContent>
+                      {PAGE_SIZE_OPTIONS.map(n => (
+                        <PageSizeSelectItem key={n} value={String(n)}>{n}</PageSizeSelectItem>
+                      ))}
+                    </PageSizeSelectContent>
+                  </PageSizeSelect>
+                </div>
+
+                <Pagination className="mx-0 w-auto justify-end">
+                  <PaginationContent>
+                    <PaginationItem>
+                      <PaginationPrevious
+                        href="#"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          if (currentPage > 1) setCurrentPage(currentPage - 1);
+                        }}
+                        aria-disabled={currentPage === 1}
+                        className={currentPage === 1 ? 'pointer-events-none opacity-50' : ''}
+                      />
+                    </PaginationItem>
+
+                    {buildPageList(currentPage, totalPages).map((p, idx) =>
+                      p === 'ellipsis' ? (
+                        <PaginationItem key={`e-${idx}`}>
+                          <PaginationEllipsis />
+                        </PaginationItem>
+                      ) : (
+                        <PaginationItem key={p}>
+                          <PaginationLink
+                            href="#"
+                            isActive={p === currentPage}
+                            onClick={(e) => {
+                              e.preventDefault();
+                              setCurrentPage(p);
+                            }}
+                          >
+                            {p}
+                          </PaginationLink>
+                        </PaginationItem>
+                      )
+                    )}
+
+                    <PaginationItem>
+                      <PaginationNext
+                        href="#"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          if (currentPage < totalPages) setCurrentPage(currentPage + 1);
+                        }}
+                        aria-disabled={currentPage === totalPages}
+                        className={currentPage === totalPages ? 'pointer-events-none opacity-50' : ''}
+                      />
+                    </PaginationItem>
+                  </PaginationContent>
+                </Pagination>
+              </div>
+            )}
           </div>
         </div>
       </div>
     </RestrictedFeatureProvider>
   );
+}
+
+/**
+ * Build a compact page list: 1 … (current-1) current (current+1) … last
+ */
+function buildPageList(current: number, total: number): (number | 'ellipsis')[] {
+  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
+  const pages: (number | 'ellipsis')[] = [1];
+  if (current > 3) pages.push('ellipsis');
+  const start = Math.max(2, current - 1);
+  const end = Math.min(total - 1, current + 1);
+  for (let i = start; i <= end; i++) pages.push(i);
+  if (current < total - 2) pages.push('ellipsis');
+  pages.push(total);
+  return pages;
 }

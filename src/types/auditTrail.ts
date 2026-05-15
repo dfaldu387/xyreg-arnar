@@ -45,6 +45,10 @@ export interface UnifiedAuditTrailEntry {
   changes?: FieldChange[];
   actionDetails?: Record<string, any>;
   ipAddress?: string;
+  /** Where the IP came from. 'captured' = recorded live by trigger;
+   *  'inferred_from_login' = back-filled from the same user's most recent
+   *  sign-in within 24 h of this event. Undefined = no IP available. */
+  ipAddressSource?: 'captured' | 'inferred_from_login' | null;
   sourceTable: 'document_audit_logs' | 'product_audit_logs' | 'audit_trail_logs';
 }
 

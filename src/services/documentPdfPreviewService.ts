@@ -4,17 +4,36 @@ import { format } from 'date-fns';
 
 export class DocumentPdfPreviewService {
   /**
-   * Generate a PDF preview for a document, including the Document Control header
-   * populated with e-signature data, and open it in a new browser tab.
-   *
-   * Content source: the latest shared-for-review DOCX file (from PADT file_path).
-   * If no shared-for-review file exists, a header-only PDF is generated with a note.
+   * Build the same PDF that `generatePreviewPdf` opens in a new tab, but return
+   * the blob instead of opening it. Lets in-app viewers (e.g. DocumentViewer
+   * dialog) render the controlled Preview PDF directly via react-pdf — no new
+   * browser tab.
    */
   static async generatePreviewPdf(
     documentId: string,
     companyId: string,
     productId?: string
   ): Promise<void> {
+    const pdfBlob = await this.generatePreviewPdfBlob(documentId, companyId, productId);
+    if (!pdfBlob) {
+      throw new Error('Failed to generate PDF preview');
+    }
+    const url = URL.createObjectURL(pdfBlob);
+    window.open(url, '_blank');
+  }
+
+  /**
+   * Generate the Preview PDF blob for a document (Document Control header,
+   * e-signature table, running header/footer, DRAFT watermark when applicable).
+   *
+   * Content source: the latest shared-for-review DOCX file (from PADT file_path).
+   * If no shared-for-review file exists, a header-only PDF is returned.
+   */
+  static async generatePreviewPdfBlob(
+    documentId: string,
+    companyId: string,
+    productId?: string
+  ): Promise<Blob | null> {
     const cleanDocId = documentId.replace(/^template-/, '');
 
     // 1. Fetch PADT record for file_path (the shared-for-review DOCX) and document name
@@ -159,9 +178,7 @@ export class DocumentPdfPreviewService {
         throw new Error('Failed to convert document to PDF');
       }
 
-      const url = URL.createObjectURL(pdfBlob);
-      window.open(url, '_blank');
-      return;
+      return pdfBlob;
     }
 
     // 5. No shared-for-review file — generate header-only PDF with note
@@ -171,9 +188,7 @@ export class DocumentPdfPreviewService {
     ], pageMeta);
 
     if (pdfBlob) {
-      const url = URL.createObjectURL(pdfBlob);
-      window.open(url, '_blank');
-      return;
+      return pdfBlob;
     }
 
     throw new Error('Failed to generate PDF preview');

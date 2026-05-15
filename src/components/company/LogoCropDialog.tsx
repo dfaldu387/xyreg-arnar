@@ -1,14 +1,28 @@
-import { useCallback, useState } from 'react';
-import Cropper, { Area } from 'react-easy-crop';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import ReactCrop, {
+  centerCrop,
+  makeAspectCrop,
+  type Crop,
+  type PixelCrop,
+} from 'react-image-crop';
+import 'react-image-crop/dist/ReactCrop.css';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { Slider } from '@/components/ui/slider';
-import { Loader2 } from 'lucide-react';
+import { Crop as CropIcon, Loader2 } from 'lucide-react';
 
 interface LogoCropDialogProps {
   open: boolean;
   imageSrc: string | null;
+  allowRawUpload?: boolean;
   onCancel: () => void;
+  onConfirmRaw?: () => Promise<void> | void;
   onConfirm: (blob: Blob) => Promise<void> | void;
   aspect?: number;
   outputWidth?: number;
@@ -18,129 +32,223 @@ interface LogoCropDialogProps {
 }
 
 async function getCroppedBlob(
-  imageSrc: string,
-  area: Area,
-  outputWidth: number,
-  outputHeight: number,
+  image: HTMLImageElement,
+  crop: PixelCrop,
+  outputWidth?: number,
+  outputHeight?: number,
 ): Promise<Blob> {
-  const image = await new Promise<HTMLImageElement>((resolve, reject) => {
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.onload = () => resolve(img);
-    img.onerror = reject;
-    img.src = imageSrc;
-  });
+  const scaleX = image.naturalWidth / image.width;
+  const scaleY = image.naturalHeight / image.height;
+  const sourceWidth = crop.width * scaleX;
+  const sourceHeight = crop.height * scaleY;
+  const targetWidth = outputWidth ?? Math.round(sourceWidth);
+  const targetHeight = outputHeight ?? Math.round(sourceHeight);
 
   const canvas = document.createElement('canvas');
-  canvas.width = outputWidth;
-  canvas.height = outputHeight;
+  canvas.width = targetWidth;
+  canvas.height = targetHeight;
   const ctx = canvas.getContext('2d');
   if (!ctx) throw new Error('Canvas not supported');
 
-  ctx.drawImage(image, area.x, area.y, area.width, area.height, 0, 0, outputWidth, outputHeight);
+  ctx.drawImage(
+    image,
+    crop.x * scaleX,
+    crop.y * scaleY,
+    sourceWidth,
+    sourceHeight,
+    0,
+    0,
+    targetWidth,
+    targetHeight,
+  );
 
   return new Promise<Blob>((resolve, reject) => {
     canvas.toBlob(
       (blob) => (blob ? resolve(blob) : reject(new Error('Failed to create image'))),
       'image/png',
-      1
+      1,
     );
   });
+}
+
+function buildInitialCrop(mediaWidth: number, mediaHeight: number, aspect?: number): Crop {
+  if (aspect) {
+    return centerCrop(
+      makeAspectCrop({ unit: '%', width: 90 }, aspect, mediaWidth, mediaHeight),
+      mediaWidth,
+      mediaHeight,
+    );
+  }
+  return centerCrop(
+    { unit: '%', x: 0, y: 0, width: 80, height: 80 },
+    mediaWidth,
+    mediaHeight,
+  );
 }
 
 export function LogoCropDialog({
   open,
   imageSrc,
+  allowRawUpload = false,
   onCancel,
+  onConfirmRaw,
   onConfirm,
-  aspect = 1,
-  outputWidth = 400,
-  outputHeight = 400,
-  title = 'Crop your logo',
-  description = 'Drag to reposition, scroll or use the slider to zoom. Saved as a 400×400 logo used everywhere — including generated documents.',
+  aspect,
+  outputWidth,
+  outputHeight,
+  title = 'Upload logo',
+  description,
 }: LogoCropDialogProps) {
-  const [crop, setCrop] = useState({ x: 0, y: 0 });
-  const [zoom, setZoom] = useState(1);
-  const [croppedAreaPixels, setCroppedAreaPixels] = useState<Area | null>(null);
-  const [isSaving, setIsSaving] = useState(false);
+  const imgRef = useRef<HTMLImageElement>(null);
+  const [mode, setMode] = useState<'preview' | 'crop'>(allowRawUpload ? 'preview' : 'crop');
+  const [crop, setCrop] = useState<Crop>();
+  const [completedCrop, setCompletedCrop] = useState<PixelCrop | null>(null);
+  const [isProcessing, setIsProcessing] = useState(false);
 
-  const onCropComplete = useCallback((_: Area, areaPixels: Area) => {
-    setCroppedAreaPixels(areaPixels);
-  }, []);
+  // Reset to the right starting mode each time the dialog opens.
+  useEffect(() => {
+    if (open) {
+      setMode(allowRawUpload ? 'preview' : 'crop');
+      setCrop(undefined);
+      setCompletedCrop(null);
+    }
+  }, [open, allowRawUpload]);
 
-  const handleSave = async () => {
-    if (!imageSrc || !croppedAreaPixels) return;
-    setIsSaving(true);
+  const onImageLoad = useCallback(
+    (e: React.SyntheticEvent<HTMLImageElement>) => {
+      const { width, height } = e.currentTarget;
+      const initial = buildInitialCrop(width, height, aspect);
+      setCrop(initial);
+      setCompletedCrop({
+        unit: 'px',
+        x: (initial.x / 100) * width,
+        y: (initial.y / 100) * height,
+        width: (initial.width / 100) * width,
+        height: (initial.height / 100) * height,
+      });
+    },
+    [aspect],
+  );
+
+  const handleUploadCropped = async () => {
+    if (!imgRef.current || !completedCrop || completedCrop.width === 0 || completedCrop.height === 0) {
+      return;
+    }
+    setIsProcessing(true);
     try {
-      const blob = await getCroppedBlob(imageSrc, croppedAreaPixels, outputWidth, outputHeight);
+      const blob = await getCroppedBlob(imgRef.current, completedCrop, outputWidth, outputHeight);
       await onConfirm(blob);
     } finally {
-      setIsSaving(false);
+      setIsProcessing(false);
+    }
+  };
+
+  const handleUploadRaw = async () => {
+    if (!onConfirmRaw) return;
+    setIsProcessing(true);
+    try {
+      await onConfirmRaw();
+    } finally {
+      setIsProcessing(false);
     }
   };
 
   const handleOpenChange = (next: boolean) => {
-    if (!next && !isSaving) {
-      setCrop({ x: 0, y: 0 });
-      setZoom(1);
-      setCroppedAreaPixels(null);
+    if (!next && !isProcessing) {
       onCancel();
     }
   };
+
+  const isCropMode = mode === 'crop';
+  const effectiveDescription =
+    description ??
+    (isCropMode
+      ? 'Drag any edge or corner to resize the crop box. Drag inside to reposition.'
+      : 'Preview your image. Upload it as-is, or crop it first.');
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="max-w-lg gap-3 p-4 sm:p-5">
         <DialogHeader className="space-y-1">
           <DialogTitle className="text-base">{title}</DialogTitle>
-          <DialogDescription className="text-xs">
-            {description}
-          </DialogDescription>
+          <DialogDescription className="text-xs">{effectiveDescription}</DialogDescription>
         </DialogHeader>
 
-        <div className="relative w-full h-64 bg-muted rounded-md overflow-hidden">
-          {imageSrc && (
-            <Cropper
-              image={imageSrc}
-              crop={crop}
-              zoom={zoom}
-              aspect={aspect}
-              cropShape="rect"
-              showGrid
-              onCropChange={setCrop}
-              onZoomChange={setZoom}
-              onCropComplete={onCropComplete}
+        <div className="w-full max-h-[24rem] bg-muted rounded-md overflow-hidden flex items-center justify-center">
+          {imageSrc && !isCropMode && (
+            <img
+              src={imageSrc}
+              alt="Preview"
+              style={{ maxHeight: '24rem', maxWidth: '100%', display: 'block' }}
             />
+          )}
+          {imageSrc && isCropMode && (
+            <ReactCrop
+              crop={crop}
+              onChange={(_, percentCrop) => setCrop(percentCrop)}
+              onComplete={(c) => setCompletedCrop(c)}
+              aspect={aspect}
+              keepSelection
+              minWidth={20}
+              minHeight={20}
+            >
+              <img
+                ref={imgRef}
+                src={imageSrc}
+                onLoad={onImageLoad}
+                alt="Crop preview"
+                style={{ maxHeight: '24rem', maxWidth: '100%', display: 'block' }}
+              />
+            </ReactCrop>
           )}
         </div>
 
-        <div className="flex items-center gap-3">
-          <span className="text-xs text-muted-foreground w-10">Zoom</span>
-          <Slider
-            value={[zoom]}
-            min={1}
-            max={3}
-            step={0.01}
-            onValueChange={(v) => setZoom(v[0])}
-            disabled={isSaving}
-            className="flex-1"
-          />
-        </div>
-
         <DialogFooter className="mt-1">
-          <Button variant="outline" onClick={onCancel} disabled={isSaving}>
-            Cancel
-          </Button>
-          <Button onClick={handleSave} disabled={isSaving || !croppedAreaPixels}>
-            {isSaving ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Saving...
-              </>
-            ) : (
-              'Save logo'
-            )}
-          </Button>
+          {isCropMode ? (
+            <>
+              <Button
+                variant="outline"
+                onClick={() => (allowRawUpload ? setMode('preview') : onCancel())}
+                disabled={isProcessing}
+              >
+                {allowRawUpload ? 'Back' : 'Cancel'}
+              </Button>
+              <Button onClick={handleUploadCropped} disabled={isProcessing || !completedCrop}>
+                {isProcessing ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Saving…
+                  </>
+                ) : (
+                  'Save & upload'
+                )}
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button variant="outline" onClick={onCancel} disabled={isProcessing}>
+                Cancel
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => setMode('crop')}
+                disabled={isProcessing}
+              >
+                <CropIcon className="mr-2 h-4 w-4" />
+                Crop
+              </Button>
+              <Button onClick={handleUploadRaw} disabled={isProcessing || !onConfirmRaw}>
+                {isProcessing ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Uploading…
+                  </>
+                ) : (
+                  'Upload'
+                )}
+              </Button>
+            </>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

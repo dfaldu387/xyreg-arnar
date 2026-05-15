@@ -27,6 +27,7 @@ import { UserAndGroupSelector } from '@/components/shared/UserAndGroupSelector';
 import { ESignatureFlow } from '@/components/shared/ESignatureFlow';
 import { useReviewerGroups } from '@/hooks/useReviewerGroups';
 import { useDocumentReviewAssignments } from '@/hooks/useDocumentReviewAssignments';
+import { AuditTrailService } from '@/services/auditTrailService';
 import { useDocumentAuthors } from '@/hooks/useDocumentAuthors';
 import { LoadingSpinner } from '@/components/ui/loading-spinner';
 import { TranslationStaleBanner } from '@/components/documents/TranslationStaleBanner';
@@ -45,6 +46,25 @@ import { splitDocPrefix } from '@/utils/templateNameUtils';
 import { convertDocxToHtml, mapDocxHtmlToSections } from '@/utils/docxToSections';
 import * as SidebarModule from '@/components/ui/sidebar';
 import { useRightRail } from '@/context/RightRailContext';
+import { resyncStaleSopSections } from '@/services/resyncSeededSopContentService';
+import { SOP_FULL_CONTENT } from '@/data/sopFullContent';
+import {
+  staleSectionsBetween,
+  LEGACY_SOP_SECTION_CONTENT,
+  SOP_SECTION_DIFFS,
+} from '@/data/sopContent/legacyTemplateBaselines';
+import { rewriteAllSopTokens } from '@/constants/sopAutoSeedTiers';
+import { RefreshCw } from 'lucide-react';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 
 /** Safe sidebar access — returns null when no SidebarProvider is mounted. */
 function useSafeSidebar() {
@@ -261,18 +281,20 @@ export function DocumentDraftDrawer({
   }, [open, openCommentsOnLoad, focusCommentId]);
 
   const resolvedCompanyId = companyId || activeCompanyRole?.companyId;
+  const [resolvedCompanyName, setResolvedCompanyName] = useState<string>('');
 
   useEffect(() => {
     if (!resolvedCompanyId) return;
     supabase
       .from('companies')
-      .select('logo_url, document_logo_url')
+      .select('name, logo_url, document_logo_url')
       .eq('id', resolvedCompanyId)
       .single()
       .then(({ data }) => {
         const d = data as any;
         const url = d?.document_logo_url || d?.logo_url;
         if (url) setCompanyLogoUrl(url);
+        if (d?.name) setResolvedCompanyName(d.name as string);
       });
   }, [resolvedCompanyId]);
 
@@ -383,6 +405,212 @@ export function DocumentDraftDrawer({
 
   const { isStarred, isLoading: starLoading, toggleStar } = useDocumentStar(normalizedDocId);
   const { comments: docxComments } = useDocxComments(showDocxComments ? normalizedDocId : undefined);
+
+  // ───── SOP template re-seed (per-draft) ─────
+  const [reseedBusy, setReseedBusy] = useState(false);
+  const [forceReseedOpen, setForceReseedOpen] = useState(false);
+
+  const sopReseedInfo = React.useMemo(() => {
+    // Skip SOP reseed detection for Quality Manual drafts. QM drafts can be
+    // opened by CI UUID (e.g. from Change Control) and their names/metadata
+    // can incidentally match SOP regex patterns, which would surface the
+    // wrong amber "Update from template" button and a misleading
+    // "Nothing to update" toast when SOP reseed runs against a QM draft.
+    const refStr = (documentReference || '').toString();
+    const tplIdStr = ((template?.metadata as any)?.templateIdKey || '').toString();
+    const loadedTemplateId = ((template as any)?.id || '').toString();
+    const isQM =
+      (typeof normalizedDocId === 'string' && normalizedDocId.startsWith('QM-FULL-')) ||
+      refStr.startsWith('QM-FULL-') ||
+      tplIdStr.startsWith('QM-FULL-') ||
+      loadedTemplateId.startsWith('QM-FULL-');
+    if (isQM) return null;
+    const candidates = [
+      documentNumber,
+      (template?.metadata as any)?.document_number,
+      (template?.metadata as any)?.sopNumber,
+      (template?.documentControl as any)?.sopNumber,
+      template?.name,
+      documentName,
+    ]
+      .filter((v): v is string => typeof v === 'string' && v.length > 0)
+      .map((v) => v.toUpperCase());
+    let m: RegExpMatchArray | null = null;
+    for (const c of candidates) {
+      m = c.match(/SOP-(?:[A-Z]+-)?(\d{3})/);
+      if (m) break;
+    }
+    if (!m) return null;
+    const sopKey = `SOP-${m[1]}`;
+    const source = SOP_FULL_CONTENT[sopKey];
+    if (!source) return null;
+    const target = source.templateVersion ?? 1;
+    const current = ((template?.metadata as any)?.sourceTemplateVersion as number | undefined) ?? 1;
+
+    // Helper: read a section's plain text from the loaded template.
+    // Drafts re-saved through TipTap have randomised section ids
+    // (`section-<ts>-<n>`), but section titles like "6.0 Procedure" stay
+    // stable. Map by canonical section number so we can still find the
+    // section we need to compare against the legacy baseline.
+    const SOP_NUM_TO_ID: Record<string, string> = {
+      '1.0': 'purpose', '2.0': 'scope', '3.0': 'references', '4.0': 'definitions',
+      '5.0': 'responsibilities', '6.0': 'procedure', '7.0': 'records', '8.0': 'revision-history',
+    };
+    const stripHtml = (raw: string): string =>
+      raw
+        .replace(/<\s*br\s*\/?\s*>/gi, '\n')
+        .replace(/<\/(p|li|h[1-6]|div)>/gi, '\n')
+        .replace(/<[^>]+>/g, '')
+        .replace(/&nbsp;/gi, ' ')
+        .replace(/&amp;/gi, '&').replace(/&lt;/gi, '<').replace(/&gt;/gi, '>')
+        // Strip leading bullet glyphs so HTML lists (which lose their <li> markers)
+        // compare equal to plain-text baselines that use "• " prefixes.
+        .replace(/^[\t ]*[•·\-]\s+/gm, '')
+        .replace(/[ \t]+/g, ' ')
+        .replace(/\s*\n\s*/g, '\n')
+        .trim();
+    const readSectionText = (canonicalId: string): string | null => {
+      const sections = (template as any)?.sections as Array<any> | undefined;
+      if (!Array.isArray(sections)) return null;
+      const s = sections.find((x) => {
+        if (x?.id === canonicalId) return true;
+        const t = (x?.title ?? '').trim();
+        const m = t.match(/^(\d+\.0)\b/);
+        return !!(m && SOP_NUM_TO_ID[m[1]] === canonicalId);
+      });
+      if (!s || !Array.isArray(s.content)) return null;
+      const joined = s.content
+        .map((b: any) => (typeof b?.content === 'string' ? b.content : ''))
+        .join('\n');
+      return stripHtml(joined);
+    };
+
+    const personalize = (text: string): string => {
+      const company =
+        companyName ||
+        (template?.productContext as any)?.companyName ||
+        resolvedCompanyName ||
+        '';
+      const replaced = text.replace(/\[Company Name\]/g, company || '[Company Name]');
+      return rewriteAllSopTokens(replaced).trim();
+    };
+
+    // Standard path: metadata-driven detection.
+    if (current < target) {
+      const changedIds = staleSectionsBetween(sopKey, current, target);
+      if (changedIds.length > 0) {
+        return { sopKey, currentVersion: current, targetVersion: target, changedCount: changedIds.length };
+      }
+    }
+
+    // Fallback: a previous bug stamped `sourceTemplateVersion` forward
+    // even when no section was actually replaced. Detect this by checking
+    // whether any section that *should* have been bumped to v(target)
+    // still matches the recorded baseline of an earlier version.
+    const diffsForSop = SOP_SECTION_DIFFS[sopKey];
+    const baselinesForSop = LEGACY_SOP_SECTION_CONTENT[sopKey];
+    if (diffsForSop && baselinesForSop) {
+      let staleByContent = 0;
+      for (let v = 2; v <= target; v++) {
+        const ids = diffsForSop[v] ?? [];
+        for (const id of ids) {
+          const baseline = baselinesForSop[id]?.[v - 1];
+          if (typeof baseline !== 'string') continue;
+          const currentText = readSectionText(id);
+          if (currentText == null) continue;
+          if (currentText === stripHtml(personalize(baseline))) {
+            staleByContent++;
+          }
+        }
+      }
+      if (staleByContent > 0) {
+        return {
+          sopKey,
+          currentVersion: current,
+          targetVersion: target,
+          changedCount: staleByContent,
+        };
+      }
+    }
+
+    return null;
+  }, [documentNumber, documentName, template?.name, template?.metadata, template?.documentControl, template?.sections, template?.productContext, companyName, resolvedCompanyName]);
+
+  // Quality Manual drafts have no static template baseline (sections are
+  // AI-generated per chapter). When the user opens a QM draft in the
+  // drawer and finds stale content, the right action is to navigate to
+  // the Quality Manual page and regenerate the affected section there.
+  const isQualityManualDraft = React.useMemo(() => {
+    const refStr = (documentReference || '').toString();
+    const tplIdStr = ((template?.metadata as any)?.templateIdKey || '').toString();
+    const loadedTemplateId = ((template as any)?.id || '').toString();
+    return (
+      (typeof normalizedDocId === 'string' && normalizedDocId.startsWith('QM-FULL-')) ||
+      refStr.startsWith('QM-FULL-') ||
+      tplIdStr.startsWith('QM-FULL-') ||
+      loadedTemplateId.startsWith('QM-FULL-')
+    );
+  }, [normalizedDocId, documentReference, template?.metadata, (template as any)?.id]);
+
+  const reloadDraftSections = useCallback(async () => {
+    if (!resolvedCompanyId || !normalizedDocId) return;
+    const { data } = await supabase
+      .from('document_studio_templates')
+      .select('sections, metadata')
+      .eq('company_id', resolvedCompanyId)
+      .eq('template_id', normalizedDocId)
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (!data) return;
+    setTemplate(prev => prev ? ({
+      ...prev,
+      sections: (data.sections as any) ?? prev.sections,
+      metadata: { ...(prev.metadata as any), ...(data.metadata as any) },
+    }) : prev);
+    setEditorKey(`${normalizedDocId}-${Date.now()}`);
+  }, [resolvedCompanyId, normalizedDocId]);
+
+  const handleReseed = useCallback(async (mode: 'safe' | 'force') => {
+    if (!sopReseedInfo || !resolvedCompanyId) return;
+    const effectiveCompanyName =
+      companyName ||
+      (template?.productContext as any)?.companyName ||
+      resolvedCompanyName ||
+      '';
+    if (!effectiveCompanyName) {
+      toast.error('Company name unavailable — cannot personalise template');
+      return;
+    }
+    setReseedBusy(true);
+    try {
+      const r = await resyncStaleSopSections(resolvedCompanyId, effectiveCompanyName, {
+        mode,
+        sopKeys: [sopReseedInfo.sopKey],
+        draftScope: normalizedDocId
+          ? [{ draftId: normalizedDocId, sopKey: sopReseedInfo.sopKey }]
+          : undefined,
+      });
+      if (r.updated > 0) {
+        toast.success(`Updated ${r.updated} section(s) from latest template`);
+        await reloadDraftSections();
+      } else if (mode === 'safe' && r.conflicts.length > 0) {
+        setForceReseedOpen(true);
+        return;
+      } else if (r.failed > 0) {
+        toast.error(`Re-seed failed: ${r.errors[0] ?? 'unknown error'}`);
+      } else {
+        toast.info('Nothing to update');
+        await reloadDraftSections();
+      }
+      setForceReseedOpen(false);
+    } catch (err) {
+      toast.error(`Re-seed failed: ${(err as Error).message}`);
+    } finally {
+      setReseedBusy(false);
+    }
+  }, [sopReseedInfo, resolvedCompanyId, companyName, resolvedCompanyName, template?.productContext, reloadDraftSections]);
+
 
   // Keep parent state (isRecord/recordId/nextReviewDate/documentNumber) in sync with
   // the CI metadata. Previously this was driven by DocumentEditorSidebar; now it's
@@ -868,6 +1096,21 @@ export function DocumentDraftDrawer({
 
       const reviewerCount = new Set([...reviewerUserIds, ...reviewerGroupIds]).size;
       const approverCount = new Set([...approverUserIds, ...approverGroupIds]).size;
+
+      // AL-05: log Draft → In Review status transition. Best-effort.
+      if (user?.id && resolvedCompanyId) {
+        AuditTrailService.logDocumentRecordEvent({
+          userId: user.id,
+          companyId: resolvedCompanyId,
+          action: 'document_sent_for_review',
+          entityType: 'document',
+          entityId: cleanDocumentId,
+          entityName: documentName,
+          reason: `Sent for review (${reviewerCount} reviewer(s), ${approverCount} approver(s))`,
+          changes: [{ field: 'Status', oldValue: 'Draft', newValue: 'In Review' }],
+        }).catch(() => {});
+      }
+
       toast.success(`Document sent for review (${reviewerCount} reviewer(s), ${approverCount} approver(s))`);
       setReviewStep('form');
       setDocStatus('In Review');
@@ -918,7 +1161,7 @@ export function DocumentDraftDrawer({
         productContext: { id: '', name: '', riskClass: '', phase: '', regulatoryRequirements: [] },
         documentControl: {
           sopNumber: '', documentTitle: documentName, version: '1.0',
-          effectiveDate: new Date(), documentOwner: '',
+          effectiveDate: null, documentOwner: '',
           preparedBy: { name: '', title: '', date: new Date() },
           reviewedBy: { name: '', title: '', date: new Date() },
           approvedBy: { name: '', title: '', date: new Date() },
@@ -952,7 +1195,7 @@ export function DocumentDraftDrawer({
         productContext: { id: productId || '', name: '', riskClass: '', phase: '', regulatoryRequirements: [] },
         documentControl: {
           sopNumber: '', documentTitle: documentName, version: '1.0',
-          effectiveDate: new Date(), documentOwner: '',
+          effectiveDate: null, documentOwner: '',
           preparedBy: { name: '', title: '', date: null },
           reviewedBy: { name: '', title: '', date: null },
           approvedBy: { name: '', title: '', date: null },
@@ -1073,7 +1316,7 @@ export function DocumentDraftDrawer({
               sopNumber: '',
               documentTitle: existingDraft.name,
               version: '1.0',
-              effectiveDate: new Date(),
+              effectiveDate: null,
               documentOwner: '',
               preparedBy: { name: '', title: '', date: null },
               reviewedBy: { name: '', title: '', date: null },
@@ -1107,7 +1350,7 @@ export function DocumentDraftDrawer({
               sopNumber: '',
               documentTitle: documentName,
               version: '1.0',
-              effectiveDate: new Date(),
+              effectiveDate: null,
               documentOwner: '',
               preparedBy: { name: '', title: '', date: null },
               reviewedBy: { name: '', title: '', date: null },
@@ -1179,7 +1422,7 @@ export function DocumentDraftDrawer({
             sopNumber: '',
             documentTitle: documentName,
             version: '1.0',
-            effectiveDate: new Date(),
+            effectiveDate: null,
             documentOwner: '',
             preparedBy: { name: '', title: '', date: null },
             reviewedBy: { name: '', title: '', date: null },
@@ -1740,6 +1983,43 @@ export function DocumentDraftDrawer({
             <Box sx={{ mr: 0.5 }}>
               <LiveEditorHeaderActions {...liveEditorActions} />
             </Box>
+          )}
+          {!normalDraft && activeView === 'draft' && !showAdvancedEditor && sopReseedInfo && canEdit && (
+            <Tooltip title={`Template updated (v${sopReseedInfo.targetVersion}). ${sopReseedInfo.changedCount} section(s) changed since this draft was created.`} arrow>
+              <span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleReseed('safe')}
+                  disabled={reseedBusy}
+                  className="h-8 gap-1.5 border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100 hover:text-amber-900"
+                >
+                  <RefreshCw className={`h-3.5 w-3.5 ${reseedBusy ? 'animate-spin' : ''}`} />
+                  Update from template
+                  <span className="ml-1 inline-flex h-5 min-w-[20px] items-center justify-center rounded-full bg-amber-200 px-1.5 text-[11px] font-semibold">
+                    {sopReseedInfo.changedCount}
+                  </span>
+                </Button>
+              </span>
+            </Tooltip>
+          )}
+          {!normalDraft && activeView === 'draft' && !showAdvancedEditor && isQualityManualDraft && canEdit && (
+            <Tooltip title="Quality Manual sections are AI-generated per chapter. Open the Quality Manual page to regenerate this section." arrow>
+              <span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    const cn = encodeURIComponent(companyName || resolvedCompanyName || '');
+                    if (cn) drawerNavigate(`/app/company/${cn}/quality-manual`);
+                  }}
+                  className="h-8 gap-1.5 border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100 hover:text-amber-900"
+                >
+                  <RefreshCw className="h-3.5 w-3.5" />
+                  Regenerate in Quality Manual
+                </Button>
+              </span>
+            </Tooltip>
           )}
           {!normalDraft && activeView === 'draft' && !showAdvancedEditor && canEdit && (
             <>
@@ -2869,6 +3149,26 @@ export function DocumentDraftDrawer({
         }}
       />
     )}
+    <AlertDialog open={forceReseedOpen} onOpenChange={setForceReseedOpen}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Overwrite edited section(s)?</AlertDialogTitle>
+          <AlertDialogDescription>
+            One or more changed sections in this draft differ from the previous
+            template baseline — they look like local edits. Force re-seed will
+            replace them with the latest template content. The previous content
+            is preserved on the draft's <code className="mx-1">metadata.reseedHistory</code>
+            so it can be restored later.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={reseedBusy}>Cancel</AlertDialogCancel>
+          <AlertDialogAction onClick={() => handleReseed('force')} disabled={reseedBusy}>
+            Overwrite and archive
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
     {/* Save-as-CI scope dialog — shown on first save of unsaved documents */}
     {showSaveCIDialog && resolvedCompanyId && (
       <SaveContentAsDocCIDialog

@@ -125,6 +125,8 @@ export function ESignatureFlow({
           onAuthenticated={handleAuthenticated}
           onCancel={() => setStep('form')}
           active={true}
+          documentId={documentId.replace(/^template-/, '')}
+          documentName={documentName}
         />
       </div>
     );

@@ -388,7 +388,7 @@ DEFINITIONS
         sopNumber: sopContent.name,
         documentTitle: sopContent.name,
         version: '1.0',
-        effectiveDate: new Date(),
+        effectiveDate: null,
         documentOwner: 'Quality Manager',
         preparedBy: {
           name: 'System',

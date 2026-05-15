@@ -251,7 +251,9 @@ export function SOPDocumentHeader({ documentControl, companyName, className = ''
                   Effective Date:
                 </td>
                 <td className="border border-gray-300 px-3 py-2">
-                  {safeFormat(documentControl.effectiveDate, 'dd MMMM yyyy')}
+                  {documentControl.effectiveDate
+                    ? safeFormat(documentControl.effectiveDate, 'dd MMMM yyyy')
+                    : <span className="text-muted-foreground italic">Pending approval</span>}
                 </td>
                 <td className="border border-gray-300 bg-gray-50 px-3 py-2 font-semibold w-1/4">
                   Next Review Date:

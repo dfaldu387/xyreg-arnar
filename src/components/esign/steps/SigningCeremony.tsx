@@ -164,6 +164,8 @@ export function SigningCeremony({ documentName, documentId, signRequest, onSigne
         onOpenChange={setShowReAuth}
         email={userEmail}
         onAuthenticated={handleAuthenticated}
+        documentId={documentId.replace(/^template-/, '')}
+        documentName={documentName}
       />
     </div>
   );

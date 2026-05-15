@@ -150,34 +150,22 @@ export function GanttChartV23({
         : internalZoomLevel;
 
     const handleZoomInInternal = useCallback(() => {
-        console.log('[zoom-in-out-issue] Zoom IN clicked, current level:', effectiveZoomLevel, 'max:', zoomLevels.length - 1, 'name:', zoomLevels[effectiveZoomLevel]?.name);
         if (effectiveZoomLevel >= zoomLevels.length - 1) {
-            console.log('[zoom-in-out-issue] Already at max zoom, skipping');
             return;
         }
         if (!isZoomControlled) {
-            setInternalZoomLevel(prev => {
-                const next = clampZoomLevel(prev + 1);
-                console.log('[zoom-in-out-issue] Zoom IN: level', prev, '->', next, 'name:', zoomLevels[next]?.name);
-                return next;
-            });
+            setInternalZoomLevel(prev => clampZoomLevel(prev + 1));
         }
 
         onZoomIn?.();
     }, [clampZoomLevel, effectiveZoomLevel, isZoomControlled, onZoomIn]);
 
     const handleZoomOutInternal = useCallback(() => {
-        console.log('[zoom-in-out-issue] Zoom OUT clicked, current level:', effectiveZoomLevel, 'min: 0', 'name:', zoomLevels[effectiveZoomLevel]?.name);
         if (effectiveZoomLevel <= 0) {
-            console.log('[zoom-in-out-issue] Already at min zoom, skipping');
             return;
         }
         if (!isZoomControlled) {
-            setInternalZoomLevel(prev => {
-                const next = clampZoomLevel(prev - 1);
-                console.log('[zoom-in-out-issue] Zoom OUT: level', prev, '->', next, 'name:', zoomLevels[next]?.name);
-                return next;
-            });
+            setInternalZoomLevel(prev => clampZoomLevel(prev - 1));
         }
 
         onZoomOut?.();
@@ -192,18 +180,6 @@ export function GanttChartV23({
     }, [isZoomControlled, onResetZoom]);
 
     const resolvedZoomMeta = zoomLevels[effectiveZoomLevel] ?? zoomLevels[DEFAULT_ZOOM_LEVEL];
-
-    // Debug: log zoom state on every render
-    console.log('[zoom-in-out-issue] Render state:', {
-      effectiveZoomLevel,
-      isZoomControlled,
-      zoomName: resolvedZoomMeta?.name,
-      scales: resolvedZoomMeta?.scales,
-      minCellWidth: resolvedZoomMeta?.minCellWidth,
-      maxCellWidth: resolvedZoomMeta?.maxCellWidth,
-      totalZoomLevels: zoomLevels.length,
-      DEFAULT_ZOOM_LEVEL,
-    });
 
     // API-fetched state
     const [tasks, setTasks] = useState<GanttTask[]>(() => {
@@ -2458,8 +2434,6 @@ export function GanttChartV23({
                 level: effectiveZoomLevel,
                 levels: zoomLevels,
             };
-            console.log('[zoom-in-out-issue] zoomConfig passed to Gantt:', JSON.stringify(config, null, 2));
-            console.log('[zoom-in-out-issue] zoomLevels[' + effectiveZoomLevel + '].scales:', JSON.stringify(zoomLevels[effectiveZoomLevel]?.scales));
             return config;
         },
         [effectiveZoomLevel, resolvedZoomMeta]

@@ -380,6 +380,7 @@ export function CompanyDocumentEditDialog({
       // Create a unified document item for the service
       const documentItem = {
         id: document.id,
+        company_id: companyId,
         name: formData.name.trim(),
         type: formData.documentType,
         description: formData.description,

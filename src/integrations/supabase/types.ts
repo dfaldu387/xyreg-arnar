@@ -851,6 +851,8 @@ export type Database = {
           entity_type: string | null
           id: string
           ip_address: string | null
+          ip_address_inferred: unknown
+          ip_address_source: string | null
           reason: string | null
           session_id: string | null
           user_agent: string | null
@@ -868,6 +870,8 @@ export type Database = {
           entity_type?: string | null
           id?: string
           ip_address?: string | null
+          ip_address_inferred?: unknown
+          ip_address_source?: string | null
           reason?: string | null
           session_id?: string | null
           user_agent?: string | null
@@ -885,6 +889,8 @@ export type Database = {
           entity_type?: string | null
           id?: string
           ip_address?: string | null
+          ip_address_inferred?: unknown
+          ip_address_source?: string | null
           reason?: string | null
           session_id?: string | null
           user_agent?: string | null
@@ -29011,6 +29017,8 @@ export type Database = {
         }
         Returns: string
       }
+      current_request_ip: { Args: never; Returns: string }
+      current_request_user_agent: { Args: never; Returns: string }
       debug_auth_state: {
         Args: never
         Returns: {

@@ -249,8 +249,9 @@ serve(async (req) => {
     }
 
     // --- GET PREFERENCE ---
+    // Universal (per-user): last duration used across ANY company
     if (action === "get-preference") {
-      if (!userId || !companyId) {
+      if (!userId) {
         return new Response(
           JSON.stringify({ remember_minutes: null }),
           { headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -261,7 +262,6 @@ serve(async (req) => {
         .from("esign_otp_codes")
         .select("remember_minutes")
         .eq("user_id", userId)
-        .eq("company_id", companyId)
         .eq("used", true)
         .not("remember_minutes", "is", null)
         .order("created_at", { ascending: false })
@@ -275,8 +275,9 @@ serve(async (req) => {
     }
 
     // --- CHECK REMEMBER ---
+    // Universal (per-user): one valid remember skips OTP for ALL companies
     if (action === "check") {
-      if (!userId || !companyId) {
+      if (!userId) {
         return new Response(
           JSON.stringify({ remembered: false }),
           { headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -285,9 +286,8 @@ serve(async (req) => {
 
       const { data: otpRow } = await supabase
         .from("esign_otp_codes")
-        .select("created_at, remember_minutes")
+        .select("id, created_at, remember_minutes")
         .eq("user_id", userId)
-        .eq("company_id", companyId)
         .eq("used", true)
         .not("remember_minutes", "is", null)
         .order("created_at", { ascending: false })
@@ -305,17 +305,12 @@ serve(async (req) => {
       const expiresAt = verifiedAt + otpRow.remember_minutes * 60 * 1000;
       const remembered = Date.now() < expiresAt;
 
-      // Update last_redirect_at if still remembered
+      // Update last_redirect_at if still remembered (telemetry only)
       if (remembered) {
         await supabase
           .from("esign_otp_codes")
           .update({ last_redirect_at: new Date().toISOString() })
-          .eq("user_id", userId)
-          .eq("company_id", companyId)
-          .eq("used", true)
-          .not("remember_minutes", "is", null)
-          .order("created_at", { ascending: false })
-          .limit(1);
+          .eq("id", otpRow.id);
       }
 
       return new Response(

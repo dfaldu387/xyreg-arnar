@@ -138,7 +138,7 @@ export function useDocumentTemplate(templateId: string, productId: string, docNa
                 sopNumber: studioMatch.name?.match(/SOP-\d{3}/)?.[0] || '',
                 documentTitle: studioMatch.name || '',
                 version: 'v1.0',
-                effectiveDate: new Date(),
+                effectiveDate: null,
                 documentOwner: '',
                 preparedBy: { name: '', title: '', date: new Date() },
                 reviewedBy: { name: '', title: '', date: new Date() },

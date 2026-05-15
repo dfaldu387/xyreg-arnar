@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
+import { AuditTrailService } from '@/services/auditTrailService';
 
 export interface PendingUser {
   id: string;
@@ -133,6 +134,27 @@ export function usePendingUsers(companyId?: string) {
       }
 
       toast.success(`Pending user ${userData.name} created successfully`);
+
+      // AL-13: log new pending user creation (best-effort).
+      try {
+        await AuditTrailService.logUserAccessEvent({
+          userId: currentUser.user.id,
+          companyId,
+          action: 'user_created',
+          entityName: userData.name || userData.email,
+          reason: `Created pending user ${userData.email} as ${userData.access_level}`,
+          actionDetails: {
+            created_user_id: data?.id,
+            created_user_email: userData.email,
+            created_user_name: userData.name,
+            access_level: userData.access_level,
+            is_internal: userData.is_internal,
+          },
+        });
+      } catch (auditErr) {
+        console.error('[usePendingUsers] Failed to write user-created audit log:', auditErr);
+      }
+
       await fetchPendingUsers(); // Refresh the list
       return true;
     } catch (err) {

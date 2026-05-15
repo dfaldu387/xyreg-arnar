@@ -29,6 +29,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { AIContentRecommendationService } from '@/services/aiContentRecommendationService';
 import { AISuggestionService } from '@/services/aiSuggestionService';
 import { DocumentStudioPersistenceService } from '@/services/documentStudioPersistenceService';
+import { AuditTrailService } from '@/services/auditTrailService';
 import { AIAutoFillDialog } from './AIAutoFillDialog';
 import { AIAutoFillFromDocxDialog } from './AIAutoFillFromDocxDialog';
 import { useCustomerFeatureFlag } from '@/hooks/useCustomerFeatureFlag';
@@ -62,6 +63,9 @@ import { PersonMentionHoverCard, PersonMentionHoverData } from './PersonMentionH
 import { LinkHoverCard, LinkHoverData } from './LinkHoverCard';
 import { CreateReferenceDocDialog } from './CreateReferenceDocDialog';
 import { REFERENCE_PREFIXES } from '@/services/createReferenceDocument';
+
+const AUDIT_LOG_THROTTLE_MS = 5 * 60 * 1000;
+const auditLogThrottle = new Map<string, number>();
 
 /**
  * Strip redundant leading headings from content that duplicate the section title.
@@ -2770,6 +2774,32 @@ export function LiveEditor({ template, className = '', onContentUpdate, companyI
         // saved record) on this callback — not what we want mid-edit.
         if (isUploadedDocument && !uploadedDocumentSaved && !silent) {
           onUploadedDocumentSaved?.();
+        }
+
+        if (isUpdate) {
+          const auditDocId = result.id || existingDocumentId || template.id;
+          if (auditDocId && activeCompanyRole?.companyId) {
+            const { data: { user: auditUser } } = await supabase.auth.getUser();
+            if (auditUser) {
+              const throttleKey = `${auditUser.id}:${auditDocId}`;
+              const now = Date.now();
+              const lastLogged = auditLogThrottle.get(throttleKey) || 0;
+              if (now - lastLogged > AUDIT_LOG_THROTTLE_MS) {
+                auditLogThrottle.set(throttleKey, now);
+                AuditTrailService.logDocumentRecordEvent({
+                  userId: auditUser.id,
+                  companyId: activeCompanyRole.companyId,
+                  action: 'document_draft_updated',
+                  entityType: 'document',
+                  entityId: auditDocId,
+                  entityName: template.name,
+                }).catch(() => {
+                  // Roll back the throttle entry so a retry can fire.
+                  auditLogThrottle.delete(throttleKey);
+                });
+              }
+            }
+          }
         }
 
         if (!silent) {

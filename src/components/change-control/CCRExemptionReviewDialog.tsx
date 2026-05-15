@@ -11,8 +11,20 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Check, XCircle } from 'lucide-react';
 import { decorateLinkedDoc, type LinkedCCRDoc } from '@/services/ccrLinkedDocsService';
+
+/** Sentinel value for the "no follow-up task" option in the Select. */
+const NO_ASSIGNEE = '__none__';
+
+export type ExemptionAssigneeSelections = Record<string, string | null>;
 
 interface Props {
   open: boolean;
@@ -27,7 +39,25 @@ interface Props {
   requestedAtISO?: string | null;
   pendingDocCount: number;
   totalDocCount: number;
-  onConfirm: (decision: 'approved' | 'rejected', reason: string) => Promise<void> | void;
+  /** Company users for the per-doc follow-up assignee picker. */
+  companyUsers: Array<{ id: string; name: string }>;
+  /**
+   * Default-selected assignee for every exempted doc. Should be the CCR
+   * responsible person resolved as exemption_requested_by → owner_id →
+   * created_by. May be null if none of those are populated — admin can
+   * still pick a different user per doc, or leave it empty (no task).
+   */
+  defaultAssigneeId: string | null;
+  onConfirm: (
+    decision: 'approved' | 'rejected',
+    reason: string,
+    /**
+     * Per-doc follow-up task assignee selections at the moment Approve was
+     * clicked. Map of PADT doc id → user id (or null = no task for that doc).
+     * Empty on Reject — only consulted when decision === 'approved'.
+     */
+    assignees: ExemptionAssigneeSelections,
+  ) => Promise<void> | void;
 }
 
 export function CCRExemptionReviewDialog({
@@ -39,17 +69,26 @@ export function CCRExemptionReviewDialog({
   requestedAtISO,
   pendingDocCount,
   totalDocCount,
+  companyUsers,
+  defaultAssigneeId,
   onConfirm,
 }: Props) {
   const [reason, setReason] = useState('');
   const [submitting, setSubmitting] = useState<null | 'approved' | 'rejected'>(null);
+  const [assignees, setAssignees] = useState<ExemptionAssigneeSelections>({});
 
   useEffect(() => {
     if (open) {
       setReason('');
       setSubmitting(null);
+      // Default every exempted doc to the CCR responsible person.
+      const next: ExemptionAssigneeSelections = {};
+      for (const d of exemptedDocs) {
+        next[d.id] = defaultAssigneeId ?? null;
+      }
+      setAssignees(next);
     }
-  }, [open]);
+  }, [open, exemptedDocs, defaultAssigneeId]);
 
   const ready = reason.trim().length > 0;
 
@@ -57,7 +96,7 @@ export function CCRExemptionReviewDialog({
     if (!ready) return;
     setSubmitting(decision);
     try {
-      await onConfirm(decision, reason.trim());
+      await onConfirm(decision, reason.trim(), assignees);
       onOpenChange(false);
     } finally {
       setSubmitting(null);
@@ -70,6 +109,14 @@ export function CCRExemptionReviewDialog({
     if (Number.isNaN(d.getTime())) return null;
     return d.toLocaleString();
   })();
+
+  // Stable sort: requested-by (default) first, then alphabetical. Makes the
+  // default option easy to find at the top of every picker.
+  const userOptions = [...companyUsers].sort((a, b) => {
+    if (a.id === defaultAssigneeId) return -1;
+    if (b.id === defaultAssigneeId) return 1;
+    return a.name.localeCompare(b.name);
+  });
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (submitting === null) onOpenChange(o); }}>
@@ -113,29 +160,69 @@ export function CCRExemptionReviewDialog({
                   None specified.
                 </p>
               ) : (
-                <ul className="space-y-1">
+                <ul className="space-y-2">
                   {exemptedDocs.map((d) => {
                     const status = (d.status || 'Draft').replace(/_/g, ' ');
                     const { displayRef, displayTitle } = decorateLinkedDoc(d);
+                    const currentAssignee = assignees[d.id] ?? null;
                     return (
                       <li
                         key={d.id}
-                        className="flex items-center gap-2 rounded border bg-background px-2 py-1.5"
+                        className="rounded border bg-background p-2 space-y-2"
                       >
-                        {displayRef && (
-                          <span className="text-[11px] font-mono px-1.5 py-0.5 rounded bg-muted border shrink-0">
-                            {displayRef}
+                        <div className="flex items-center gap-2">
+                          {displayRef && (
+                            <span className="text-[11px] font-mono px-1.5 py-0.5 rounded bg-muted border shrink-0">
+                              {displayRef}
+                            </span>
+                          )}
+                          <span
+                            className="text-sm font-medium truncate flex-1 min-w-0"
+                            title={displayTitle}
+                          >
+                            {displayTitle}
                           </span>
-                        )}
-                        <span
-                          className="text-sm font-medium truncate flex-1 min-w-0 max-w-[300px]"
-                          title={displayTitle}
-                        >
-                          {displayTitle}
-                        </span>
-                        <Badge variant="outline" className="text-[10px] py-0 h-4 capitalize shrink-0">
-                          {status}
-                        </Badge>
+                          <Badge variant="outline" className="text-[10px] py-0 h-4 capitalize shrink-0">
+                            {status}
+                          </Badge>
+                        </div>
+                        <div className="flex items-center gap-2 pl-1">
+                          <Label
+                            htmlFor={`exemption-assignee-${d.id}`}
+                            className="text-xs text-muted-foreground shrink-0"
+                          >
+                            Follow-up task to:
+                          </Label>
+                          <Select
+                            value={currentAssignee ?? NO_ASSIGNEE}
+                            onValueChange={(v) =>
+                              setAssignees((prev) => ({
+                                ...prev,
+                                [d.id]: v === NO_ASSIGNEE ? null : v,
+                              }))
+                            }
+                          >
+                            <SelectTrigger
+                              id={`exemption-assignee-${d.id}`}
+                              className="h-8 text-xs flex-1"
+                            >
+                              <SelectValue placeholder="Select a user…" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value={NO_ASSIGNEE}>
+                                No follow-up task
+                              </SelectItem>
+                              {userOptions.map((u) => (
+                                <SelectItem key={u.id} value={u.id}>
+                                  {u.name}
+                                  {u.id === defaultAssigneeId
+                                    ? ' (CCR responsible)'
+                                    : ''}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
                       </li>
                     );
                   })}

@@ -1,6 +1,121 @@
 import { supabase } from '@/integrations/supabase/client';
 import type { AuditCategory, UnifiedAuditTrailEntry, AuditTrailFilters, FieldChange } from '@/types/auditTrail';
 
+/**
+ * Normalize entity type so DOCUMENT, document, Document all render the same.
+ */
+export function normalizeEntityType(entityType: string | undefined | null): string {
+  if (!entityType) return '';
+  const raw = entityType.trim();
+  if (!raw) return '';
+  // Title case (split on underscores/spaces)
+  return raw
+    .toLowerCase()
+    .split(/[_\s]+/)
+    .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ');
+}
+
+/**
+ * Normalize action label for display: 'document_created' → 'Created',
+ * 'CREATE' → 'Created', 'status_changed' → 'Status Changed'.
+ */
+export function normalizeActionLabel(action: string | undefined | null): string {
+  if (!action) return '';
+  const lower = action.toLowerCase().trim();
+  const map: Record<string, string> = {
+    create: 'Created',
+    update: 'Updated',
+    delete: 'Deleted',
+    view: 'Viewed',
+    download: 'Downloaded',
+    share: 'Shared',
+    export: 'Exported',
+    document_created: 'Created',
+    document_updated: 'Updated',
+    document_draft_updated: 'Draft Updated',
+    document_deleted: 'Deleted',
+    document_status_changed: 'Status Changed',
+    document_sent_for_review: 'Sent for Review',
+    document_approved: 'Approved',
+    document_rejected: 'Rejected',
+    signature_failed: 'Signature Failed',
+    signature_applied: 'Signature Applied',
+    signature_rejected: 'Signature Rejected',
+    user_created: 'User Created',
+    user_invited: 'User Invited',
+  };
+  if (map[lower]) return map[lower];
+  // Strip common entity prefixes (document_, product_, ccr_, etc.)
+  const stripped = lower.replace(/^(document|product|ccr|capa|user|review)_/, '');
+  return stripped
+    .split(/[_\s]+/)
+    .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ');
+}
+
+/**
+ * Default reason fallback for empty "Why" values.
+ */
+export function defaultReasonFor(action: string | undefined | null): string {
+  if (!action) return 'System event';
+  const lower = action.toLowerCase().trim();
+  const reasons: Record<string, string> = {
+    login: 'User sign-in',
+    logout: 'User sign-out',
+    failed_login: 'Authentication failed',
+    role_change: 'Role assignment updated',
+    permission_change: 'Permissions updated',
+    account_lockout: 'Account locked after failed attempts',
+    create: 'Record created',
+    update: 'Record updated',
+    delete: 'Record deleted',
+    view: 'Record viewed',
+    download: 'Record downloaded',
+    share: 'Record shared',
+    export: 'Record exported',
+    document_created: 'Document created',
+    document_updated: 'Document updated',
+    document_draft_updated: 'Document draft content edited',
+    document_deleted: 'Document deleted',
+    document_status_changed: 'Document status changed',
+    document_sent_for_review: 'Document sent for review',
+    document_approved: 'Document approved via review workflow',
+    document_rejected: 'Document rejected via review workflow',
+    ccr_created: 'Change control request created',
+    ccr_updated: 'Change control request updated',
+    ccr_deleted: 'Change control request deleted',
+    signature_applied: 'E-signature applied',
+    signature_verified: 'E-signature verified',
+    signature_failed: 'E-signature verification failed',
+    user_created: 'New user account created',
+    user_invited: 'User invited to company',
+    signature_rejected: 'E-signature rejected by signer',
+    request_created: 'E-signature request created',
+    request_completed: 'E-signature request fully signed',
+    request_voided: 'E-signature request voided',
+    signer_authenticated: 'Signer authenticated',
+    document_viewed: 'Document viewed by signer',
+    hash_mismatch_detected: 'Document hash mismatch detected',
+  };
+  return reasons[lower] || 'System event';
+}
+
+/**
+ * Action equivalence — used to dedupe entries that represent the same
+ * user action logged into two different audit tables (e.g. product_audit_logs
+ * writes "CREATE" while audit_trail_logs writes "document_created" for the
+ * same document creation).
+ */
+function actionEquivalenceKey(action: string): string {
+  const lower = (action || '').toLowerCase();
+  if (lower === 'create' || lower === 'document_created') return 'create';
+  if (lower === 'update' || lower === 'document_updated') return 'update';
+  if (lower === 'delete' || lower === 'document_deleted') return 'delete';
+  if (lower === 'status_changed' || lower === 'document_status_changed') return 'status_changed';
+  return lower;
+}
+
 interface CreateAuditTrailData {
   companyId?: string | null;
   userId: string;
@@ -20,7 +135,15 @@ export class AuditTrailService {
   static async logUserAccessEvent(data: {
     userId: string;
     companyId?: string | null;
-    action: 'login' | 'logout' | 'failed_login' | 'role_change' | 'permission_change' | 'account_lockout';
+    action:
+      | 'login'
+      | 'logout'
+      | 'failed_login'
+      | 'role_change'
+      | 'permission_change'
+      | 'account_lockout'
+      | 'user_created'
+      | 'user_invited';
     entityName?: string;
     reason?: string;
     changes?: FieldChange[];
@@ -42,7 +165,15 @@ export class AuditTrailService {
   static async logDocumentRecordEvent(data: {
     userId: string;
     companyId: string;
-    action: 'document_created' | 'document_updated' | 'document_deleted' | 'document_status_changed';
+    action:
+      | 'document_created'
+      | 'document_updated'
+      | 'document_draft_updated'
+      | 'document_deleted'
+      | 'document_status_changed'
+      | 'document_sent_for_review'
+      | 'document_approved'
+      | 'document_rejected';
     entityType?: string;
     entityId?: string;
     entityName?: string;
@@ -89,8 +220,18 @@ export class AuditTrailService {
 
   static async logESignatureEvent(data: {
     userId: string;
-    companyId: string;
-    action: 'signature_applied' | 'signature_verified' | 'signature_failed';
+    companyId: string | null;
+    action:
+      | 'signature_applied'
+      | 'signature_verified'
+      | 'signature_failed'
+      | 'signature_rejected'
+      | 'request_created'
+      | 'request_completed'
+      | 'request_voided'
+      | 'signer_authenticated'
+      | 'document_viewed'
+      | 'hash_mismatch_detected';
     entityType: string;
     entityId?: string;
     entityName?: string;
@@ -122,37 +263,35 @@ export class AuditTrailService {
     // Viewer gets nothing
     if (userRole === 'viewer') return [];
 
+    const effectiveFilters: AuditTrailFilters = userRole === 'editor' && currentUserId
+      ? { ...filters, userId: filters.userId || currentUserId }
+      : filters;
+
+    const perTableLimit = Math.min(Math.max(limit, 200), 2000);
+
+    const wantsTrail = !effectiveFilters.category || ['document_record', 'e_signature', 'user_access_security', 'quality_process'].includes(effectiveFilters.category);
+    const wantsDocLog = !effectiveFilters.category || effectiveFilters.category === 'document_record';
+    const wantsProdLog = !effectiveFilters.category || effectiveFilters.category === 'document_record';
+
     const [docLogs, prodLogs, trailLogs] = await Promise.all([
-      this.fetchDocumentLogs(companyId, filters),
-      this.fetchProductLogs(companyId, filters),
-      this.fetchTrailLogs(companyId, filters),
+      wantsDocLog ? this.fetchDocumentLogs(companyId, effectiveFilters, perTableLimit) : Promise.resolve([]),
+      wantsProdLog ? this.fetchProductLogs(companyId, effectiveFilters, perTableLimit) : Promise.resolve([]),
+      wantsTrail ? this.fetchTrailLogs(companyId, effectiveFilters, perTableLimit) : Promise.resolve([]),
     ]);
 
     let all = [...docLogs, ...prodLogs, ...trailLogs];
 
-    // Editor sees own actions only
-    if (userRole === 'editor' && currentUserId) {
-      all = all.filter(e => e.userId === currentUserId);
+    if (effectiveFilters.category) {
+      all = all.filter(e => e.category === effectiveFilters.category);
     }
-
-    // Category filter
-    if (filters.category) {
-      all = all.filter(e => e.category === filters.category);
+    if (effectiveFilters.actionType) {
+      all = all.filter(e => e.action === effectiveFilters.actionType);
     }
-
-    // Action filter
-    if (filters.actionType) {
-      all = all.filter(e => e.action === filters.actionType);
+    if (effectiveFilters.entityType) {
+      all = all.filter(e => e.entityType.toLowerCase() === effectiveFilters.entityType!.toLowerCase());
     }
-
-    // Entity type filter
-    if (filters.entityType) {
-      all = all.filter(e => e.entityType.toLowerCase() === filters.entityType!.toLowerCase());
-    }
-
-    // Search term
-    if (filters.searchTerm) {
-      const term = filters.searchTerm.toLowerCase();
+    if (effectiveFilters.searchTerm) {
+      const term = effectiveFilters.searchTerm.toLowerCase();
       all = all.filter(e =>
         e.entityName.toLowerCase().includes(term) ||
         e.action.toLowerCase().includes(term) ||
@@ -164,28 +303,44 @@ export class AuditTrailService {
     // Sort by timestamp desc
     all.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
 
-    return all.slice(0, limit);
+    return this.dedupeEntries(all).slice(0, limit);
   }
 
   // ───── CSV Export ─────
 
   static exportCSV(entries: UnifiedAuditTrailEntry[]): string {
-    const header = 'Who,Email,What (Action),Entity Type,Entity Name,When,Why,Category,IP Address';
+    const header = 'Category,Action,Entity,Who,When,Why,IP Address';
     const rows = entries.map(e => {
       const escape = (s: string) => `"${(s || '').replace(/"/g, '""')}"`;
+      const when = new Date(e.timestamp).toLocaleString('en-GB', {
+        day: '2-digit', month: 'short', year: 'numeric',
+        hour: '2-digit', minute: '2-digit', second: '2-digit',
+      });
+      const who = e.userEmail ? `${e.userName} (${e.userEmail})` : e.userName;
+      const entity = e.entityName
+        ? `${normalizeEntityType(e.entityType)} - ${e.entityName}`
+        : normalizeEntityType(e.entityType);
       return [
-        escape(e.userName),
-        escape(e.userEmail),
-        escape(e.action),
-        escape(e.entityType),
-        escape(e.entityName),
-        escape(new Date(e.timestamp).toISOString()),
-        escape(e.reason),
-        escape(e.category),
+        escape(this.categoryLabel(e.category)),
+        escape(normalizeActionLabel(e.action)),
+        escape(entity),
+        escape(who),
+        escape(when),
+        escape(e.reason || defaultReasonFor(e.action)),
         escape(e.ipAddress || ''),
       ].join(',');
     });
     return [header, ...rows].join('\n');
+  }
+
+  private static categoryLabel(category: AuditCategory): string {
+    const labels: Record<AuditCategory, string> = {
+      document_record: 'Documents & Records',
+      e_signature: 'E-Signatures',
+      user_access_security: 'User Access & Security',
+      quality_process: 'Quality Processes',
+    };
+    return labels[category] || category;
   }
 
   // ───── Category Mapping ─────
@@ -239,9 +394,13 @@ export class AuditTrailService {
       ...(dstResult.data || []).map((d: any) => d.id),
     ];
 
-    // Step 2: Fetch from all sources in parallel
+    // Step 2: Fetch from all sources in parallel.
+    // We always fetch trail logs by product_id (action_details.product_id)
+    // so entries for *deleted* documents — whose IDs no longer appear in
+    // phase_assigned_document_template — still surface here.
     const promises: Promise<UnifiedAuditTrailEntry[]>[] = [
       this.fetchProductLogsByProductId(productId, companyId, filters),
+      this.fetchTrailLogsByProductId(productId, companyId, filters),
     ];
     if (documentIds.length > 0) {
       promises.push(this.fetchDocumentLogsByDocIds(companyId, documentIds, filters));
@@ -250,6 +409,15 @@ export class AuditTrailService {
 
     const results = await Promise.all(promises);
     let all = results.flat();
+
+    // De-duplicate by source row id (the same trail row may match both the
+    // entity-id query and the product-id query).
+    const byId = new Map<string, UnifiedAuditTrailEntry>();
+    for (const e of all) {
+      const k = `${e.sourceTable}|${e.id}`;
+      if (!byId.has(k)) byId.set(k, e);
+    }
+    all = Array.from(byId.values());
 
     // Client-side search filter
     if (filters.searchTerm) {
@@ -265,7 +433,39 @@ export class AuditTrailService {
     // Sort by timestamp desc
     all.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
 
-    return all.slice(0, limit);
+    return this.dedupeEntries(all).slice(0, limit);
+  }
+
+  private static dedupeEntries(entries: UnifiedAuditTrailEntry[]): UnifiedAuditTrailEntry[] {
+    const result: UnifiedAuditTrailEntry[] = [];
+    const seen = new Map<string, number>(); // key → index in result
+
+    for (const entry of entries) {
+      const entityKey = (entry.entityName || entry.entityId || '').trim().toLowerCase();
+      const actionKey = actionEquivalenceKey(entry.action);
+      // Bucket timestamp into 30-second windows: the two writes happen via
+      // Promise.all but the round-trip latency to two tables can drift
+      // a few seconds, especially under load.
+      const tsBucket = Math.floor(new Date(entry.timestamp).getTime() / 30000);
+      const key = `${entry.userId}|${entityKey}|${actionKey}|${tsBucket}`;
+
+      const existingIdx = seen.get(key);
+      if (existingIdx === undefined) {
+        seen.set(key, result.length);
+        result.push(entry);
+        continue;
+      }
+
+      // Prefer audit_trail_logs over product_audit_logs / document_audit_logs.
+      const existing = result[existingIdx];
+      const incomingPriority = entry.sourceTable === 'audit_trail_logs' ? 1 : 0;
+      const existingPriority = existing.sourceTable === 'audit_trail_logs' ? 1 : 0;
+      if (incomingPriority > existingPriority) {
+        result[existingIdx] = entry;
+      }
+    }
+
+    return result;
   }
 
   // ───── Private Helpers ─────
@@ -297,16 +497,19 @@ export class AuditTrailService {
     }
   }
 
-  private static async fetchDocumentLogs(companyId: string, filters: AuditTrailFilters): Promise<UnifiedAuditTrailEntry[]> {
+  private static async fetchDocumentLogs(companyId: string, filters: AuditTrailFilters, limit = 200): Promise<UnifiedAuditTrailEntry[]> {
     try {
+      // Only the columns we actually use downstream — keeps the wire payload
+      // small and the table scan tighter.
       let query = (supabase as any)
         .from('document_audit_logs')
-        .select(`*, user_profiles(first_name, last_name, email)`)
+        .select('id, company_id, user_id, action, action_details, document_id, created_at, reason, ip_address, user_profiles(first_name, last_name, email)')
         .eq('company_id', companyId)
         .order('created_at', { ascending: false })
-        .limit(200);
+        .limit(limit);
 
       if (filters.userId) query = query.eq('user_id', filters.userId);
+      if (filters.actionType) query = query.eq('action', filters.actionType);
       if (filters.startDate) query = query.gte('created_at', filters.startDate.toISOString());
       if (filters.endDate) query = query.lte('created_at', filters.endDate.toISOString());
 
@@ -325,7 +528,7 @@ export class AuditTrailService {
         entityId: row.document_id,
         entityName: row.action_details?.entityName || row.action_details?.document_name || 'Document',
         timestamp: row.created_at,
-        reason: row.reason || row.action_details?.reason || '',
+        reason: row.reason || row.action_details?.reason || this.defaultReason(row.action),
         changes: row.action_details?.changes,
         actionDetails: row.action_details,
         ipAddress: row.ip_address,
@@ -336,16 +539,18 @@ export class AuditTrailService {
     }
   }
 
-  private static async fetchProductLogs(companyId: string, filters: AuditTrailFilters): Promise<UnifiedAuditTrailEntry[]> {
+  private static async fetchProductLogs(companyId: string, filters: AuditTrailFilters, limit = 200): Promise<UnifiedAuditTrailEntry[]> {
     try {
       let query = (supabase as any)
         .from('product_audit_logs')
-        .select(`*, user_profiles(first_name, last_name, email)`)
+        .select('id, company_id, user_id, action, entity_type, entity_name, product_id, created_at, reason, changes, metadata, ip_address, user_profiles(first_name, last_name, email)')
         .eq('company_id', companyId)
         .order('created_at', { ascending: false })
-        .limit(200);
+        .limit(limit);
 
       if (filters.userId) query = query.eq('user_id', filters.userId);
+      if (filters.actionType) query = query.eq('action', filters.actionType);
+      if (filters.entityType) query = query.ilike('entity_type', filters.entityType);
       if (filters.startDate) query = query.gte('created_at', filters.startDate.toISOString());
       if (filters.endDate) query = query.lte('created_at', filters.endDate.toISOString());
 
@@ -364,7 +569,7 @@ export class AuditTrailService {
         entityId: row.product_id,
         entityName: row.entity_name || 'Product',
         timestamp: row.created_at,
-        reason: row.reason || row.metadata?.reason || '',
+        reason: row.reason || row.metadata?.reason || this.defaultReason(row.action),
         changes: row.changes,
         actionDetails: row.metadata,
         ipAddress: row.ip_address,
@@ -375,19 +580,29 @@ export class AuditTrailService {
     }
   }
 
-  private static async fetchTrailLogs(companyId: string, filters: AuditTrailFilters): Promise<UnifiedAuditTrailEntry[]> {
+  private static async fetchTrailLogs(companyId: string, filters: AuditTrailFilters, limit = 200): Promise<UnifiedAuditTrailEntry[]> {
     try {
       let query = (supabase as any)
         .from('audit_trail_logs')
-        .select(`*`)
+        .select('id, company_id, user_id, category, action, entity_type, entity_id, entity_name, created_at, reason, changes, action_details, ip_address, ip_address_inferred, ip_address_source')
         .eq('company_id', companyId)
         .order('created_at', { ascending: false })
-        .limit(200);
+        .limit(limit);
 
       if (filters.userId) query = query.eq('user_id', filters.userId);
       if (filters.startDate) query = query.gte('created_at', filters.startDate.toISOString());
       if (filters.endDate) query = query.lte('created_at', filters.endDate.toISOString());
       if (filters.category) query = query.eq('category', filters.category);
+      if (filters.actionType) query = query.eq('action', filters.actionType);
+      if (filters.entityType) query = query.ilike('entity_type', filters.entityType);
+      // Push the search term to the DB across the columns that index well.
+      // PostgREST .or() escapes the term so it's safe for user input.
+      if (filters.searchTerm) {
+        const term = filters.searchTerm.replace(/[()*,]/g, '');
+        if (term) {
+          query = query.or(`entity_name.ilike.%${term}%,action.ilike.%${term}%,reason.ilike.%${term}%`);
+        }
+      }
 
       const { data, error } = await query;
       if (error || !data) return [];
@@ -421,10 +636,11 @@ export class AuditTrailService {
           entityId: row.entity_id,
           entityName: row.entity_name || '',
           timestamp: row.created_at,
-          reason: row.reason || '',
+          reason: row.reason || this.defaultReason(row.action),
           changes: row.changes,
           actionDetails: row.action_details,
-          ipAddress: row.ip_address,
+          ipAddress: row.ip_address ?? row.ip_address_inferred,
+          ipAddressSource: row.ip_address_source ?? null,
           sourceTable: 'audit_trail_logs' as const,
         };
       });
@@ -466,7 +682,7 @@ export class AuditTrailService {
         entityId: row.document_id,
         entityName: row.action_details?.entityName || row.action_details?.document_name || 'Document',
         timestamp: row.created_at,
-        reason: row.reason || row.action_details?.reason || '',
+        reason: row.reason || row.action_details?.reason || this.defaultReason(row.action),
         changes: row.action_details?.changes,
         actionDetails: row.action_details,
         ipAddress: row.ip_address,
@@ -528,10 +744,81 @@ export class AuditTrailService {
           entityId: row.entity_id,
           entityName: row.entity_name || '',
           timestamp: row.created_at,
-          reason: row.reason || '',
+          reason: row.reason || this.defaultReason(row.action),
           changes: row.changes,
           actionDetails: row.action_details,
-          ipAddress: row.ip_address,
+          ipAddress: row.ip_address ?? row.ip_address_inferred,
+          ipAddressSource: row.ip_address_source ?? null,
+          sourceTable: 'audit_trail_logs' as const,
+        };
+      });
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Fetch `audit_trail_logs` entries that reference this product via
+   * `action_details.product_id`. Used so that deletion logs — whose
+   * `entity_id` is gone from `phase_assigned_document_template` — still
+   * surface on the device-scoped audit trail.
+   */
+  private static async fetchTrailLogsByProductId(
+    productId: string,
+    companyId: string,
+    filters: AuditTrailFilters
+  ): Promise<UnifiedAuditTrailEntry[]> {
+    try {
+      let query = (supabase as any)
+        .from('audit_trail_logs')
+        .select(`*`)
+        .eq('company_id', companyId)
+        .eq('category', 'document_record')
+        .filter('action_details->>product_id', 'eq', productId)
+        .order('created_at', { ascending: false })
+        .limit(200);
+
+      if (filters.userId) query = query.eq('user_id', filters.userId);
+      if (filters.startDate) query = query.gte('created_at', filters.startDate.toISOString());
+      if (filters.endDate) query = query.lte('created_at', filters.endDate.toISOString());
+
+      const { data, error } = await query;
+      if (error || !data) return [];
+
+      // Fetch user profiles
+      const userIds = [...new Set((data as any[]).map((r: any) => r.user_id))];
+      const userMap: Record<string, { first_name: string; last_name: string; email: string }> = {};
+      if (userIds.length > 0) {
+        const { data: profiles } = await supabase
+          .from('user_profiles')
+          .select('id, first_name, last_name, email')
+          .in('id', userIds);
+        if (profiles) {
+          for (const p of profiles) {
+            userMap[p.id] = { first_name: p.first_name || '', last_name: p.last_name || '', email: p.email || '' };
+          }
+        }
+      }
+
+      return (data as any[]).map(row => {
+        const profile = userMap[row.user_id];
+        return {
+          id: row.id,
+          companyId: row.company_id,
+          userId: row.user_id,
+          userName: profile ? `${profile.first_name} ${profile.last_name}`.trim() : 'Unknown',
+          userEmail: profile?.email || '',
+          category: row.category as AuditCategory,
+          action: row.action,
+          entityType: row.entity_type || 'Document',
+          entityId: row.entity_id,
+          entityName: row.entity_name || '',
+          timestamp: row.created_at,
+          reason: row.reason || this.defaultReason(row.action),
+          changes: row.changes,
+          actionDetails: row.action_details,
+          ipAddress: row.ip_address ?? row.ip_address_inferred,
+          ipAddressSource: row.ip_address_source ?? null,
           sourceTable: 'audit_trail_logs' as const,
         };
       });
@@ -573,7 +860,7 @@ export class AuditTrailService {
         entityId: row.product_id,
         entityName: row.entity_name || 'Product',
         timestamp: row.created_at,
-        reason: row.reason || row.metadata?.reason || '',
+        reason: row.reason || row.metadata?.reason || this.defaultReason(row.action),
         changes: row.changes,
         actionDetails: row.metadata,
         ipAddress: row.ip_address,
@@ -585,19 +872,7 @@ export class AuditTrailService {
   }
 
   private static defaultReason(action: string): string {
-    const reasons: Record<string, string> = {
-      login: 'User sign-in',
-      logout: 'User sign-out',
-      failed_login: 'Authentication failed',
-      role_change: 'Role assignment updated',
-      permission_change: 'Permissions updated',
-      account_lockout: 'Account locked after failed attempts',
-      document_created: 'Document created',
-      document_updated: 'Document updated',
-      document_deleted: 'Document deleted',
-      document_status_changed: 'Document status changed',
-    };
-    return reasons[action] || 'System event';
+    return defaultReasonFor(action);
   }
 
   private static async getClientIP(): Promise<string> {

@@ -396,7 +396,7 @@ export const defaultSidebarConfig: SidebarConfig = {
         },
         {
           id: 'audit-log',
-          name: 'Audit Log',
+          name: 'Audit Trail',
           icon: <FileBarChart className="w-5 h-5" />,
           route: '/app/company/:companyName/audit-log',
           domainColor: 'green'
@@ -535,7 +535,7 @@ export const defaultSidebarConfig: SidebarConfig = {
         },
         {
           id: 'device-audit-log',
-          name: 'Audit Log',
+          name: 'Audit Trail',
           icon: <FileBarChart className="w-5 h-5" />,
           route: '/app/product/:id/audit-log',
           domainColor: 'green'

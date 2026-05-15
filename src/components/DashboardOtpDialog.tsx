@@ -242,7 +242,7 @@ export function DashboardOtpDialog({
             </div>
             {rememberMe && (
               <p className="text-[11px] text-muted-foreground/70 pl-6">
-                Applies to this company — no OTP needed for {REMEMBER_OPTIONS.find(o => o.value === rememberMinutes)?.label || rememberMinutes + " min"}
+                Applies to all companies — no OTP needed for {REMEMBER_OPTIONS.find(o => o.value === rememberMinutes)?.label || rememberMinutes + " min"}
               </p>
             )}
           </div>

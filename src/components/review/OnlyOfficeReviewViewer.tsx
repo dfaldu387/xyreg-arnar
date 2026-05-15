@@ -41,6 +41,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { ReAuthContent } from "@/components/esign/components/ReAuthContent";
 import { ESignService } from "@/components/esign/lib/esign.service";
+import { AuditTrailService } from "@/services/auditTrailService";
 import { AuditTrailDrawer } from "@/components/esign/components/AuditTrailDrawer";
 import { useDocumentReviewAssignments } from "@/hooks/useDocumentReviewAssignments";
 import type { ESignRecord, AuthMethod } from "@/components/esign/lib/esign.types";
@@ -369,8 +370,47 @@ export function OnlyOfficeReviewViewer({
       payload.reviewer_group_ids = [];
       payload.reviewer_user_ids = [];
     }
+
+    // Capture previous status + company_id for the audit row.
+    let previousStatus: string | null = null;
+    let companyId: string | null = null;
+    let entityName = '';
+    try {
+      const { data: prevRow } = await supabase
+        .from('phase_assigned_document_template')
+        .select('status, company_id, name')
+        .eq('id', cleanDocId)
+        .maybeSingle();
+      previousStatus = (prevRow as any)?.status ?? null;
+      companyId = (prevRow as any)?.company_id ?? null;
+      entityName = (prevRow as any)?.name ?? '';
+    } catch {}
+
     await supabase.from("phase_assigned_document_template").update(payload as any).eq("id", cleanDocId);
     await supabase.from("documents").update(payload as any).eq("id", cleanDocId);
+
+    // AL-04 / AL-05: log the status transition (Approved / Rejected / Changes Requested).
+    if (user?.id && companyId && previousStatus !== newStatus) {
+      const action =
+        newStatus === 'Approved' ? 'document_approved' as const :
+        newStatus === 'Rejected' ? 'document_rejected' as const :
+        'document_status_changed' as const;
+      const reason =
+        newStatus === 'Approved' ? 'Document approved via review workflow' :
+        newStatus === 'Rejected' ? 'Document rejected via review workflow' :
+        newStatus === 'Changes Requested' ? 'Reviewer requested changes' :
+        'Document status changed via review workflow';
+      AuditTrailService.logDocumentRecordEvent({
+        userId: user.id,
+        companyId,
+        action,
+        entityType: 'document',
+        entityId: cleanDocId,
+        entityName,
+        reason,
+        changes: [{ field: 'Status', oldValue: previousStatus || 'In Review', newValue: newStatus }],
+      }).catch(() => {});
+    }
   };
 
   const saveReviewerDecision = async (decision: string, comment?: string) => {
@@ -888,6 +928,8 @@ export function OnlyOfficeReviewViewer({
                 onAuthenticated={handleAuthenticated}
                 onCancel={() => setReviewStep("sign")}
                 active={true}
+                documentId={documentId.replace(/^template-/, '')}
+                documentName={documentName}
               />
             </div>
           )}

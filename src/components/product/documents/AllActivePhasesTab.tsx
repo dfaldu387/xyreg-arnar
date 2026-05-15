@@ -26,7 +26,7 @@ import { useCompanyPhasePositions } from "@/hooks/useCompanyPhasePositions";
 import { DocumentActionMenu } from './DocumentActionMenu';
 import { DocumentReviewersList } from './DocumentReviewersList';
 import { EditDocumentDialog } from './EditDocumentDialog';
-import { DocumentViewer } from '../DocumentViewer';
+import { DocumentPdfPreviewDialog } from '@/components/documents/DocumentPdfPreviewDialog';
 import { ProductSpecificDocumentService } from '@/services/productSpecificDocumentService';
 import { DueDateBadge } from './DueDateBadge';
 import { OnlyOfficeEditorDialog } from './OnlyOfficeEditorDialog';
@@ -553,8 +553,8 @@ const DocumentCICardComponent = ({
         >
           <FileEdit className={`h-4 w-4 ${actionStyles.icon}`} />
         </Button>
-        {/* View button */}
-        {document.file_path && onView && (
+        {/* View button — only for approved documents; previews the latest approved PDF */}
+        {document.file_path && onView && document.status === 'Approved' && (
           <Button
             variant="outline"
             size="sm"
@@ -2412,21 +2412,16 @@ export function AllActivePhasesTab({
 
     {/* Assign Reviewers Dialog removed for template instances - now handled in Edit Instance dialog */}
 
-    {/* Document Viewer */}
-    {viewingDocument && companyId && <DocumentViewer open={!!viewingDocument} onOpenChange={open => !open && setViewingDocument(null)} documentId={viewingDocument.id} documentName={viewingDocument.name} companyId={companyId} companyRole={activeRole || 'viewer'} reviewerGroupId="" documentFile={viewingDocument.file_path ? {
-      path: viewingDocument.file_path,
-      name: viewingDocument.file_name || viewingDocument.name,
-      type: 'pdf'
-    } : undefined} onStatusChanged={(docId, newStatus) => {
-      // Refresh document list when status is changed in DocumentViewer
-      if (handleRefreshData) {
-        handleRefreshData();
-      }
-      // Also notify parent component if callback exists
-      if (onDocumentStatusChange) {
-        onDocumentStatusChange(docId, newStatus);
-      }
-    }} />}
+    {/* Document Preview (lean PDF preview — same output as "Preview PDF" menu item) */}
+    {viewingDocument && companyId && (
+      <DocumentPdfPreviewDialog
+        open={!!viewingDocument}
+        onOpenChange={(open) => !open && setViewingDocument(null)}
+        documentId={viewingDocument.id}
+        documentName={viewingDocument.name}
+        companyId={companyId}
+      />
+    )}
 
     {/* OnlyOffice Editor Dialog for Template Editing */}
     <OnlyOfficeEditorDialog

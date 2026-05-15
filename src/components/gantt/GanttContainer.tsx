@@ -1,4 +1,12 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, {
+    createContext,
+    useCallback,
+    useContext,
+    useEffect,
+    useMemo,
+    useRef,
+    useState,
+} from 'react';
 import { useGanttStore } from '@/stores/ganttStore';
 import { useTimeScale } from '@/hooks/gantt/useTimeScale';
 import { ZOOM_LEVELS } from '@/lib/gantt/zoomLevels';
@@ -6,10 +14,18 @@ import { TimelineHeader } from './TimelineHeader';
 import { TimelineGrid, TodayMarker } from './TimelineGrid';
 import { TaskBar, type DragMode, type LinkEdge } from './TaskBar';
 import { DependencyLayer, computeLinkPaths } from './DependencyLayer';
-import { TaskListPane } from './TaskListPane';
+import { TaskListPane, type GanttColumn } from './TaskListPane';
+export type { GanttColumn } from './TaskListPane';
 import { ZoomControls } from './ZoomControls';
 import { InteractionLayer, type LinkDraft } from './InteractionLayer';
-import { Search, X } from 'lucide-react';
+import {
+    Search,
+    X,
+    ChevronLeft,
+    ChevronRight,
+    ChevronsDownUp,
+    ChevronsUpDown,
+} from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import type { GanttTask, GanttLink } from '@/types/ganttChart';
 
@@ -46,6 +62,44 @@ interface GanttContainerProps {
      * `[0, 6]` for the Western Sat+Sun convention, `[5, 6]` for Fri+Sat.
      */
     weekendDays?: readonly number[];
+    /**
+     * Direction the dependency cascade walks when a task is dragged.
+     *  - `'forward'` (default, matches the production Gantt): a drag only
+     *    pushes tasks downstream via outgoing links. Predecessors stay put.
+     *  - `'bidirectional'`: the cascade walks BOTH outgoing AND incoming
+     *    links, so dragging a target also slides its predecessors along —
+     *    the whole linked chain moves as a rigid block.
+     */
+    cascadeMode?: 'forward' | 'bidirectional';
+    /**
+     * Fired when a task row is clicked (either the bar in the timeline or
+     * the row in the task list pane). The full `GanttTask` is passed so the
+     * caller can decide what to do — e.g. open a document drawer for doc
+     * rows, navigate to a phase detail, ignore category clicks, etc.
+     */
+    onTaskClick?: (task: GanttTask) => void;
+    /**
+     * Fired when a task row is double-clicked. Same payload as `onTaskClick`.
+     * Typical use: open a detail drawer / editor for the clicked task.
+     */
+    onTaskDoubleClick?: (task: GanttTask) => void;
+    /**
+     * Pixel width of the always-present task-name column. Default 200.
+     */
+    nameColumnWidth?: number;
+    /**
+     * Columns to render in the task list pane to the right of the task name.
+     * Defaults to `Start` + `End` date columns. Pass any combination to add
+     * Assigned, Duration, Status, etc. Pass `[]` to show only the task name.
+     */
+    columns?: GanttColumn[];
+    /**
+     * Custom UI rendered in the toolbar where the built-in "Search tasks…"
+     * input used to live (between the task-count chip and the zoom controls).
+     * When provided, the built-in search input is replaced with this slot —
+     * pass a `GanttFilterBar` (or your own filter component) here.
+     */
+    filterSlot?: React.ReactNode;
 }
 
 interface BarDrag {
@@ -69,6 +123,26 @@ type DragInfo = BarDrag | LinkDrag | null;
 
 const HEADER_HEIGHT = 64;
 
+// ─── Update context — exposes a per-instance "update a task field" function
+//     so cell renderers in custom columns can commit edits without prop
+//     drilling. The provider is rendered inside GanttContainer below. ──────
+export interface GanttUpdateContextValue {
+    /** Set a task's `start` or `end` date and run the dependency cascade. */
+    updateTaskField: (
+        id: GanttTask['id'],
+        field: 'start' | 'end',
+        nextDate: Date,
+    ) => void;
+}
+
+export const GanttUpdateContext = createContext<GanttUpdateContextValue | null>(null);
+
+/** Hook for column renderers that need to write back to the Gantt's task
+ *  state — e.g. an inline date editor. Returns `null` outside a provider. */
+export function useGanttUpdate(): GanttUpdateContextValue | null {
+    return useContext(GanttUpdateContext);
+}
+
 // ─── Dependency cascade (ported from src/components/gantt-chart/GanttChart.tsx) ─
 // Given the freshly-dragged task's new dates, walk the dependency graph DFS
 // from it and apply the four standard Gantt update rules to each downstream
@@ -84,6 +158,7 @@ function applyDragWithCascade(
     mode: DragMode,
     deltaMs: number,
     snapMs: number,
+    cascadeMode: 'forward' | 'bidirectional' = 'forward',
 ): GanttTask[] {
     const byId = new Map(tasks.map((t) => [t.id, t]));
     const dragged = byId.get(draggedId);
@@ -148,63 +223,107 @@ function applyDragWithCascade(
         shiftDescendants(nextDragged.id, deltaMs);
     }
 
-    // 3. DFS cascade routine — reused for the initial pass and for any
-    //    parent whose dates change during roll-up. Each call takes its own
-    //    `visited` Set so a parent's downstream chain can re-flow even when
-    //    those targets were already touched by an earlier pass.
+    // 3. Bidirectional cascade — BFS that walks BOTH outgoing AND incoming
+    //    links from every visited task. Outgoing direction is the classic
+    //    "drag a source, target follows"; incoming direction is "drag a
+    //    target, source follows" (the rigid-chain behaviour). Each call
+    //    takes its own `visited` Set so a parent's chain can re-flow even
+    //    when those neighbours were already touched by an earlier pass.
     const cascadeFrom = (seedId: GanttTask['id']) => {
         const visited = new Set<GanttTask['id']>([seedId]);
-        const recurse = (sourceId: GanttTask['id']) => {
-            for (const link of links) {
-                if (link.source !== sourceId) continue;
-                if (visited.has(link.target)) continue;
-                const source = byId.get(sourceId);
-                const target = byId.get(link.target);
-                if (!source || !target) continue;
+        const queue: GanttTask['id'][] = [seedId];
+        while (queue.length > 0) {
+            const currentId = queue.shift()!;
+            const current = byId.get(currentId);
+            if (!current) continue;
 
-                const durationMs = target.end.getTime() - target.start.getTime();
+            for (const link of links) {
+                // Determine the neighbour we'd flow to and our role in the link.
+                let neighbourId: GanttTask['id'];
+                let neighbourIsLinkTarget: boolean;
+                if (link.source === currentId) {
+                    neighbourId = link.target;
+                    neighbourIsLinkTarget = true; // forward direction
+                } else if (link.target === currentId && cascadeMode === 'bidirectional') {
+                    neighbourId = link.source;
+                    neighbourIsLinkTarget = false; // backward direction
+                } else {
+                    continue;
+                }
+                if (visited.has(neighbourId)) continue;
+
+                const neighbour = byId.get(neighbourId);
+                if (!neighbour) continue;
+
+                const durationMs = neighbour.end.getTime() - neighbour.start.getTime();
                 let nextStart: Date;
                 let nextEnd: Date;
-                switch (link.type) {
-                    case 'e2s':
-                        nextStart = new Date(source.end);
-                        nextEnd = new Date(nextStart.getTime() + durationMs);
-                        break;
-                    case 's2s':
-                        nextStart = new Date(source.start);
-                        nextEnd = new Date(nextStart.getTime() + durationMs);
-                        break;
-                    case 'e2e':
-                        nextEnd = new Date(source.end);
-                        nextStart = new Date(nextEnd.getTime() - durationMs);
-                        break;
-                    case 's2e':
-                        nextEnd = new Date(source.start);
-                        nextStart = new Date(nextEnd.getTime() - durationMs);
-                        break;
-                    default:
-                        continue;
+
+                if (neighbourIsLinkTarget) {
+                    // Forward: link.source = current, link.target = neighbour.
+                    // Compute neighbour's edge from the link rule.
+                    switch (link.type) {
+                        case 'e2s':
+                            nextStart = new Date(current.end);
+                            nextEnd = new Date(nextStart.getTime() + durationMs);
+                            break;
+                        case 's2s':
+                            nextStart = new Date(current.start);
+                            nextEnd = new Date(nextStart.getTime() + durationMs);
+                            break;
+                        case 'e2e':
+                            nextEnd = new Date(current.end);
+                            nextStart = new Date(nextEnd.getTime() - durationMs);
+                            break;
+                        case 's2e':
+                            nextEnd = new Date(current.start);
+                            nextStart = new Date(nextEnd.getTime() - durationMs);
+                            break;
+                        default:
+                            continue;
+                    }
+                } else {
+                    // Backward: link.target = current, link.source = neighbour.
+                    // Apply the inverse — anchor neighbour's edge to current's.
+                    switch (link.type) {
+                        case 'e2s':
+                            nextEnd = new Date(current.start);
+                            nextStart = new Date(nextEnd.getTime() - durationMs);
+                            break;
+                        case 's2s':
+                            nextStart = new Date(current.start);
+                            nextEnd = new Date(nextStart.getTime() + durationMs);
+                            break;
+                        case 'e2e':
+                            nextEnd = new Date(current.end);
+                            nextStart = new Date(nextEnd.getTime() - durationMs);
+                            break;
+                        case 's2e':
+                            nextStart = new Date(current.end);
+                            nextEnd = new Date(nextStart.getTime() + durationMs);
+                            break;
+                        default:
+                            continue;
+                    }
                 }
 
                 // Mark visited even when unchanged, so a diamond doesn't re-enter.
-                visited.add(target.id);
+                visited.add(neighbourId);
                 if (
-                    nextStart.getTime() === target.start.getTime() &&
-                    nextEnd.getTime() === target.end.getTime()
+                    nextStart.getTime() === neighbour.start.getTime() &&
+                    nextEnd.getTime() === neighbour.end.getTime()
                 ) {
                     continue;
                 }
-                // All four link rules (e2s / s2s / e2e / s2e) preserve the
-                // target's duration, so delta_start === delta_end — a pure
-                // shift. Carry the target's descendants along by that delta
-                // so a parent target doesn't "leave its children behind".
-                const targetDelta = nextStart.getTime() - target.start.getTime();
-                byId.set(target.id, { ...target, start: nextStart, end: nextEnd });
-                shiftDescendants(target.id, targetDelta);
-                recurse(target.id);
+                // All four link rules preserve the neighbour's duration, so
+                // delta_start === delta_end — a pure shift. Carry the
+                // neighbour's descendants along by that delta.
+                const delta = nextStart.getTime() - neighbour.start.getTime();
+                byId.set(neighbourId, { ...neighbour, start: nextStart, end: nextEnd });
+                shiftDescendants(neighbourId, delta);
+                queue.push(neighbourId);
             }
-        };
-        recurse(seedId);
+        }
     };
 
     // 4. Initial cascade from the dragged task.
@@ -266,15 +385,36 @@ export function GanttContainer({
     initialCollapsedIds,
     showProgress = false,
     weekendDays,
+    cascadeMode = 'forward',
+    onTaskClick,
+    onTaskDoubleClick,
+    nameColumnWidth,
+    columns,
+    filterSlot,
 }: GanttContainerProps) {
     const scrollRef = useRef<HTMLDivElement>(null);
     const taskListInnerRef = useRef<HTMLDivElement>(null);
+    const taskListWrapperRef = useRef<HTMLDivElement>(null);
     const level = useGanttStore((s) => s.zoom.level);
     const filters = useGanttStore((s) => s.filters);
     const setFilters = useGanttStore((s) => s.setFilters);
 
     const [tasks, setTasks] = useState<GanttTask[]>(initialTasks);
     const [links, setLinks] = useState<GanttLink[]>(initialLinks);
+
+    // Sync internal state when the parent passes new tasks/links (e.g. when
+    // it filters the data, swaps datasets, or recomputes). Without this the
+    // GanttContainer would forever render the array it was first mounted with.
+    // Drag-in-progress edits do mutate internal state too — they'll get
+    // overwritten by the next prop change, which is the right trade-off for
+    // filtering: the user expects filter results to be the source of truth.
+    useEffect(() => {
+        setTasks(initialTasks);
+    }, [initialTasks]);
+    useEffect(() => {
+        setLinks(initialLinks);
+    }, [initialLinks]);
+
     const [selectedId, setSelectedId] = useState<GanttTask['id'] | undefined>();
     const [selectedLinkId, setSelectedLinkId] = useState<GanttLink['id'] | undefined>();
     // Seed once from props. `initialCollapsedIds` wins if both are passed.
@@ -306,12 +446,73 @@ export function GanttContainer({
     });
     const [drag, setDrag] = useState<DragInfo>(null);
 
+    // Pane layout: 'split' shows both task-list and timeline side-by-side with
+    // a draggable splitter between them. 'left-only' hides the timeline, and
+    // 'right-only' hides the task list. The taskListPaneWidth override only
+    // matters in 'split' mode — when null, the task-list pane uses its
+    // natural width (sum of column widths).
+    const [paneMode, setPaneMode] = useState<'split' | 'left-only' | 'right-only'>('split');
+    const [taskListPaneWidth, setTaskListPaneWidth] = useState<number | null>(null);
+
+    const startSplitterDrag = useCallback(
+        (e: React.PointerEvent<HTMLDivElement>) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const startX = e.clientX;
+            // Read the task-list wrapper's actual rendered width so the drag
+            // starts exactly where the splitter currently is, even when
+            // `taskListPaneWidth` is still null (first drag — no override yet).
+            const startWidth =
+                taskListPaneWidth ??
+                taskListWrapperRef.current?.getBoundingClientRect().width ??
+                300;
+            const onMove = (ev: PointerEvent) => {
+                const next = Math.max(120, startWidth + (ev.clientX - startX));
+                setTaskListPaneWidth(next);
+            };
+            const onUp = () => {
+                window.removeEventListener('pointermove', onMove);
+                window.removeEventListener('pointerup', onUp);
+                window.removeEventListener('pointercancel', onUp);
+                document.body.style.cursor = '';
+                document.body.style.userSelect = '';
+            };
+            window.addEventListener('pointermove', onMove);
+            window.addEventListener('pointerup', onUp);
+            window.addEventListener('pointercancel', onUp);
+            document.body.style.cursor = 'col-resize';
+            document.body.style.userSelect = 'none';
+        },
+        [taskListPaneWidth],
+    );
+
     // Selecting a task bar dismisses the dependency-delete affordance so the
-    // two selection states don't visually compete.
-    const handleSelectTask = useCallback((id: GanttTask['id'] | undefined) => {
-        setSelectedId(id);
-        setSelectedLinkId(undefined);
-    }, []);
+    // two selection states don't visually compete. We also surface the click
+    // to the parent component via `onTaskClick` so consumers can react (e.g.
+    // open a document drawer for doc rows).
+    const handleSelectTask = useCallback(
+        (id: GanttTask['id'] | undefined) => {
+            setSelectedId(id);
+            setSelectedLinkId(undefined);
+            if (id !== undefined && onTaskClick) {
+                const clicked = initialTasks.find((t) => t.id === id) ?? tasks.find((t) => t.id === id);
+                if (clicked) onTaskClick(clicked);
+            }
+        },
+        [onTaskClick, initialTasks, tasks],
+    );
+
+    // Resolves a clicked task id to its GanttTask and fires `onTaskDoubleClick`.
+    // The handler is shared by TaskListPane (sidebar rows) and TaskBar
+    // (timeline bars) so both surfaces open the drawer on double-click.
+    const handleDoubleClickTask = useCallback(
+        (id: GanttTask['id']) => {
+            if (!onTaskDoubleClick) return;
+            const task = tasks.find((t) => t.id === id);
+            if (task) onTaskDoubleClick(task);
+        },
+        [onTaskDoubleClick, tasks],
+    );
 
     const handleSelectLink = useCallback((id: GanttLink['id']) => {
         setSelectedLinkId(id);
@@ -361,8 +562,16 @@ export function GanttContainer({
         const rawDeltaMs = scale.pxToMs(drag.deltaPx);
         const deltaMs = Math.round(rawDeltaMs / snapMs) * snapMs;
         if (deltaMs === 0) return tasks;
-        return applyDragWithCascade(tasks, links, drag.taskId, drag.mode, deltaMs, snapMs);
-    }, [tasks, links, drag, scale, snapMs]);
+        return applyDragWithCascade(
+            tasks,
+            links,
+            drag.taskId,
+            drag.mode,
+            deltaMs,
+            snapMs,
+            cascadeMode,
+        );
+    }, [tasks, links, drag, scale, snapMs, cascadeMode]);
 
     // hasChildren is derived from the full task set (not the filtered list)
     // so a parent keeps its chevron even when its children are filtered out.
@@ -436,6 +645,59 @@ export function GanttContainer({
         });
     }, []);
 
+    const handleExpandAll = useCallback(() => {
+        setCollapsedIds(new Set());
+    }, []);
+
+    // Commit an inline edit on a task's `start` or `end` date and run the
+    // dependency cascade so downstream tasks reflow. Surfaced via the
+    // `GanttUpdateContext` so custom column renderers can call it.
+    const updateTaskField = useCallback(
+        (id: GanttTask['id'], field: 'start' | 'end', nextDate: Date) => {
+            setTasks((ts) => {
+                const task = ts.find((t) => t.id === id);
+                if (!task) return ts;
+                const oldValue = field === 'start' ? task.start : task.end;
+                const deltaMs = nextDate.getTime() - oldValue.getTime();
+                if (deltaMs === 0) return ts;
+                const mode: DragMode =
+                    field === 'start' ? 'resize-start' : 'resize-end';
+                return applyDragWithCascade(
+                    ts,
+                    links,
+                    id,
+                    mode,
+                    deltaMs,
+                    snapMs,
+                    cascadeMode,
+                );
+            });
+        },
+        [links, snapMs, cascadeMode],
+    );
+
+    const updateContextValue = useMemo<GanttUpdateContextValue>(
+        () => ({ updateTaskField }),
+        [updateTaskField],
+    );
+
+    const handleCollapseAll = useCallback(() => {
+        // Match the `defaultCollapsed` semantics — collapse every parent that
+        // itself has a parent. Root-level parents stay expanded so the user
+        // always sees the top-level grouping.
+        const taskById = new Map(visibleTasks.map((t) => [t.id, t]));
+        const next = new Set<GanttTask['id']>();
+        for (const t of visibleTasks) {
+            if (t.parent === undefined || t.parent === null) continue;
+            const parent = taskById.get(t.parent);
+            if (!parent) continue;
+            if (parent.parent !== undefined && parent.parent !== null) {
+                next.add(parent.id);
+            }
+        }
+        setCollapsedIds(next);
+    }, [visibleTasks]);
+
     const rowIndexById = useMemo(() => {
         const m = new Map<GanttTask['id'], number>();
         filteredTasks.forEach((t, i) => m.set(t.id, i));
@@ -485,6 +747,33 @@ export function GanttContainer({
         el.scrollTop += e.deltaY;
         el.scrollLeft += e.deltaX;
     }, []);
+
+    // Scroll the timeline horizontally so the given task's START edge lands
+    // at the centre of the visible area. Anchoring on the start (rather than
+    // the bar's midpoint) keeps long bars aligned predictably — the user
+    // sees the bar begin in the middle and extend off to the right.
+    const scrollTaskIntoView = useCallback(
+        (id: GanttTask['id']) => {
+            const el = scrollRef.current;
+            if (!el) return;
+            const task = tasks.find((t) => t.id === id);
+            if (!task) return;
+            const startX = scale.dateToX(task.start);
+            const target = Math.max(0, startX - el.clientWidth / 2);
+            el.scrollTo({ left: target, behavior: 'smooth' });
+        },
+        [tasks, scale],
+    );
+
+    // Sidebar row click: select + centre the bar. Same selection logic as
+    // `handleSelectTask`, plus the horizontal scroll.
+    const handleSelectTaskFromList = useCallback(
+        (id: GanttTask['id'] | undefined) => {
+            handleSelectTask(id);
+            if (id !== undefined) scrollTaskIntoView(id);
+        },
+        [handleSelectTask, scrollTaskIntoView],
+    );
 
     const jumpToToday = useCallback(() => {
         const today = new Date();
@@ -568,6 +857,7 @@ export function GanttContainer({
                                 current.mode,
                                 deltaMs,
                                 snapMs,
+                                cascadeMode,
                             ),
                         );
                     }
@@ -576,21 +866,29 @@ export function GanttContainer({
                 const hit = document.elementFromPoint(e.clientX, e.clientY);
                 const taskEl = hit?.closest('[data-task-id]') as HTMLElement | null;
                 const targetId = taskEl?.dataset.taskId;
-                const targetEdge = taskEl?.dataset.taskEdge as LinkEdge | undefined;
+                // Prefer the explicit edge marker (set on the connector dots).
+                // If released on the bar body instead of a dot, snap to whichever
+                // half of the bar the pointer is over — right half ⇒ 'e' (end),
+                // left half ⇒ 's' (start).
+                let targetEdge = taskEl?.dataset.taskEdge as LinkEdge | undefined;
+                if (!targetEdge && taskEl) {
+                    const rect = taskEl.getBoundingClientRect();
+                    const midX = rect.left + rect.width / 2;
+                    targetEdge = e.clientX >= midX ? 'e' : 's';
+                }
 
                 if (targetId && targetId !== current.sourceId) {
                     const linkType =
                         `${current.sourceEdge}2${targetEdge ?? 's'}` as GanttLink['type'];
-                    // Avoid duplicate links
-                    setLinks((ls) => {
-                        const exists = ls.some(
-                            (l) =>
-                                l.source === current.sourceId &&
-                                l.target === targetId &&
-                                l.type === linkType,
-                        );
-                        if (exists) return ls;
-                        return [
+                    const exists = links.some(
+                        (l) =>
+                            l.source === current.sourceId &&
+                            l.target === targetId &&
+                            l.type === linkType,
+                    );
+                    if (!exists) {
+                        // 1) Add the new dependency link.
+                        setLinks((ls) => [
                             ...ls,
                             {
                                 id: `new-${Date.now()}`,
@@ -598,8 +896,51 @@ export function GanttContainer({
                                 target: targetId,
                                 type: linkType,
                             },
-                        ];
-                    });
+                        ]);
+
+                        // 2) Snap the target task to satisfy the link rule
+                        //    immediately. We compute the target's required
+                        //    delta and route it through `applyDragWithCascade`
+                        //    so any tasks already linked to the target also
+                        //    follow (forward, plus backward in bidirectional
+                        //    mode). Source stays put — the rule already holds
+                        //    for it after this shift.
+                        setTasks((ts) => {
+                            const source = ts.find((t) => t.id === current.sourceId);
+                            const target = ts.find((t) => t.id === targetId);
+                            if (!source || !target) return ts;
+                            const durationMs =
+                                target.end.getTime() - target.start.getTime();
+                            let nextStartMs: number;
+                            switch (linkType) {
+                                case 'e2s':
+                                    nextStartMs = source.end.getTime();
+                                    break;
+                                case 's2s':
+                                    nextStartMs = source.start.getTime();
+                                    break;
+                                case 'e2e':
+                                    nextStartMs = source.end.getTime() - durationMs;
+                                    break;
+                                case 's2e':
+                                    nextStartMs = source.start.getTime() - durationMs;
+                                    break;
+                                default:
+                                    return ts;
+                            }
+                            const deltaMs = nextStartMs - target.start.getTime();
+                            if (deltaMs === 0) return ts;
+                            return applyDragWithCascade(
+                                ts,
+                                links,
+                                targetId,
+                                'move',
+                                deltaMs,
+                                snapMs,
+                                cascadeMode,
+                            );
+                        });
+                    }
                 }
             }
             setDrag(null);
@@ -613,7 +954,7 @@ export function GanttContainer({
             window.removeEventListener('pointerup', onUp);
             window.removeEventListener('pointercancel', onUp);
         };
-    }, [drag, scale, snapMs]);
+    }, [drag, scale, snapMs, links, cascadeMode]);
 
     const linkDraft: LinkDraft | null =
         drag && drag.kind === 'link'
@@ -629,6 +970,7 @@ export function GanttContainer({
     const isDragging = drag !== null;
 
     return (
+        <GanttUpdateContext.Provider value={updateContextValue}>
         <div className="flex flex-col h-full w-full bg-slate-50">
             {/* Toolbar */}
             <div className="flex items-center justify-between gap-3 px-4 h-12 bg-white border-b border-slate-200 shrink-0">
@@ -641,38 +983,147 @@ export function GanttContainer({
                     </span>
                 </div>
                 <div className="flex items-center gap-2">
-                    <div className="relative">
-                        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
-                        <Input
-                            placeholder="Search tasks…"
-                            value={filters.search}
-                            onChange={(e) => setFilters({ search: e.target.value })}
-                            className="h-8 pl-8 w-56 text-sm"
-                        />
-                    </div>
+                    {(() => {
+                        // Show "Expand all" whenever ANY parent is currently
+                        // collapsed; otherwise show "Collapse all".
+                        const anyCollapsed = collapsedIds.size > 0;
+                        return (
+                            <button
+                                type="button"
+                                onClick={anyCollapsed ? handleExpandAll : handleCollapseAll}
+                                className="inline-flex items-center justify-center h-8 px-3 rounded border border-slate-200 text-xs font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900 hover:border-slate-300 transition-colors whitespace-nowrap"
+                            >
+                                {anyCollapsed ? 'Expand all' : 'Collapse all'}
+                            </button>
+                        );
+                    })()}
+                    {filterSlot ? (
+                        filterSlot
+                    ) : (
+                        <div className="relative">
+                            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+                            <Input
+                                placeholder="Search tasks…"
+                                value={filters.search}
+                                onChange={(e) => setFilters({ search: e.target.value })}
+                                className="h-8 pl-8 w-56 text-sm"
+                            />
+                        </div>
+                    )}
                     <ZoomControls onJumpToToday={jumpToToday} />
                 </div>
             </div>
 
             {/* Body */}
             <div
-                className={`flex flex-1 min-h-0 overflow-hidden ${
+                className={`flex flex-1 min-h-0 overflow-hidden relative ${
                     isDragging ? 'select-none cursor-grabbing' : ''
                 }`}
             >
-                <TaskListPane
-                    tasks={filteredTasks}
-                    rowHeight={rowHeight}
-                    headerHeight={HEADER_HEIGHT}
-                    selectedId={selectedId}
-                    onSelect={handleSelectTask}
-                    innerRef={taskListInnerRef}
-                    onWheel={handleTaskListWheel}
-                    collapsedIds={collapsedIds}
-                    hasChildrenSet={hasChildrenSet}
-                    depthById={depthById}
-                    onToggleCollapse={handleToggleCollapse}
-                />
+                {paneMode !== 'right-only' && (
+                    <div
+                        ref={taskListWrapperRef}
+                        className="shrink-0 overflow-x-auto relative"
+                        style={{
+                            width:
+                                paneMode === 'left-only'
+                                    ? '100%'
+                                    : taskListPaneWidth ?? 'auto',
+                        }}
+                    >
+                        <TaskListPane
+                            tasks={filteredTasks}
+                            rowHeight={rowHeight}
+                            headerHeight={HEADER_HEIGHT}
+                            selectedId={selectedId}
+                            onSelect={handleSelectTaskFromList}
+                            onDoubleSelect={handleDoubleClickTask}
+                            innerRef={taskListInnerRef}
+                            onWheel={handleTaskListWheel}
+                            collapsedIds={collapsedIds}
+                            hasChildrenSet={hasChildrenSet}
+                            depthById={depthById}
+                            onToggleCollapse={handleToggleCollapse}
+                            nameColumnWidth={nameColumnWidth}
+                            columns={columns}
+                        />
+                    </div>
+                )}
+
+                {/* Splitter — 0-width flex slot so the timeline butts right
+                    up against the task-list pane (no visible gap), with an
+                    absolutely-positioned 6px hit area straddling the
+                    boundary. The hit area is invisible until hovered.
+                    `zIndex: 50` on the outer container makes the splitter
+                    form a stacking context above the scroll viewport sibling
+                    so task bars don't paint over the hover highlight. */}
+                {paneMode === 'split' && (
+                    <div
+                        className="relative shrink-0"
+                        style={{ width: 0, zIndex: 50 }}
+                    >
+                        <div
+                            onPointerDown={startSplitterDrag}
+                            className="absolute top-0 bottom-0 group/splitter cursor-col-resize"
+                            style={{ left: -3, width: 6, touchAction: 'none' }}
+                        >
+                            {/* Highlight bar that grows visible on hover. */}
+                            <div className="absolute inset-y-0 inset-x-0 bg-transparent group-hover/splitter:bg-blue-200/70 transition-colors" />
+                            {/* Floating collapse pill — both chevrons joined
+                                side by side in a single rounded container. */}
+                            <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 inline-flex items-center bg-white border border-slate-300 rounded shadow-sm overflow-hidden opacity-0 pointer-events-none group-hover/splitter:opacity-100 group-hover/splitter:pointer-events-auto transition-opacity">
+                                <button
+                                    type="button"
+                                    onClick={() => setPaneMode('right-only')}
+                                    title="Hide task list (timeline full screen)"
+                                    className="inline-flex items-center justify-center h-5 w-5 hover:bg-blue-50 text-slate-600 hover:text-blue-600"
+                                >
+                                    <ChevronLeft className="h-3 w-3" />
+                                </button>
+                                <div className="w-px h-3 bg-slate-300" />
+                                <button
+                                    type="button"
+                                    onClick={() => setPaneMode('left-only')}
+                                    title="Hide timeline (task list full screen)"
+                                    className="inline-flex items-center justify-center h-5 w-5 hover:bg-blue-50 text-slate-600 hover:text-blue-600"
+                                >
+                                    <ChevronRight className="h-3 w-3" />
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* Floating "restore" button when one pane is fully hidden.
+                    The button sits on the SIDE where the hidden pane used
+                    to be, with an arrow pointing TOWARDS where it lives so
+                    the user reads it as "open the missing pane". */}
+                {paneMode === 'right-only' && (
+                    // Task list is hidden → it was on the left. Put the
+                    // restore tab on the LEFT edge with a `>` chevron.
+                    <button
+                        type="button"
+                        onClick={() => setPaneMode('split')}
+                        title="Show task list"
+                        className="absolute left-0 top-1/2 -translate-y-1/2 z-20 inline-flex items-center justify-center h-8 w-5 rounded-r bg-white border border-l-0 border-slate-300 shadow-md hover:bg-blue-50 hover:border-blue-300 text-slate-600 hover:text-blue-600"
+                    >
+                        <ChevronRight className="h-3.5 w-3.5" />
+                    </button>
+                )}
+                {paneMode === 'left-only' && (
+                    // Timeline is hidden → it was on the right. Put the
+                    // restore tab on the RIGHT edge with a `<` chevron.
+                    <button
+                        type="button"
+                        onClick={() => setPaneMode('split')}
+                        title="Show timeline"
+                        className="absolute right-0 top-1/2 -translate-y-1/2 z-20 inline-flex items-center justify-center h-8 w-5 rounded-l bg-white border border-r-0 border-slate-300 shadow-md hover:bg-blue-50 hover:border-blue-300 text-slate-600 hover:text-blue-600"
+                    >
+                        <ChevronLeft className="h-3.5 w-3.5" />
+                    </button>
+                )}
+
+                {paneMode !== 'left-only' && (
                 <div
                     ref={scrollRef}
                     onScroll={handleScroll}
@@ -734,6 +1185,7 @@ export function GanttContainer({
                                         rowHeight={rowHeight}
                                         selected={selectedId === t.id}
                                         onSelect={handleSelectTask}
+                                        onDoubleSelect={handleDoubleClickTask}
                                         onBarDragStart={handleBarDragStart}
                                         onLinkDragStart={handleLinkDragStart}
                                         showProgress={showProgress}
@@ -777,6 +1229,7 @@ export function GanttContainer({
                         </div>
                     </div>
                 </div>
+                )}
             </div>
 
             {/* Legend */}
@@ -811,5 +1264,6 @@ export function GanttContainer({
                 </span>
             </div>
         </div>
+        </GanttUpdateContext.Provider>
     );
 }

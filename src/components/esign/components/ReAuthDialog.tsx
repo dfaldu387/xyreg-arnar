@@ -12,9 +12,13 @@ interface ReAuthDialogProps {
   onOpenChange: (open: boolean) => void;
   email: string;
   onAuthenticated: (authMethod: AuthMethod) => void;
+  // Optional doc/company context for audit logging of failed attempts (AL-08).
+  documentId?: string;
+  documentName?: string;
+  companyId?: string | null;
 }
 
-export function ReAuthDialog({ open, onOpenChange, email, onAuthenticated }: ReAuthDialogProps) {
+export function ReAuthDialog({ open, onOpenChange, email, onAuthenticated, documentId, documentName, companyId }: ReAuthDialogProps) {
   const handleCancel = () => {
     onOpenChange(false);
   };
@@ -31,6 +35,9 @@ export function ReAuthDialog({ open, onOpenChange, email, onAuthenticated }: ReA
           email={email}
           onAuthenticated={handleAuthenticated}
           active={open}
+          documentId={documentId}
+          documentName={documentName}
+          companyId={companyId}
         />
         <DialogFooter>
           <Button variant="outline" onClick={handleCancel}>

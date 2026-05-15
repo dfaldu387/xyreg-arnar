@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { fetchLinkedDocs, decorateLinkedDoc } from '@/services/ccrLinkedDocsService';
+import { createExemptionFollowupTasks } from '@/services/missionControlTaskService';
 import { ConsistentPageHeader } from '@/components/layout/ConsistentPageHeader';
 import { LoadingSpinner } from '@/components/ui/loading-spinner';
 import { Button } from '@/components/ui/button';
@@ -408,6 +409,8 @@ export default function ChangeControlDetailPage() {
   const { users: companyUsers } = useCompanyUsers(ccr?.company_id);
   const reviewerName = (id?: string | null) =>
     id ? companyUsers.find((u) => u.id === id)?.name ?? 'Assigned reviewer' : null;
+
+
   // Eligibility to review an exemption. We accept any of:
   //   1. Per-company admin row in user_company_access for THIS company.
   //   2. Privileged platform role on the auth user (super_admin, admin,
@@ -942,6 +945,7 @@ export default function ChangeControlDetailPage() {
   const handleReviewExemption = async (
     decision: 'approved' | 'rejected',
     reason: string,
+    assignees: Record<string, string | null>,
   ) => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
@@ -983,6 +987,30 @@ export default function ChangeControlDetailPage() {
       }
     } catch (e) {
       console.error('Failed to notify author of exemption decision', e);
+    }
+
+    // On Approve: create one follow-up task per (doc, assignee) pair the
+    // admin selected in the Review Exemption dialog. Failures here don't
+    // roll back the exemption decision.
+    if (decision === 'approved') {
+      try {
+        const adminName =
+          companyUsers.find((u) => u.id === user.id)?.name ?? 'An admin';
+        await createExemptionFollowupTasks({
+          ccrPrimaryKey: ccr.id,
+          ccrId: ccr.ccr_id,
+          ccrTitle: ccr.title,
+          companyId: ccr.company_id,
+          unapprovedLinkedDocs,
+          assigneesPerDoc: assignees,
+          adminUserId: user.id,
+          adminName,
+          reviewReason: reason,
+          decisionDate: new Date(),
+        });
+      } catch (e) {
+        console.error('Failed to create exemption follow-up tasks', e);
+      }
     }
   };
 
@@ -2135,6 +2163,10 @@ export default function ChangeControlDetailPage() {
         requestedAtISO={ccr.exemption_requested_at}
         pendingDocCount={unapprovedLinkedDocs.length}
         totalDocCount={linkedDocsForGate.length || linkedDocIds.length}
+        companyUsers={companyUsers.map((u) => ({ id: u.id, name: u.name }))}
+        defaultAssigneeId={
+          ccr.exemption_requested_by ?? ccr.owner_id ?? ccr.created_by ?? null
+        }
         onConfirm={handleReviewExemption}
       />
     </div>

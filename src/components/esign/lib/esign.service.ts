@@ -10,6 +10,19 @@ import type {
   RequestStatus,
 } from './esign.types';
 import { AUDIT_ACTIONS } from './esign.constants';
+import { AuditTrailService } from '@/services/auditTrailService';
+
+type ESignAuditAction =
+  | 'signature_applied'
+  | 'signature_verified'
+  | 'signature_failed'
+  | 'signature_rejected'
+  | 'request_created'
+  | 'request_completed'
+  | 'request_voided'
+  | 'signer_authenticated'
+  | 'document_viewed'
+  | 'hash_mismatch_detected';
 
 // Helper to get client IP (best effort from browser)
 async function getClientIP(): Promise<string> {
@@ -282,7 +295,41 @@ export class ESignService {
   }
 
   /**
-   * Log an audit event (append-only)
+   * Resolve company_id + display name for a document by checking
+   * phase_assigned_document_template first, then document_studio_templates.
+   * Returns null companyId if neither table has the document.
+   */
+  private static async resolveDocumentContext(
+    documentId: string
+  ): Promise<{ companyId: string | null; entityName: string }> {
+    const cleanId = documentId.replace(/^template-/, '');
+
+    const { data: padt } = await supabase
+      .from('phase_assigned_document_template')
+      .select('company_id, name')
+      .eq('id', cleanId)
+      .maybeSingle();
+
+    if (padt) {
+      return { companyId: padt.company_id ?? null, entityName: padt.name || 'Document' };
+    }
+
+    const { data: dst } = await supabase
+      .from('document_studio_templates')
+      .select('company_id, name')
+      .eq('id', cleanId)
+      .maybeSingle();
+
+    if (dst) {
+      return { companyId: dst.company_id ?? null, entityName: dst.name || 'Document' };
+    }
+
+    return { companyId: null, entityName: 'Document' };
+  }
+
+  /**
+   * Log an audit event (append-only). Writes to the unified
+   * audit_trail_logs table so events appear on the main Audit Trail page.
    */
   static async logAuditEvent(
     documentId: string,
@@ -291,32 +338,33 @@ export class ESignService {
     action: string,
     metadata: Record<string, any> = {}
   ): Promise<void> {
-    let ip = 'unknown';
-    try {
-      ip = await getClientIP();
-    } catch { /* ignore */ }
+    const cleanDocId = documentId.replace(/^template-/, '');
+    const { companyId, entityName } = await this.resolveDocumentContext(cleanDocId);
 
-    await supabase.from('esign_audit_log').insert({
-      document_id: documentId.replace(/^template-/, ''),
-      request_id: requestId,
-      user_id: userId,
-      action,
-      metadata,
-      ip_address: ip,
-      user_agent: navigator.userAgent,
+    await AuditTrailService.logESignatureEvent({
+      userId,
+      companyId,
+      action: action as ESignAuditAction,
+      entityType: 'document',
+      entityId: cleanDocId,
+      entityName,
+      actionDetails: { ...metadata, request_id: requestId },
     });
   }
 
   /**
-   * Get audit log for a document
+   * Get audit log for a document. Reads from the unified audit_trail_logs
+   * table filtered to e-signature events for this document, and reshapes
+   * each row into AuditLogEntry so the drawer UI stays unchanged.
    */
   static async getAuditLog(documentId: string): Promise<AuditLogEntry[]> {
     const cleanId = documentId.replace(/^template-/, '');
 
-    const { data, error } = await supabase
-      .from('esign_audit_log')
+    const { data, error } = await (supabase as any)
+      .from('audit_trail_logs')
       .select('*')
-      .eq('document_id', cleanId)
+      .eq('category', 'e_signature')
+      .eq('entity_id', cleanId)
       .order('created_at', { ascending: true });
 
     if (error) {
@@ -326,7 +374,8 @@ export class ESignService {
 
     // Enrich with user names — resolve from user_profiles (canonical) and fall
     // back to profiles for older accounts that pre-date user_profiles.
-    const userIds = [...new Set((data || []).map(d => d.user_id).filter(Boolean))];
+    const rows = (data || []) as any[];
+    const userIds = [...new Set(rows.map(r => r.user_id).filter(Boolean))];
     const userNames: Record<string, string> = {};
 
     if (userIds.length > 0) {
@@ -359,10 +408,21 @@ export class ESignService {
       }
     }
 
-    return (data || []).map(entry => ({
-      ...entry,
-      user_name: userNames[entry.user_id] || 'Unknown User',
-    })) as AuditLogEntry[];
+    return rows.map(row => {
+      const details = (row.action_details || {}) as Record<string, any>;
+      const { request_id: requestId, ...rest } = details;
+      return {
+        id: row.id,
+        document_id: row.entity_id,
+        request_id: requestId ?? undefined,
+        user_id: row.user_id,
+        user_name: userNames[row.user_id] || 'Unknown User',
+        action: row.action,
+        metadata: rest,
+        ip_address: row.ip_address ?? undefined,
+        created_at: row.created_at,
+      };
+    }) as AuditLogEntry[];
   }
 
   /**

@@ -11,7 +11,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { DatePicker } from '@/components/ui/date-picker';
-import { Download, Search } from 'lucide-react';
+import { Download, Search, AlertCircle } from 'lucide-react';
 import { useTranslation } from '@/hooks/useTranslation';
 import type { UnifiedAuditTrailEntry } from '@/types/auditTrail';
 
@@ -44,13 +44,29 @@ export function AuditLogFilters({
 }: AuditLogFiltersProps) {
   const { lang } = useTranslation();
 
-  // Extract unique users from entries
+  const cachedUsersRef = React.useRef<{ id: string; name: string }[]>([]);
   const uniqueUsers = React.useMemo(() => {
-    const users = Array.from(new Set(entries.map(e => e.userName)))
-      .filter(u => u && u.trim() !== '' && u !== 'Unknown')
-      .sort();
-    return ['All', ...users];
-  }, [entries]);
+    const seen = new Map<string, string>();
+    for (const e of entries) {
+      if (!e.userId) continue;
+      const name = (e.userName || '').trim();
+      if (!name || name === 'Unknown') continue;
+      if (!seen.has(e.userId)) seen.set(e.userId, name);
+    }
+    const fromEntries = Array.from(seen.entries()).map(([id, name]) => ({ id, name }));
+
+    if (selectedUser === 'All' || cachedUsersRef.current.length === 0) {
+      cachedUsersRef.current = fromEntries;
+    } else {
+      // Merge cached snapshot with anyone newly present in current entries.
+      const merged = new Map(cachedUsersRef.current.map(u => [u.id, u.name]));
+      for (const u of fromEntries) merged.set(u.id, u.name);
+      cachedUsersRef.current = Array.from(merged.entries()).map(([id, name]) => ({ id, name }));
+    }
+
+    const list = [...cachedUsersRef.current].sort((a, b) => a.name.localeCompare(b.name));
+    return [{ id: 'All', name: 'All' }, ...list];
+  }, [entries, selectedUser]);
 
   const handleClearFilters = () => {
     onSearchTermChange('');
@@ -59,11 +75,14 @@ export function AuditLogFilters({
     onEndDateChange(undefined);
   };
 
+  // Validation: end date set without start date
+  const endDateOnlyError = !!endDate && !startDate;
+
   return (
     <div className="bg-card rounded-lg border p-6">
       <div className="flex flex-wrap items-end gap-4">
         {/* Search */}
-        <div className="flex flex-col flex-shrink-0 w-56 gap-2">
+        <div className="flex flex-col flex-shrink-0 w-72 gap-2">
           <Label>{lang('auditLog.filters.search')}</Label>
           <div className="relative">
             <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
@@ -86,8 +105,8 @@ export function AuditLogFilters({
             </SelectTrigger>
             <SelectContent>
               {uniqueUsers.map((user) => (
-                <SelectItem key={user} value={user}>
-                  {user}
+                <SelectItem key={user.id} value={user.id}>
+                  {user.name}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -95,8 +114,11 @@ export function AuditLogFilters({
         </div>
 
         {/* Start Date Filter */}
-        <div className="flex flex-col flex-shrink-0 w-40 gap-2">
-          <Label>{lang('auditLog.filters.startDate')}</Label>
+        <div className="relative flex flex-col flex-shrink-0 w-44 gap-2">
+          <Label className={endDateOnlyError ? 'text-destructive' : ''}>
+            {lang('auditLog.filters.startDate')}
+            {endDateOnlyError && <span className="text-destructive ml-0.5">*</span>}
+          </Label>
           <DatePicker
             date={startDate}
             setDate={onStartDateChange}
@@ -105,7 +127,14 @@ export function AuditLogFilters({
               if (!endDate) return false;
               return date > endDate;
             }}
+            className={endDateOnlyError ? 'border-destructive' : ''}
           />
+          {endDateOnlyError && (
+            <div className="absolute left-0 top-full mt-1 flex items-center gap-1 text-xs text-destructive whitespace-nowrap">
+              <AlertCircle className="h-3 w-3 shrink-0" />
+              <span>{lang('auditLog.filters.startDateRequired')}</span>
+            </div>
+          )}
         </div>
 
         {/* End Date Filter */}

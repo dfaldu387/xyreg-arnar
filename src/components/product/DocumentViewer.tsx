@@ -43,6 +43,7 @@ import { useDocumentReviewAssignments } from "@/hooks/useDocumentReviewAssignmen
 import { LoadingSpinner } from "../ui/loading-spinner";
 import { AnnotationSidebar } from "./AnnotationSidebar";
 import { DocToPdfConverterService } from "@/services/docToPdfConverterService";
+import { DocumentPdfPreviewService } from "@/services/documentPdfPreviewService";
 import { ESignPopup } from "@/components/esign/ESignPopup";
 
 // React PDF imports for viewing
@@ -406,19 +407,18 @@ export function DocumentViewer({
           setPdfError(null);
 
           try {
-            const { data: fileBlob, error: downloadError } = await supabase.storage
-              .from("document-templates")
-              .download(documentFile.path);
-
-            if (downloadError || !fileBlob) {
-              throw new Error("Failed to download file");
+            if (!documentId || !companyId) {
+              throw new Error("Document id or company id missing for PDF preview");
             }
+            // Render the same PDF the "Preview PDF" menu item generates —
+            // Document Control header, e-signature table, running header /
+            // footer, DRAFT watermark when applicable. Keeps the in-app
+            // dialog view consistent with the new-tab preview.
+            const pdfBlob = await DocumentPdfPreviewService.generatePreviewPdfBlob(
+              documentId,
+              companyId,
+            );
 
-            const pdfBlob = await DocToPdfConverterService.convertDocxToPdf(fileBlob, {
-              fileName: documentFile.name,
-            });
-
-            // Validate the blob before creating URL
             if (pdfBlob && pdfBlob.size > 0) {
               const blobUrl = URL.createObjectURL(pdfBlob);
               setConvertedPdfBlobUrl(blobUrl);
@@ -442,7 +442,7 @@ export function DocumentViewer({
     };
 
     loadDocument();
-  }, [documentFile?.path, isPDF, isDocFile]);
+  }, [documentFile?.path, isPDF, isDocFile, documentId, companyId]);
 
   // Fetch document status
   useEffect(() => {

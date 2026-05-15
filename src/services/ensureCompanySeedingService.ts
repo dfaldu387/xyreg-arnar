@@ -26,7 +26,11 @@ import {
 } from '@/services/sopAutoSeedService';
 import { eagerSeedCompanyWorkInstructions } from '@/services/eagerSeedCompanyWIsClient';
 import { TIER_A_AUTO_SEED, TIER_B_CONDITIONAL } from '@/constants/sopAutoSeedTiers';
-import { resyncSeededSopContent, resyncWiReferences } from '@/services/resyncSeededSopContentService';
+import {
+  resyncSeededSopContent,
+  resyncWiReferences,
+  resyncStaleSopSections,
+} from '@/services/resyncSeededSopContentService';
 
 const RESYNC_MARKER_PREFIX = 'xyreg.sopDefRefsResync.v1.';
 const WI_REF_RESYNC_MARKER_PREFIX = 'xyreg.wiRefBackfill.v1.';
@@ -151,6 +155,24 @@ export async function ensureCompanySeedingComplete(
     }
   } catch (err) {
     result.errors.push(`WI reference backfill: ${(err as Error).message}`);
+  }
+
+  // 7. Template-version-aware re-seed: when the static SOP template
+  //    library bumps `templateVersion`, push the changed sections into
+  //    drafts whose content still matches the previous-version baseline.
+  //    User-edited sections are reported as conflicts and left alone for
+  //    the user to resolve via the manual "Re-seed updated templates"
+  //    button on the Documents page.
+  try {
+    const r = await resyncStaleSopSections(companyId, companyName, { mode: 'safe' });
+    if (r.updated > 0) {
+      result.sopSectionsResynced += r.updated;
+    }
+    if (r.failed > 0) {
+      result.errors.push(`${r.failed} stale SOP section resync(s) failed`);
+    }
+  } catch (err) {
+    result.errors.push(`Stale SOP resync: ${(err as Error).message}`);
   }
 
   if (result.errors.length > 0) {

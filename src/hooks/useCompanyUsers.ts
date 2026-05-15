@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
+import { AuditTrailService } from '@/services/auditTrailService';
 
 export interface CompanyUser {
   id: string;
@@ -165,6 +166,22 @@ export function useCompanyUsers(companyId?: string) {
   }) => {
     if (!companyId) return false;
 
+    // AL-12: capture pre-update role for audit comparison.
+    let previousAccessLevel: string | null = null;
+    let affectedUserEmail = '';
+    let affectedUserName = '';
+    try {
+      const { data: existing } = await supabase
+        .from('user_company_access')
+        .select('access_level, user_profiles!inner(email, first_name, last_name)')
+        .eq('user_id', userId)
+        .eq('company_id', companyId)
+        .maybeSingle() as { data: any };
+      previousAccessLevel = existing?.access_level || null;
+      affectedUserEmail = existing?.user_profiles?.email || '';
+      affectedUserName = `${existing?.user_profiles?.first_name || ''} ${existing?.user_profiles?.last_name || ''}`.trim();
+    } catch {}
+
     try {
       // Update user profile name if provided
       if (updates.name) {
@@ -221,6 +238,34 @@ export function useCompanyUsers(companyId?: string) {
             : user
         )
       );
+
+      // AL-12: log role/access_level change if it actually changed.
+      if (updates.access_level && previousAccessLevel && updates.access_level !== previousAccessLevel) {
+        try {
+          const { data: { user: adminUser } } = await supabase.auth.getUser();
+          if (adminUser) {
+            await AuditTrailService.logUserAccessEvent({
+              userId: adminUser.id,
+              companyId,
+              action: 'role_change',
+              entityName: affectedUserName || affectedUserEmail || userId,
+              reason: `Role changed for ${affectedUserEmail || userId}: ${previousAccessLevel} → ${updates.access_level}`,
+              changes: [{
+                field: 'Role',
+                oldValue: previousAccessLevel,
+                newValue: updates.access_level,
+              }],
+              actionDetails: {
+                affected_user_id: userId,
+                affected_user_email: affectedUserEmail,
+                affected_user_name: affectedUserName,
+              },
+            });
+          }
+        } catch (auditErr) {
+          console.error('[useCompanyUsers] Failed to write role-change audit log:', auditErr);
+        }
+      }
 
       toast.success('User permissions updated');
       return true;

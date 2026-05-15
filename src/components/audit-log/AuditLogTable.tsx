@@ -12,9 +12,11 @@ import { Badge } from '@/components/ui/badge';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { getActionTypeConfig } from '@/utils/auditLogUtils';
 import { AuditLogEmptyState } from './AuditLogEmptyState';
+import { FormatAuditIp } from './formatAuditIp';
 import { useTranslation } from '@/hooks/useTranslation';
 import type { UnifiedAuditTrailEntry, FieldChange, AuditCategory } from '@/types/auditTrail';
 import { AUDIT_CATEGORY_COLORS } from '@/types/auditTrail';
+import { normalizeEntityType, normalizeActionLabel, defaultReasonFor } from '@/services/auditTrailService';
 import { supabase } from '@/integrations/supabase/client';
 
 const CATEGORY_LABEL_KEYS: Record<AuditCategory, string> = {
@@ -149,6 +151,10 @@ export function AuditLogTable({ entries, isLoading = false }: AuditLogTableProps
               const actionConfig = getActionTypeConfig(entry.action);
               const { date, time } = formatTimestamp(entry.timestamp);
               const hasChanges = entry.changes && entry.changes.length > 0;
+              // AL-09: e-signature rows are also expandable to show
+              // which document + version the signature applies to.
+              const isESignature = entry.category === 'e_signature';
+              const isExpandable = hasChanges || isESignature;
               const isExpanded = expandedRows.has(entry.id);
               const categoryColor = AUDIT_CATEGORY_COLORS[entry.category] || '';
               const categoryLabel = CATEGORY_LABEL_KEYS[entry.category] ? lang(CATEGORY_LABEL_KEYS[entry.category]) : entry.category;
@@ -156,11 +162,11 @@ export function AuditLogTable({ entries, isLoading = false }: AuditLogTableProps
               return (
                 <React.Fragment key={entry.id}>
                   <TableRow
-                    className={`hover:bg-muted/50 transition-colors duration-200 ${hasChanges ? 'cursor-pointer' : ''}`}
-                    onClick={() => hasChanges && toggleRow(entry.id)}
+                    className={`hover:bg-muted/50 transition-colors duration-200 ${isExpandable ? 'cursor-pointer' : ''}`}
+                    onClick={() => isExpandable && toggleRow(entry.id)}
                   >
                     <TableCell className="w-8 px-2">
-                      {hasChanges && (
+                      {isExpandable && (
                         isExpanded
                           ? <ChevronDown className="h-4 w-4 text-muted-foreground" />
                           : <ChevronRight className="h-4 w-4 text-muted-foreground" />
@@ -174,13 +180,13 @@ export function AuditLogTable({ entries, isLoading = false }: AuditLogTableProps
                     <TableCell>
                       <div className="flex items-center gap-2">
                         <div className={`w-2 h-2 rounded-full ${actionConfig.bgColor}`}></div>
-                        <span className="text-sm font-medium">{entry.action}</span>
+                        <span className="text-sm font-medium">{normalizeActionLabel(entry.action)}</span>
                       </div>
                     </TableCell>
                     <TableCell>
                       <div className="space-y-0.5">
                         <div className="text-sm font-medium">{entry.entityName}</div>
-                        <div className="text-xs text-muted-foreground">{entry.entityType}</div>
+                        <div className="text-xs text-muted-foreground">{normalizeEntityType(entry.entityType)}</div>
                       </div>
                     </TableCell>
                     <TableCell>
@@ -196,13 +202,13 @@ export function AuditLogTable({ entries, isLoading = false }: AuditLogTableProps
                       </div>
                     </TableCell>
                     <TableCell>
-                      <div className="text-sm text-muted-foreground max-w-[200px] truncate" title={entry.reason}>
-                        {entry.reason || '—'}
+                      <div className="text-sm text-muted-foreground max-w-[200px] truncate" title={entry.reason || defaultReasonFor(entry.action)}>
+                        {entry.reason || defaultReasonFor(entry.action)}
                       </div>
                     </TableCell>
                     <TableCell>
                       <div className="text-sm font-mono text-muted-foreground">
-                        {entry.ipAddress || '—'}
+                        <FormatAuditIp ip={entry.ipAddress} source={entry.ipAddressSource} />
                       </div>
                     </TableCell>
                   </TableRow>
@@ -221,6 +227,57 @@ export function AuditLogTable({ entries, isLoading = false }: AuditLogTableProps
                                 <span className="text-green-600 truncate max-w-[200px]" title={change.newValue}><ChangeValue change={change} side="new" /></span>
                               </div>
                             ))}
+                          </div>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  )}
+
+                  {/* AL-09: expanded e-signature details */}
+                  {isExpanded && isESignature && !hasChanges && (
+                    <TableRow className="bg-muted/30">
+                      <TableCell colSpan={8} className="py-3 px-8">
+                        <div className="space-y-2">
+                          <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                            Signature Details
+                          </div>
+                          <div className="grid grid-cols-2 gap-x-8 gap-y-1.5 text-sm">
+                            <div className="flex gap-2">
+                              <span className="font-medium min-w-[120px] text-muted-foreground">Document</span>
+                              <span>{entry.entityName || '—'}</span>
+                            </div>
+                            <div className="flex gap-2">
+                              <span className="font-medium min-w-[120px] text-muted-foreground">Document ID</span>
+                              <span className="font-mono text-xs">{entry.entityId || '—'}</span>
+                            </div>
+                            <div className="flex gap-2">
+                              <span className="font-medium min-w-[120px] text-muted-foreground">Signer</span>
+                              <span>{entry.userName}{entry.userEmail ? ` (${entry.userEmail})` : ''}</span>
+                            </div>
+                            <div className="flex gap-2">
+                              <span className="font-medium min-w-[120px] text-muted-foreground">Role / Meaning</span>
+                              <span className="capitalize">{entry.actionDetails?.meaning || '—'}</span>
+                            </div>
+                            <div className="flex gap-2">
+                              <span className="font-medium min-w-[120px] text-muted-foreground">Auth Method</span>
+                              <span>{entry.actionDetails?.auth_method?.toString().replace(/_/g, ' ') || '—'}</span>
+                            </div>
+                            <div className="flex gap-2">
+                              <span className="font-medium min-w-[120px] text-muted-foreground">Timestamp (UTC)</span>
+                              <span className="font-mono text-xs">{new Date(entry.timestamp).toISOString()}</span>
+                            </div>
+                            {entry.actionDetails?.full_legal_name && (
+                              <div className="flex gap-2 col-span-2">
+                                <span className="font-medium min-w-[120px] text-muted-foreground">Full Legal Name</span>
+                                <span>{entry.actionDetails.full_legal_name}</span>
+                              </div>
+                            )}
+                            {entry.actionDetails?.request_id && (
+                              <div className="flex gap-2 col-span-2">
+                                <span className="font-medium min-w-[120px] text-muted-foreground">Request ID</span>
+                                <span className="font-mono text-xs">{entry.actionDetails.request_id}</span>
+                              </div>
+                            )}
                           </div>
                         </div>
                       </TableCell>
@@ -252,7 +309,7 @@ export function AuditLogTable({ entries, isLoading = false }: AuditLogTableProps
               <div className="flex items-start justify-between">
                 <div className="flex items-center gap-2">
                   <div className={`w-2 h-2 rounded-full ${actionConfig.bgColor}`}></div>
-                  <span className="font-medium text-sm">{entry.action}</span>
+                  <span className="font-medium text-sm">{normalizeActionLabel(entry.action)}</span>
                 </div>
                 <Badge variant="outline" className={`text-xs ${categoryColor}`}>
                   {categoryLabel}
@@ -262,15 +319,13 @@ export function AuditLogTable({ entries, isLoading = false }: AuditLogTableProps
               {/* Entity */}
               <div>
                 <div className="text-sm font-medium">{entry.entityName}</div>
-                <div className="text-xs text-muted-foreground">{entry.entityType}</div>
+                <div className="text-xs text-muted-foreground">{normalizeEntityType(entry.entityType)}</div>
               </div>
 
               {/* Reason */}
-              {entry.reason && (
-                <div className="text-sm text-muted-foreground italic">
-                  {lang('auditLog.table.why')}: {entry.reason}
-                </div>
-              )}
+              <div className="text-sm text-muted-foreground italic">
+                {lang('auditLog.table.why')}: {entry.reason || defaultReasonFor(entry.action)}
+              </div>
 
               {/* Metadata */}
               <div className="grid grid-cols-2 gap-4 pt-2 border-t text-xs text-muted-foreground">
@@ -285,7 +340,7 @@ export function AuditLogTable({ entries, isLoading = false }: AuditLogTableProps
                 </div>
                 <div className="col-span-2">
                   <div className="font-medium">{lang('auditLog.table.ipAddress')}</div>
-                  <div className="font-mono">{entry.ipAddress || '—'}</div>
+                  <div className="font-mono"><FormatAuditIp ip={entry.ipAddress} source={entry.ipAddressSource} /></div>
                 </div>
               </div>
 

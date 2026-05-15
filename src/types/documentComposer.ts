@@ -48,7 +48,7 @@ export interface DocumentControl {
   sopNumber: string;
   documentTitle: string;
   version: string;
-  effectiveDate: Date;
+  effectiveDate: Date | null;
   nextReviewDate?: Date;
   documentOwner: string;
   documentOwnerTitle?: string;

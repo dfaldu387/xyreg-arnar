@@ -16,7 +16,21 @@ import { PORTFOLIO_MENU_ACCESS } from '@/constants/menuAccessKeys';
 import { RestrictedFeatureProvider } from '@/contexts/RestrictedFeatureContext';
 import { RestrictedPreviewBanner } from '@/components/subscription/RestrictedPreviewBanner';
 import { ensureCompanySeedingComplete } from '@/services/ensureCompanySeedingService';
+import { resyncStaleSopSections } from '@/services/resyncSeededSopContentService';
 import { useQueryClient } from '@tanstack/react-query';
+import { Button } from '@/components/ui/button';
+import { RefreshCw } from 'lucide-react';
+import { toast } from 'sonner';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 
 function CompanyDocumentsPage() {
   const { companyName } = useParams<{ companyName: string }>();
@@ -28,6 +42,11 @@ function CompanyDocumentsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const { companyRoles, isLoading: rolesLoading } = useCompanyRole();
   const queryClient = useQueryClient();
+  const [reseeding, setReseeding] = useState(false);
+  const [forceReseedOpen, setForceReseedOpen] = useState(false);
+  const [pendingConflicts, setPendingConflicts] = useState<
+    Array<{ draftId: string; draftName: string; sectionId: string }>
+  >([]);
 
   // Restriction check - double security pattern (hooks must be called before any conditional returns)
   const { isMenuAccessKeyEnabled, planName } = usePlanMenuAccess();
@@ -45,6 +64,65 @@ function CompanyDocumentsPage() {
   const navigateToComplianceInstances = () => {
     if (companyName) {
       navigate(`/app/company/${encodeURIComponent(companyName)}/compliance-instances`);
+    }
+  };
+
+  const handleSafeReseed = async () => {
+    if (!companyId || !companyName) return;
+    setReseeding(true);
+    try {
+      const r = await resyncStaleSopSections(
+        companyId,
+        decodeURIComponent(companyName),
+        { mode: 'safe' },
+      );
+      if (r.updated > 0) {
+        queryClient.invalidateQueries({ queryKey: ['company-documents'] });
+        queryClient.invalidateQueries({ queryKey: ['document-studio-templates'] });
+        toast.success(`Re-seeded ${r.updated} section(s) from updated templates`);
+      } else {
+        toast.info('All seeded SOP drafts already match the latest templates');
+      }
+      if (r.conflicts.length > 0) {
+        setPendingConflicts(r.conflicts);
+      } else {
+        setPendingConflicts([]);
+      }
+      if (r.failed > 0) {
+        toast.error(`${r.failed} re-seed(s) failed — see console for details`);
+        console.warn('[Re-seed] failures', r.errors);
+      }
+    } catch (err) {
+      toast.error(`Re-seed failed: ${(err as Error).message}`);
+    } finally {
+      setReseeding(false);
+    }
+  };
+
+  const handleForceReseed = async () => {
+    if (!companyId || !companyName) return;
+    setReseeding(true);
+    setForceReseedOpen(false);
+    try {
+      const r = await resyncStaleSopSections(
+        companyId,
+        decodeURIComponent(companyName),
+        { mode: 'force' },
+      );
+      queryClient.invalidateQueries({ queryKey: ['company-documents'] });
+      queryClient.invalidateQueries({ queryKey: ['document-studio-templates'] });
+      if (r.updated > 0) {
+        toast.success(
+          `Force re-seeded ${r.updated} section(s). Previous content archived to draft history.`,
+        );
+      } else {
+        toast.info('Nothing to re-seed.');
+      }
+      setPendingConflicts([]);
+    } catch (err) {
+      toast.error(`Force re-seed failed: ${(err as Error).message}`);
+    } finally {
+      setReseeding(false);
     }
   };
 
@@ -222,9 +300,55 @@ function CompanyDocumentsPage() {
           breadcrumbs={breadcrumbs}
           title={`${decodeURIComponent(companyName || "")} Documents`}
           subtitle="Manage company-level documentation"
+          actions={
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleSafeReseed}
+                disabled={reseeding || !companyId}
+                title="Push template fixes into existing seeded SOP drafts. Safe mode skips drafts you have edited."
+              >
+                <RefreshCw className={`h-4 w-4 mr-2 ${reseeding ? 'animate-spin' : ''}`} />
+                Re-seed updated templates
+              </Button>
+              {pendingConflicts.length > 0 && (
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  onClick={() => setForceReseedOpen(true)}
+                  disabled={reseeding}
+                  title="Overwrite user-edited sections too. Previous content is archived for undo."
+                >
+                  Force re-seed {pendingConflicts.length} edited
+                </Button>
+              )}
+            </div>
+          }
         />
 
         {isRestricted && <RestrictedPreviewBanner className="mt-6 !mb-0" />}
+
+        <AlertDialog open={forceReseedOpen} onOpenChange={setForceReseedOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Force re-seed edited sections?</AlertDialogTitle>
+              <AlertDialogDescription>
+                {pendingConflicts.length} draft section(s) have local edits that differ from
+                the previous template baseline. Force re-seed will replace them with the
+                latest template content. The previous content is preserved on each draft's
+                <code className="mx-1">metadata.reseedHistory</code>
+                so it can be restored later.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction onClick={handleForceReseed}>
+                Overwrite and archive
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
 
         {/* Content */}
         <div className="flex-1 overflow-y-auto">

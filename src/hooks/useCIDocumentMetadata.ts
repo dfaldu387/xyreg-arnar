@@ -1,5 +1,35 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { AuditTrailService } from '@/services/auditTrailService';
+
+const FIELD_LABELS: Record<string, string> = {
+  name: 'Name',
+  status: 'Status',
+  due_date: 'Due Date',
+  document_type: 'Document Type',
+  sub_section: 'Section',
+  section_ids: 'Section',
+  authors_ids: 'Author',
+  reference_document_ids: 'Reference Documents',
+  phase_id: 'Phase',
+  version: 'Version',
+  tags: 'Tags',
+  is_record: 'Is Record',
+  date: 'Date',
+  is_current_effective_version: 'Current Effective Version',
+  need_template_update: 'Needs Template Update',
+  reviewer_group_ids: 'Reviewer Groups',
+  record_id: 'Record ID',
+  next_review_date: 'Next Review Date',
+  document_number: 'Document Number',
+};
+
+function stringifyForLog(val: any): string {
+  if (val === null || val === undefined) return '';
+  if (Array.isArray(val)) return val.join(', ');
+  if (val instanceof Date) return val.toISOString();
+  return String(val);
+}
 
 export interface CIDocumentMetadata {
   id: string;
@@ -94,6 +124,9 @@ export function useCIDocumentMetadata(documentId: string | null, companyId: stri
   const updateField = useCallback(async (field: string, value: any) => {
     if (!documentId) return;
 
+    // Capture the prior value (for audit logging) before mutating.
+    const oldValue = metadata ? (metadata as any)[field] : undefined;
+
     const { error } = await supabase
       .from('phase_assigned_document_template')
       .update({ [field]: value, updated_at: new Date().toISOString() } as any)
@@ -106,7 +139,42 @@ export function useCIDocumentMetadata(documentId: string | null, companyId: stri
 
     // Update local state
     setMetadata(prev => prev ? { ...prev, [field]: value } : null);
-  }, [documentId]);
+
+    // Audit-log the change so it appears in the device-level audit trail.
+    // Failures here must never block the save itself.
+    try {
+      const oldStr = stringifyForLog(oldValue);
+      const newStr = stringifyForLog(value);
+      if (oldStr === newStr) return; // no-op change
+
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user || !companyId) return;
+
+      const documentName = field === 'name'
+        ? stringifyForLog(value)
+        : (metadata?.name || 'Document');
+      const productId = metadata?.product_id || undefined;
+      const action = field === 'status' ? 'document_status_changed' : 'document_updated';
+
+      await AuditTrailService.logDocumentRecordEvent({
+        userId: user.id,
+        companyId,
+        action,
+        entityType: 'document',
+        entityId: documentId,
+        entityName: documentName,
+        changes: [{
+          field: FIELD_LABELS[field] || field,
+          oldValue: oldStr,
+          newValue: newStr,
+        }],
+        actionDetails: productId ? { product_id: productId } : undefined,
+      });
+    } catch (auditErr) {
+      // Audit logging is non-blocking — log the failure but don't throw.
+      console.warn('[useCIDocumentMetadata] Audit log skipped:', auditErr);
+    }
+  }, [documentId, companyId, metadata]);
 
   return { metadata, isLoading, updateField, refetch: fetchMetadata };
 }

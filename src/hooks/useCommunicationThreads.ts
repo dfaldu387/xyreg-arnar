@@ -47,17 +47,11 @@ export function useCommunicationThreads(options: UseCommunicationThreadsOptions 
         const myParticipant = (thread.thread_participants || []).find((p: any) => p.user_id === user.id);
         const myUnread = myParticipant?.unread_count || 0;
 
-        if (myUnread > 0) {
-          console.log('[Stats] Thread with unread:', thread.id, 'unread:', myUnread, 'participants:', thread.thread_participants);
-        }
-
         unreadCount += myUnread;
         if (thread.status === 'Active') activeCount++;
         if (thread.status === 'Awaiting Response') awaitingResponseCount++;
         if (thread.created_by === user.id || myParticipant?.role === 'owner') myThreadsCount++;
       });
-
-      console.log('[Stats] Total unread:', unreadCount, 'active:', activeCount, 'myThreads:', myThreadsCount, 'threads count:', (data || []).length);
 
       return { unreadCount, activeCount, awaitingResponseCount, myThreadsCount };
     },
@@ -105,14 +99,11 @@ export function useCommunicationThreads(options: UseCommunicationThreadsOptions 
         (payload) => {
           const notif = payload.new as any;
           if (notif.category === 'communication') {
-            console.log('[RT] Communication notification received:', notif.title);
             invalidateDelayed();
           }
         }
       )
-      .subscribe((status) => {
-        console.log('[RT] comms-notif channel status:', status);
-      });
+      .subscribe();
 
     // Fallback channel: direct table subscriptions (may be blocked by SECURITY DEFINER RLS)
     const tableChannel = supabase
@@ -120,21 +111,19 @@ export function useCommunicationThreads(options: UseCommunicationThreadsOptions 
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'communication_threads' },
-        (payload) => { console.log('[RT] threads change:', payload.eventType); invalidateAll(); }
+        () => invalidateAll()
       )
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'thread_participants' },
-        (payload) => { console.log('[RT] participants change:', payload.eventType); invalidateAll(); }
+        () => invalidateAll()
       )
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'communication_messages' },
-        (payload) => { console.log('[RT] message insert'); invalidateDelayed(); }
+        () => invalidateDelayed()
       )
-      .subscribe((status) => {
-        console.log('[RT] comms-tables channel status:', status);
-      });
+      .subscribe();
 
     return () => {
       if (debounceTimer) clearTimeout(debounceTimer);
@@ -566,7 +555,6 @@ export function useThreadMessages(threadId: string | null) {
         },
         (payload: any) => {
           if (payload.new?.sender_user_id === user?.id) return;
-          console.log('[RT] Direct message event for thread:', threadId);
           invalidate();
         }
       )
@@ -602,7 +590,6 @@ export function useThreadMessages(threadId: string | null) {
             notif.category === 'communication' &&
             notif.entity_id === threadId
           ) {
-            console.log('[RT] Notification-based message update for thread:', threadId);
             invalidate();
           }
         }

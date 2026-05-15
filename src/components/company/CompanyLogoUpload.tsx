@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useToast } from '@/hooks/use-toast';
+import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -22,15 +22,11 @@ interface SlotConfig {
   kind: SlotKind;
   title: string;
   description: string;
-  aspect: number;
-  outputWidth: number;
-  outputHeight: number;
   previewClass: string; // tailwind sizing for the preview box
   filePrefix: string;   // storage filename segment
   urlColumn: 'logo_url' | 'document_logo_url';
   originalColumn: 'logo_original_url' | 'document_logo_original_url';
   cropTitle: string;
-  cropDescription: string;
 }
 
 async function urlToDataUrl(url: string): Promise<string> {
@@ -59,35 +55,98 @@ function LogoSlot({ companyId, config, initialUrl, initialOriginalUrl }: SlotPro
   const [originalUrl, setOriginalUrl] = useState(initialOriginalUrl);
   const [cropSrc, setCropSrc] = useState<string | null>(null);
   const [pendingOriginal, setPendingOriginal] = useState<{ blob: Blob; ext: string } | null>(null);
-  const { toast } = useToast();
   const queryClient = useQueryClient();
   const inputId = `logo-upload-${config.kind}`;
 
-  const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
+  const validateFile = (file: File | undefined): file is File => {
+    if (!file) return false;
     if (!file.type.startsWith('image/')) {
-      toast({
-        title: lang('company.logo.invalidFileType'),
+      toast.error(lang('company.logo.invalidFileType'), {
         description: lang('company.logo.invalidFileTypeDesc'),
-        variant: 'destructive',
       });
-      return;
+      return false;
     }
     if (file.size > 2 * 1024 * 1024) {
-      toast({
-        title: lang('company.logo.fileTooLarge'),
+      toast.error(lang('company.logo.fileTooLarge'), {
         description: lang('company.logo.fileTooLargeDesc'),
-        variant: 'destructive',
       });
-      return;
+      return false;
     }
+    return true;
+  };
+
+  const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!validateFile(file)) return;
     const ext = file.name.split('.').pop()?.toLowerCase() || (file.type.split('/')[1] ?? 'png');
     setPendingOriginal({ blob: file, ext });
     const reader = new FileReader();
     reader.onload = () => setCropSrc(typeof reader.result === 'string' ? reader.result : null);
     reader.readAsDataURL(file);
-    event.target.value = '';
+  };
+
+  const handleConfirmRaw = async () => {
+    if (!pendingOriginal) return;
+    setIsUploading(true);
+    try {
+      const ts = Date.now();
+      const filePath = `company-logos/${companyId}-${config.filePrefix}-${ts}.${pendingOriginal.ext}`;
+
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from('company-media')
+        .upload(filePath, pendingOriginal.blob, {
+          cacheControl: '3600',
+          upsert: false,
+          contentType: pendingOriginal.blob.type || 'application/octet-stream',
+        });
+      if (uploadError) throw uploadError;
+
+      const { data: urlData } = supabase.storage.from('company-media').getPublicUrl(uploadData.path);
+
+      // For raw uploads, the "logo" and the "original" are the same file —
+      // store the same URL in both columns so Recrop still works later.
+      const updatePayload: Record<string, any> = {
+        [config.urlColumn]: urlData.publicUrl,
+        [config.originalColumn]: urlData.publicUrl,
+      };
+
+      let { error: updateError } = await supabase
+        .from('companies')
+        .update(updatePayload as any)
+        .eq('id', companyId);
+      if (updateError && new RegExp(config.originalColumn).test(updateError.message || '')) {
+        const retry = await supabase
+          .from('companies')
+          .update({ [config.urlColumn]: urlData.publicUrl } as any)
+          .eq('id', companyId);
+        updateError = retry.error;
+      }
+      if (updateError && new RegExp(config.urlColumn).test(updateError.message || '')) {
+        throw new Error(
+          `The "${config.urlColumn}" column doesn't exist yet. Apply the pending migration to enable this slot.`,
+        );
+      }
+      if (updateError) throw updateError;
+
+      queryClient.invalidateQueries({ queryKey: ['company', companyId] });
+      queryClient.invalidateQueries({ queryKey: ['company-info', companyId] });
+      const newUrl = `${urlData.publicUrl}?t=${ts}`;
+      setPreviewUrl(newUrl);
+      setOriginalUrl(urlData.publicUrl);
+      setCropSrc(null);
+      setPendingOriginal(null);
+      toast.success(lang('company.logo.uploadSuccess'), {
+        description: lang('company.logo.uploadSuccessDesc'),
+      });
+    } catch (error) {
+      console.error('Error uploading logo:', error);
+      toast.error(lang('company.logo.uploadFailed'), {
+        description: (error as any)?.message || lang('company.logo.uploadFailedDesc'),
+      });
+    } finally {
+      setIsUploading(false);
+    }
   };
 
   const handleRecrop = async () => {
@@ -100,10 +159,8 @@ function LogoSlot({ companyId, config, initialUrl, initialOriginalUrl }: SlotPro
       setCropSrc(dataUrl);
     } catch (err) {
       console.error('Failed to load logo for recrop', err);
-      toast({
-        title: lang('company.logo.uploadFailed'),
+      toast.error(lang('company.logo.uploadFailed'), {
         description: 'Could not load the existing logo for cropping.',
-        variant: 'destructive',
       });
     } finally {
       setIsLoadingRecrop(false);
@@ -174,16 +231,13 @@ function LogoSlot({ companyId, config, initialUrl, initialOriginalUrl }: SlotPro
       setOriginalUrl(nextOriginalUrl);
       setCropSrc(null);
       setPendingOriginal(null);
-      toast({
-        title: lang('company.logo.uploadSuccess'),
+      toast.success(lang('company.logo.uploadSuccess'), {
         description: lang('company.logo.uploadSuccessDesc'),
       });
     } catch (error) {
       console.error('Error uploading logo:', error);
-      toast({
-        title: lang('company.logo.uploadFailed'),
+      toast.error(lang('company.logo.uploadFailed'), {
         description: (error as any)?.message || lang('company.logo.uploadFailedDesc'),
-        variant: 'destructive',
       });
     } finally {
       setIsUploading(false);
@@ -220,7 +274,7 @@ function LogoSlot({ companyId, config, initialUrl, initialOriginalUrl }: SlotPro
           )}
         </div>
 
-        <div className="flex-1 flex flex-wrap gap-2">
+        <div className="flex-1 flex items-center gap-2">
           <input
             type="file"
             id={inputId}
@@ -252,10 +306,10 @@ function LogoSlot({ companyId, config, initialUrl, initialOriginalUrl }: SlotPro
               variant="outline"
               disabled={isUploading || isLoadingRecrop}
               onClick={handleRecrop}
-              title={originalUrl ? 'Re-crop the original uploaded image' : 'Re-crop the current logo (no original on file)'}
+              title={originalUrl ? 'Re-crop the original uploaded image' : 'Re-crop the current logo'}
             >
               {isLoadingRecrop ? (
-                <Loader2 className="mr-2 h-4 w-4" />
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
               ) : (
                 <Crop className="mr-2 h-4 w-4" />
               )}
@@ -268,15 +322,13 @@ function LogoSlot({ companyId, config, initialUrl, initialOriginalUrl }: SlotPro
       <LogoCropDialog
         open={cropSrc !== null}
         imageSrc={cropSrc}
-        aspect={config.aspect}
-        outputWidth={config.outputWidth}
-        outputHeight={config.outputHeight}
+        allowRawUpload={pendingOriginal !== null}
         title={config.cropTitle}
-        description={config.cropDescription}
         onCancel={() => {
           setCropSrc(null);
           setPendingOriginal(null);
         }}
+        onConfirmRaw={handleConfirmRaw}
         onConfirm={handleCroppedUpload}
       />
     </div>
@@ -294,34 +346,24 @@ export function CompanyLogoUpload({
 
   const squareConfig: SlotConfig = {
     kind: 'square',
-    title: 'Square logo (1:1)',
-    description: 'Used everywhere — cards, marketplace, investor views, document thumbnails.',
-    aspect: 1,
-    outputWidth: 400,
-    outputHeight: 400,
+    title: 'Square logo',
+    description: 'Used everywhere — cards, marketplace, investor views, document thumbnails. Square artwork works best.',
     previewClass: 'w-24 h-24',
     filePrefix: 'logo',
     urlColumn: 'logo_url',
     originalColumn: 'logo_original_url',
-    cropTitle: 'Crop your square logo',
-    cropDescription:
-      'Drag to reposition, scroll or use the slider to zoom. Saved as a 400×400 PNG used as the default logo across the app.',
+    cropTitle: 'Upload square logo',
   };
 
   const documentConfig: SlotConfig = {
     kind: 'document',
-    title: 'Document logo (16:9, optional)',
+    title: 'Document logo (optional)',
     description: 'Wide banner used on document headers and PDF exports. Falls back to the square logo when empty.',
-    aspect: 16 / 9,
-    outputWidth: 800,
-    outputHeight: 450,
     previewClass: 'w-40 h-[90px]',
     filePrefix: 'doc-logo',
     urlColumn: 'document_logo_url',
     originalColumn: 'document_logo_original_url',
-    cropTitle: 'Crop your document logo',
-    cropDescription:
-      'Drag to reposition, scroll or use the slider to zoom. Saved as an 800×450 (16:9) PNG used on document headers.',
+    cropTitle: 'Upload document logo',
   };
 
   return (

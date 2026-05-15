@@ -18,15 +18,17 @@ export interface DatePickerProps {
   fromDate?: Date;
   toDate?: Date;
   disabled?: (date: Date) => boolean;
+  className?: string;
 }
 
-export function DatePicker({ 
-  date, 
+export function DatePicker({
+  date,
   setDate,
   placeholder = "Select date",
   fromDate,
   toDate,
-  disabled
+  disabled,
+  className,
 }: DatePickerProps) {
   return (
     <Popover>
@@ -35,7 +37,8 @@ export function DatePicker({
           variant={"outline"}
           className={cn(
             "w-[180px] justify-start text-left font-normal",
-            !date && "text-muted-foreground"
+            !date && "text-muted-foreground",
+            className
           )}
         >
           <CalendarIcon className="mr-2 h-4 w-4" />

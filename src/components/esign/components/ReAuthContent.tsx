@@ -6,6 +6,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Shield, Loader2, Lock, Mail, Smartphone, Eye, EyeOff, QrCode, Copy, Check } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { ESignService } from '../lib/esign.service';
+import { AuditTrailService } from '@/services/auditTrailService';
 import type { AuthMethod } from '../lib/esign.types';
 
 interface ReAuthContentProps {
@@ -13,9 +14,23 @@ interface ReAuthContentProps {
   onAuthenticated: (authMethod: AuthMethod) => void;
   onCancel?: () => void;
   active?: boolean; // controls when TOTP enrollment check runs (replaces dialog `open`)
+  // Optional doc/company context. When provided, failed re-auth attempts are
+  // logged against the right document via ESignService.logAuditEvent;
+  // otherwise we fall back to a context-free signature_failed audit row.
+  documentId?: string;
+  documentName?: string;
+  companyId?: string | null;
 }
 
-export function ReAuthContent({ email, onAuthenticated, onCancel, active = true }: ReAuthContentProps) {
+export function ReAuthContent({
+  email,
+  onAuthenticated,
+  onCancel,
+  active = true,
+  documentId,
+  documentName,
+  companyId,
+}: ReAuthContentProps) {
   const [activeTab, setActiveTab] = useState<'password' | 'totp' | 'otp'>('password');
   const [password, setPassword] = useState('');
   const [otpCode, setOtpCode] = useState('');
@@ -72,6 +87,33 @@ export function ReAuthContent({ email, onAuthenticated, onCancel, active = true 
     } catch {} finally { setCheckingEnrollment(false); }
   };
 
+  // AL-08: log a failed signature attempt (best-effort, never blocks UI).
+  const logFailedAttempt = async (authMethod: AuthMethod, reason: string) => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      if (documentId) {
+        await ESignService.logAuditEvent(documentId, null, user.id, 'signature_failed', {
+          auth_method: authMethod,
+          reason,
+          email,
+        });
+      } else {
+        await AuditTrailService.logESignatureEvent({
+          userId: user.id,
+          companyId: companyId ?? null,
+          action: 'signature_failed',
+          entityType: 'document',
+          entityName: documentName,
+          reason,
+          actionDetails: { auth_method: authMethod, email },
+        });
+      }
+    } catch {
+      // never block re-auth UI on audit failure
+    }
+  };
+
   // --- Password ---
   const handlePasswordAuth = async () => {
     setError('');
@@ -79,10 +121,19 @@ export function ReAuthContent({ email, onAuthenticated, onCancel, active = true 
     setIsAuthenticating(true);
     try {
       const { error: authError } = await supabase.auth.signInWithPassword({ email, password });
-      if (authError) { setError('Invalid password. Please try again.'); setIsAuthenticating(false); return; }
+      if (authError) {
+        setError('Invalid password. Please try again.');
+        setIsAuthenticating(false);
+        logFailedAttempt('password_reauth', 'Invalid password');
+        return;
+      }
       resetState();
       onAuthenticated('password_reauth');
-    } catch { setError('Authentication failed. Please try again.'); setIsAuthenticating(false); }
+    } catch {
+      setError('Authentication failed. Please try again.');
+      setIsAuthenticating(false);
+      logFailedAttempt('password_reauth', 'Authentication exception');
+    }
   };
 
   // --- TOTP ---
@@ -110,11 +161,20 @@ export function ReAuthContent({ email, onAuthenticated, onCancel, active = true 
       const { data: challengeData, error: challengeError } = await supabase.auth.mfa.challenge({ factorId: totpFactorId });
       if (challengeError) { setError('Challenge failed. ' + challengeError.message); setIsAuthenticating(false); return; }
       const { error: verifyError } = await supabase.auth.mfa.verify({ factorId: totpFactorId, challengeId: challengeData.id, code: totpCode });
-      if (verifyError) { setError('Invalid code.'); setIsAuthenticating(false); return; }
+      if (verifyError) {
+        setError('Invalid code.');
+        setIsAuthenticating(false);
+        logFailedAttempt('totp_authenticator', 'Invalid TOTP code');
+        return;
+      }
       if (!isEnrolled) setIsEnrolled(true);
       resetState();
       onAuthenticated('totp_authenticator');
-    } catch { setError('Verification failed.'); setIsAuthenticating(false); }
+    } catch {
+      setError('Verification failed.');
+      setIsAuthenticating(false);
+      logFailedAttempt('totp_authenticator', 'TOTP verification exception');
+    }
   };
 
   const handleCopySecret = async () => {
@@ -139,10 +199,19 @@ export function ReAuthContent({ email, onAuthenticated, onCancel, active = true 
     setIsAuthenticating(true);
     try {
       const verified = await ESignService.verifyOTP(email, otpCode);
-      if (!verified) { setError('Invalid or expired code.'); setIsAuthenticating(false); return; }
+      if (!verified) {
+        setError('Invalid or expired code.');
+        setIsAuthenticating(false);
+        logFailedAttempt('email_otp', 'Invalid or expired OTP');
+        return;
+      }
       resetState();
       onAuthenticated('email_otp');
-    } catch { setError('Verification failed.'); setIsAuthenticating(false); }
+    } catch {
+      setError('Verification failed.');
+      setIsAuthenticating(false);
+      logFailedAttempt('email_otp', 'OTP verification exception');
+    }
   };
 
   return (

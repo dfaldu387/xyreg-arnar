@@ -11,6 +11,7 @@ export interface LinkedCCRDoc {
   status: string | null;
   updated_at: string | null;
   document_scope: string | null;
+  uploaded_by: string | null;
 }
 
 /**
@@ -41,7 +42,7 @@ export async function fetchLinkedDocs(ciIds: string[]): Promise<LinkedCCRDoc[]> 
   if (!ids.length) return [];
   const { data, error } = await supabase
     .from('phase_assigned_document_template')
-    .select('id, name, document_reference, document_number, document_type, status, updated_at, document_scope')
+    .select('id, name, document_reference, document_number, document_type, status, updated_at, document_scope, uploaded_by')
     .in('id', ids);
   if (error) {
     console.error('[ccrLinkedDocsService] fetchLinkedDocs error', error);

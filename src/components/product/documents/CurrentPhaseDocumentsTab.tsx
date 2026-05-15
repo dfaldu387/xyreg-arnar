@@ -6,7 +6,7 @@ import { FileText, RefreshCw, AlertCircle, File, Eye } from "lucide-react";
 import { DocumentActionMenu } from './DocumentActionMenu';
 import { DocumentReviewersList } from './DocumentReviewersList';
 import { DocumentDraftDrawer } from './DocumentDraftDrawer';
-import { DocumentViewer } from '../DocumentViewer';
+import { DocumentPdfPreviewDialog } from '@/components/documents/DocumentPdfPreviewDialog';
 import { DueDateBadge } from './DueDateBadge';
 import { useIsolatedDocumentOperations } from '@/hooks/useIsolatedDocumentOperations';
 import { useCompanyRole } from '@/context/CompanyRoleContext';
@@ -307,8 +307,8 @@ export function CurrentPhaseDocumentsTab({
                     <div className="flex flex-col items-end gap-2">
                       <DueDateBadge document={doc} />
                       <div className="flex items-center gap-3">
-                        {/* Add back view button */}
-                        {doc.file_path && (
+                        {/* View button — only for approved documents; previews the latest approved PDF */}
+                        {doc.file_path && doc.status === 'Approved' && (
                           <Button
                             variant="outline"
                             size="sm"
@@ -395,28 +395,14 @@ export function CurrentPhaseDocumentsTab({
 
       {/* Assign Reviewers Dialog removed for template instances - now handled in Edit Instance dialog */}
 
-      {/* Document Viewer Dialog - NOW WITH COMPANY ID */}
+      {/* Document Preview (lean PDF preview — same output as "Preview PDF" menu item) */}
       {viewingDocument && (
-        <DocumentViewer
+        <DocumentPdfPreviewDialog
           open={!!viewingDocument}
           onOpenChange={(open) => !open && setViewingDocument(null)}
           documentId={viewingDocument.id}
           documentName={viewingDocument.name}
           companyId={companyId}
-          documentFile={{
-            path: viewingDocument.file_path,
-            name: viewingDocument.file_name || 'Unknown file',
-            size: viewingDocument.file_size,
-            type: viewingDocument.file_type,
-            uploadedAt: viewingDocument.uploaded_at
-          }}
-          companyRole={activeRole}
-          reviewerGroupId="default"
-          onStatusChanged={(docId, newStatus) => {
-            // Refresh document list when status changes
-            handleRefreshData();
-            onDocumentStatusChange(docId, newStatus);
-          }}
         />
       )}
     </div>

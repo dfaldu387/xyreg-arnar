@@ -3987,7 +3987,7 @@
       "postMarketSurveillance": "Post-Market Surveillance",
       "training": "Training Management",
       "communication": "Communication",
-      "auditLog": "Audit Log",
+      "auditLog": "Audit Trail",
       "deviceDashboard": "Device Dashboard",
       "businessCase": "Business Case",
       "ventureBlueprint": "Venture Blueprint",
@@ -5979,7 +5979,8 @@
       "endDate": "End Date",
       "endDatePlaceholder": "To...",
       "clearFilters": "Clear Filters",
-      "exportCsv": "Export CSV"
+      "exportCsv": "Export CSV",
+      "startDateRequired": "Start date is required when End date is set."
     },
     "table": {
       "loading": "Loading audit trail...",

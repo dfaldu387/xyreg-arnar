@@ -31,7 +31,7 @@ export function CCRLinkedDocuments({ ccr, onVisibleCountChange }: CCRLinkedDocum
 
   const [pickerOpen, setPickerOpen] = useState(false);
   const updateCCR = useUpdateCCR();
-  type OpenDoc = { id: string; name: string; type: string };
+  type OpenDoc = { id: string; name: string; type: string; documentReference?: string | null };
   const [openDocs, setOpenDocs] = useState<OpenDoc[]>([]);
   const [activeDocId, setActiveDocId] = useState<string | null>(null);
   const selectedDoc = openDocs.find(d => d.id === activeDocId) || null;
@@ -63,11 +63,11 @@ export function CCRLinkedDocuments({ ccr, onVisibleCountChange }: CCRLinkedDocum
       e.preventDefault();
       void (async () => {
         try {
-        let row: { id: string; name: string | null; document_type: string | null } | null = null;
+        let row: { id: string; name: string | null; document_type: string | null; document_reference: string | null } | null = null;
         if (docId) {
           const { data } = await supabase
             .from('phase_assigned_document_template')
-            .select('id, name, document_type')
+            .select('id, name, document_type, document_reference')
             .eq('id', docId)
             .maybeSingle();
           row = data as any;
@@ -75,7 +75,7 @@ export function CCRLinkedDocuments({ ccr, onVisibleCountChange }: CCRLinkedDocum
         if (!row && docName) {
           const { data } = await supabase
             .from('phase_assigned_document_template')
-            .select('id, name, document_type')
+            .select('id, name, document_type, document_reference')
             .eq('company_id', ccr.company_id)
             .ilike('name', `%${docName}%`)
             .limit(1)
@@ -87,6 +87,7 @@ export function CCRLinkedDocuments({ ccr, onVisibleCountChange }: CCRLinkedDocum
             id: row.id,
             name: row.name || docName || 'Document',
             type: row.document_type || 'document',
+            documentReference: row.document_reference,
           });
         }
         } catch { /* keep current doc open */ }
@@ -243,6 +244,7 @@ export function CCRLinkedDocuments({ ccr, onVisibleCountChange }: CCRLinkedDocum
                     id: d.id,
                     name: displayTitle,
                     type: d.document_type || 'document',
+                    documentReference: d.document_reference,
                   })
                 }
               >
@@ -301,7 +303,9 @@ export function CCRLinkedDocuments({ ccr, onVisibleCountChange }: CCRLinkedDocum
         documentId={selectedDoc?.id || ''}
         documentName={selectedDoc?.name || ''}
         documentType={selectedDoc?.type || ''}
+        documentReference={selectedDoc?.documentReference || undefined}
         companyId={ccr.company_id}
+        companyName={(ccr as any).company?.name}
         tabs={openDocs.map(d => ({ id: d.id, name: d.name }))}
         activeTabId={activeDocId || undefined}
         onSelectTab={(id) => setActiveDocId(id)}

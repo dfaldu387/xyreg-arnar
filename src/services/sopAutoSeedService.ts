@@ -189,6 +189,7 @@ async function seedSopsForCompany(
               document_number: canonicalSopNumber,
               seededFrom: 'tier-a-auto-seed-backfill',
               seededAt: new Date().toISOString(),
+              sourceTemplateVersion: content.templateVersion ?? 1,
             } as unknown as Json,
           });
         if (backfillError) {
@@ -251,6 +252,7 @@ async function seedSopsForCompany(
           document_number: canonicalSopNumber,
           seededFrom: 'tier-a-auto-seed',
           seededAt: new Date().toISOString(),
+          sourceTemplateVersion: content.templateVersion ?? 1,
         } as unknown as Json,
       };
 

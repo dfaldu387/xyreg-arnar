@@ -10,7 +10,7 @@ import { DocumentReviewersList } from "./DocumentReviewersList";
 // import { DocumentAuthorsList } from "./DocumentAuthorsList";
 import { DocumentDraftDrawer } from './DocumentDraftDrawer';
 // AssignReviewersDialog removed for template instances
-import { DocumentViewer } from "../DocumentViewer";
+import { DocumentPdfPreviewDialog } from "@/components/documents/DocumentPdfPreviewDialog";
 import { DueDateBadge } from "./DueDateBadge";
 import { ProductSpecificDocumentService } from "@/services/productSpecificDocumentService";
 import { useUserDocumentAccess } from "@/hooks/useUserDocumentAccess";
@@ -542,8 +542,8 @@ export function ProductSpecificDocumentsTab({
                       </Badge>
                     </div>
                     <div className="flex items-center gap-3">
-                      {/* View button */}
-                      {doc.file_path && hasFile && (
+                      {/* View button — only for approved documents; previews the latest approved PDF */}
+                      {doc.file_path && hasFile && doc.status === 'Approved' && (
                         <Button
                           variant="outline"
                           size="sm"
@@ -641,28 +641,14 @@ export function ProductSpecificDocumentsTab({
 
       {/* Assign Reviewers Dialog removed for template instances */}
 
-      {/* Document Viewer */}
+      {/* Document Preview (lean PDF preview — same output as "Preview PDF" menu item) */}
       {viewingDocument && (
-        <DocumentViewer
+        <DocumentPdfPreviewDialog
+          open={!!viewingDocument}
+          onOpenChange={(open) => !open && setViewingDocument(null)}
           documentId={viewingDocument.id}
           documentName={viewingDocument.name}
           companyId={companyId}
-          documentFile={viewingDocument.file_path ? {
-            path: viewingDocument.file_path,
-            name: viewingDocument.file_name || 'Document',
-            size: viewingDocument.file_size,
-            type: viewingDocument.file_type,
-            uploadedAt: viewingDocument.uploaded_at
-          } : null}
-          open={!!viewingDocument}
-          onOpenChange={(open) => !open && setViewingDocument(null)}
-          companyRole={activeRole}
-          reviewerGroupId="default"
-          onStatusChanged={(docId, newStatus) => {
-            // Refresh document list when status changes
-            handleRefreshData();
-            onDocumentStatusChange(docId, newStatus);
-          }}
         />
       )}
     </div>

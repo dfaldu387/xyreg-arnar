@@ -23,6 +23,7 @@ import { DocumentTemplate } from '@/types/documentComposer';
 import { useDocumentAuthors } from '@/hooks/useDocumentAuthors';
 import { UserAndGroupSelector } from '@/components/shared/UserAndGroupSelector';
 import { ESignatureFlow } from '@/components/shared/ESignatureFlow';
+import { AuditTrailService } from '@/services/auditTrailService';
 
 const appNotificationService = new AppNotificationService();
 
@@ -410,6 +411,21 @@ export function SendToReviewGroupDialog({
 
       const reviewerCount = new Set([...reviewerUserIds, ...reviewerGroupIds]).size;
       const approverCount = new Set([...approverUserIds, ...approverGroupIds]).size;
+
+      // failures here must not block the user from seeing the success toast.
+      if (user?.id) {
+        AuditTrailService.logDocumentRecordEvent({
+          userId: user.id,
+          companyId,
+          action: 'document_sent_for_review',
+          entityType: 'document',
+          entityId: cleanDocumentId,
+          entityName: documentName,
+          reason: `Sent for review (${reviewerCount} reviewer(s), ${approverCount} approver(s))`,
+          changes: [{ field: 'Status', oldValue: 'Draft', newValue: 'In Review' }],
+        }).catch(() => {});
+      }
+
       toast.success(`Document sent for review (${reviewerCount} reviewer(s), ${approverCount} approver(s))`);
 
       // Reset state

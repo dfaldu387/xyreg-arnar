@@ -83,7 +83,8 @@ export function ResizableDrawer({
       onClose={onClose}
       sx={{
         zIndex: 45,
-        '& .MuiBackdrop-root': { top: `${topOffsetPx}px` },
+        top: `${topOffsetPx}px`,
+        '& .MuiBackdrop-root': { top: 0 },
       }}
       ModalProps={{
         disableAutoFocus: true,

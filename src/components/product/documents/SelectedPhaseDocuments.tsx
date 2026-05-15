@@ -7,7 +7,7 @@ import { DocumentActionMenu } from "./DocumentActionMenu";
 import { DocumentReviewersList } from "./DocumentReviewersList";
 import { DocumentDraftDrawer } from './DocumentDraftDrawer';
 // AssignReviewersDialog removed for template instances
-import { DocumentViewer } from "../DocumentViewer";
+import { DocumentPdfPreviewDialog } from "@/components/documents/DocumentPdfPreviewDialog";
 import { useState } from "react";
 import { useIsolatedDocumentOperations } from "@/hooks/useIsolatedDocumentOperations";
 import { useCompanyRole } from "@/context/CompanyRoleContext";
@@ -294,7 +294,8 @@ export function SelectedPhaseDocuments({
                     </Badge>
 
                     <div className="flex items-center gap-2">
-                      {hasFile && (
+                      {/* View button — only for approved documents; previews the latest approved PDF */}
+                      {hasFile && doc.status === 'Approved' && (
                         <Button
                           variant="outline"
                           size="sm"
@@ -376,27 +377,14 @@ export function SelectedPhaseDocuments({
 
       {/* Assign Reviewers Dialog removed for template instances */}
 
-      {/* Document Viewer Dialog */}
+      {/* Document Preview (lean PDF preview — same output as "Preview PDF" menu item) */}
       {viewingDocument && (
-        <DocumentViewer
+        <DocumentPdfPreviewDialog
           open={!!viewingDocument}
           onOpenChange={(open) => !open && setViewingDocument(null)}
           documentId={viewingDocument.id}
           documentName={viewingDocument.name}
           companyId={companyId}
-          documentFile={{
-            path: viewingDocument.file_path,
-            name: viewingDocument.file_name || 'Unknown file',
-            size: viewingDocument.file_size,
-            type: viewingDocument.file_type,
-            uploadedAt: viewingDocument.uploaded_at
-          }}
-          companyRole={activeRole}
-          reviewerGroupId="default"
-          onStatusChanged={(docId, newStatus) => {
-            // Notify parent to refresh when status changes
-            onDocumentUpdated({ ...viewingDocument, status: newStatus });
-          }}
         />
       )}
     </div>
